@@ -2,14 +2,17 @@ package x11
 
 import (
 	"fmt"
+	"image"
 
 	"github.com/jezek/xgb/xproto"
 )
 
 // WindowInfo contains information about a window
 type WindowInfo struct {
-	ID   xproto.Window
-	Name string
+	ID      xproto.Window
+	Name    string
+	Icon    image.Image // Window icon from _NET_WM_ICON
+	Preview image.Image // Window thumbnail (to be implemented)
 }
 
 // GetClientList retrieves the list of client windows via EWMH _NET_CLIENT_LIST
@@ -83,6 +86,71 @@ func (c *Connection) GetWindowName(window xproto.Window) (string, error) {
 	return string(prop.Value), nil
 }
 
+// GetWindowIcon retrieves window icon from _NET_WM_ICON property.
+// Returns nil if the icon is not available.
+func (c *Connection) GetWindowIcon(window xproto.Window) (image.Image, error) {
+	// Get _NET_WM_ICON atom
+	netWmIcon, err := c.InternAtom("_NET_WM_ICON", true)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get _NET_WM_ICON atom: %w", err)
+	}
+
+	// Read property
+	prop, err := xproto.GetProperty(c.Conn, false, window,
+		netWmIcon,
+		xproto.AtomCardinal,
+		0,
+		^uint32(0), // read all
+	).Reply()
+	if err != nil || prop.ValueLen == 0 {
+		return nil, nil // no icon available
+	}
+
+	// Parse icon data
+	// Format: width, height, ARGB pixels...
+	data := make([]uint32, prop.ValueLen)
+	for i := uint32(0); i < prop.ValueLen; i++ {
+		data[i] = uint32(prop.Value[i*4]) |
+			uint32(prop.Value[i*4+1])<<8 |
+			uint32(prop.Value[i*4+2])<<16 |
+			uint32(prop.Value[i*4+3])<<24
+	}
+
+	if len(data) < 2 {
+		return nil, nil // invalid icon data
+	}
+
+	width := int(data[0])
+	height := int(data[1])
+
+	if width <= 0 || height <= 0 || len(data) < 2+width*height {
+		return nil, nil // invalid dimensions or insufficient data
+	}
+
+	// Create RGBA image
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+
+	// Copy pixel data (ARGB format)
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			pixel := data[2+y*width+x]
+			a := uint8((pixel >> 24) & 0xFF)
+			r := uint8((pixel >> 16) & 0xFF)
+			g := uint8((pixel >> 8) & 0xFF)
+			b := uint8(pixel & 0xFF)
+
+			img.SetRGBA(x, y, image.NewRGBA(image.Rect(0, 0, 1, 1)).RGBAAt(0, 0))
+			offset := img.PixOffset(x, y)
+			img.Pix[offset+0] = r
+			img.Pix[offset+1] = g
+			img.Pix[offset+2] = b
+			img.Pix[offset+3] = a
+		}
+	}
+
+	return img, nil
+}
+
 // GetWindowList retrieves list of windows with names
 func (c *Connection) GetWindowList() ([]WindowInfo, error) {
 	windows, err := c.GetClientList()
@@ -97,13 +165,53 @@ func (c *Connection) GetWindowList() ([]WindowInfo, error) {
 			// Skip windows for which we couldn't get the name
 			continue
 		}
+
+		// Try to get window icon (ignore errors)
+		icon, _ := c.GetWindowIcon(win)
+
 		result = append(result, WindowInfo{
 			ID:   win,
 			Name: name,
+			Icon: icon,
 		})
 	}
 
 	return result, nil
+}
+
+// SortWindowsByMRU sorts a list of WindowInfo by MRU order.
+// Windows not in the MRU list are placed at the end.
+func SortWindowsByMRU(windows []WindowInfo, mruOrder []xproto.Window) []WindowInfo {
+	// Create a map for quick lookup of MRU position
+	mruPos := make(map[xproto.Window]int)
+	for i, win := range mruOrder {
+		mruPos[win] = i
+	}
+
+	// Sort windows by MRU position
+	sorted := make([]WindowInfo, len(windows))
+	copy(sorted, windows)
+
+	// Custom sort: MRU windows first, then others
+	for i := 0; i < len(sorted); i++ {
+		for j := i + 1; j < len(sorted); j++ {
+			posI, inMRUI := mruPos[sorted[i].ID]
+			posJ, inMRUJ := mruPos[sorted[j].ID]
+
+			// Both in MRU: compare positions
+			if inMRUI && inMRUJ {
+				if posI > posJ {
+					sorted[i], sorted[j] = sorted[j], sorted[i]
+				}
+			} else if !inMRUI && inMRUJ {
+				// Only J in MRU: move J before I
+				sorted[i], sorted[j] = sorted[j], sorted[i]
+			}
+			// If only I in MRU or neither in MRU: keep order
+		}
+	}
+
+	return sorted
 }
 
 // ActivateWindow activates the specified window via _NET_ACTIVE_WINDOW

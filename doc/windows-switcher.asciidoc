@@ -223,10 +223,10 @@ Launch:            From ~/.xinitrc or autostart
    - ✅ Simple window list menu (text)
    - ✅ Activating selected window
 
-. **Phase 2: MRU and Thumbnails (1-2 weeks)**
-   - MRU list implementation with focus tracking
-   - Getting window icons from `_NET_WM_ICON`
-   - Thumbnail capture via XComposite
+. **Phase 2: MRU and Thumbnails (1-2 weeks)** ✅ *IMPLEMENTED*
+   - ✅ MRU list implementation with focus tracking
+   - ✅ Getting window icons from `_NET_WM_ICON`
+   - ✅ Thumbnail capture via XComposite
 
 . **Phase 3: Carousel UI (1-2 weeks)**
    - 2.5D carousel rendering via gg
@@ -270,8 +270,28 @@ qws/
 **pkg/x11/windows.go** — window operations::
 * `GetClientList()` — get window list via `_NET_CLIENT_LIST`
 * `GetWindowName()` — get window name via `_NET_WM_NAME` (UTF-8) or `WM_NAME` (fallback)
-* `GetWindowList()` — collect information about all windows
+* `GetWindowIcon()` — get window icon from `_NET_WM_ICON` property (ARGB format)
+* `GetWindowList()` — collect information about all windows with icons
+* `SortWindowsByMRU()` — sort windows by Most Recently Used order
 * `ActivateWindow()` — activate window via `_NET_ACTIVE_WINDOW` ClientMessage
+
+**pkg/mru/mru.go** — MRU list management::
+* `MRUList` — thread-safe list of windows in MRU order
+* `Touch()` — move window to front on focus
+* `Remove()` — remove window from list on close
+* `GetOrder()` — get current MRU order
+
+**pkg/focus/watcher.go** — focus tracking::
+* `Watcher` — tracks focus changes via PropertyNotify and FocusIn events
+* `HandlePropertyNotify()` — process `_NET_ACTIVE_WINDOW` changes
+* `HandleFocusIn()` — fallback for WMs without EWMH support
+* `GetActiveWindow()` — get currently active window
+
+**pkg/composite/capture.go** — thumbnail capture::
+* `Capturer` — captures window thumbnails using XComposite extension
+* `CaptureWindow()` — get window pixmap and convert to image
+* `IsCompositorRunning()` — check if compositor is active
+* Supports scaling thumbnails while preserving aspect ratio
 
 **pkg/keygrab/keygrab.go** — key grabbing::
 * `GrabAltTab()` — global grab of `Alt+Tab` and `Alt+Shift+Tab`
@@ -288,6 +308,10 @@ qws/
 * Monolithic architecture (single process)
 * Event loop on `WaitForEvent()`
 * KeyPressEvent handling for Alt+Tab
+* PropertyNotify handling for focus tracking
+* FocusIn event handling as fallback
+* MRU list integration with automatic sorting
+* Thumbnail capture when compositor is available
 * Graceful shutdown on Ctrl+C
 
 === Implementation Technical Details
@@ -326,13 +350,237 @@ Uses terminal raw mode for arrow key handling without waiting for Enter. ESC seq
 
 === Current Implementation Limitations
 
-* No MRU order — windows displayed in WM order
-* No window thumbnails or icons
+* ~~No MRU order~~ — ✅ *FIXED:* windows now sorted by Most Recently Used order
+* ~~No window thumbnails or icons~~ — ✅ *FIXED:* icons from `_NET_WM_ICON` and thumbnails via XComposite
 * No window filtering (all windows displayed, including service ones)
 * Requires EWMH-compatible WM
 * Text UI blocks terminal during operation
 
-These limitations will be addressed in subsequent development phases.
+These remaining limitations will be addressed in subsequent development phases.
+
+== Phase 2 (MRU & Thumbnails) Implementation
+
+=== Adopted Architectural Decisions
+
+**Focus Tracking Strategy:** PropertyNotify on `_NET_ACTIVE_WINDOW` with FocusIn fallback
+
+**MRU Storage:** Thread-safe slice with mutex protection
+
+**Icon Format:** ARGB from `_NET_WM_ICON`, converted to image.RGBA
+
+**Thumbnail Capture:** XComposite + XRender with fallback detection
+
+.Project Structure Updates
+[source,text]
+----
+qws/
+├── pkg/
+│   ├── mru/              # NEW: MRU list management
+│   │   └── mru.go        # MRUList with Touch/Remove/GetOrder
+│   ├── focus/            # NEW: Focus change tracking
+│   │   └── watcher.go    # PropertyNotify + FocusIn handling
+│   ├── composite/        # NEW: Thumbnail capture
+│   │   └── capture.go    # XComposite pixmap capture
+│   └── x11/
+│       └── windows.go    # UPDATED: Icon support, MRU sorting
+----
+
+=== Implemented Features
+
+==== MRU List (pkg/mru/mru.go)
+
+Thread-safe list maintaining Most Recently Used order:
+
+[source,go]
+----
+type MRUList struct {
+    mu    sync.RWMutex
+    items []xproto.Window // [0] = most recent
+}
+
+// Key operations:
+mru.Touch(windowID)      // Move to front on focus
+mru.Remove(windowID)     // Remove on window close
+mru.GetOrder()           // Get current order
+----
+
+**Thread Safety:** All operations protected by RWMutex
+
+**Performance:** O(n) for Touch/Remove, O(1) for GetOrder
+
+==== Focus Tracking (pkg/focus/watcher.go)
+
+Tracks active window changes via two methods:
+
+**Primary Method:** PropertyNotify on `_NET_ACTIVE_WINDOW`::
+* Subscribes to PropertyChange events on root window
+* Zero latency detection of focus changes
+* Works with EWMH-compatible WMs
+
+**Fallback Method:** FocusIn events::
+* Direct window focus events
+* Used when EWMH not available
+* Requires per-window event subscription
+
+[source,go]
+----
+watcher := focus.NewWatcher(conn, root, mruList)
+
+// In event loop:
+case xproto.PropertyNotifyEvent:
+    watcher.HandlePropertyNotify(e)
+case xproto.FocusInEvent:
+    watcher.HandleFocusIn(e)  // Fallback
+----
+
+==== Window Icons (pkg/x11/windows.go)
+
+Gets icons from `_NET_WM_ICON` property:
+
+**Icon Format:**
+* Property type: `CARDINAL[]`
+* Data layout: `[width, height, pixel₀, pixel₁, ..., pixelₙ]`
+* Pixel format: ARGB (32-bit)
+
+**Implementation:**
+[source,go]
+----
+icon, err := conn.GetWindowIcon(window)
+// Returns image.Image (RGBA format)
+----
+
+**Graceful Degradation:** Returns nil if icon unavailable (no error)
+
+==== Thumbnail Capture (pkg/composite/capture.go)
+
+Captures window content using XComposite extension:
+
+**Requirements:**
+* XComposite extension 0.2+
+* Running compositor (picom, compton, etc.)
+* Windows must be redirected to off-screen pixmaps
+
+**Implementation:**
+[source,go]
+----
+capturer := composite.NewCapturer(conn, root)
+
+// Check if compositor is running
+if capturer.IsCompositorRunning() {
+    // Capture with scaling (max 256×256)
+    preview, err := capturer.CaptureWindow(window, 256, 256)
+}
+----
+
+**Features:**
+* Automatic aspect ratio preservation
+* Nearest-neighbor scaling
+* Supports 24-bit and 32-bit color depths
+* BGRA to RGBA conversion
+
+==== MRU Sorting (pkg/x11/windows.go)
+
+Sorts window list by MRU order:
+
+[source,go]
+----
+windows := conn.GetWindowList()
+mruOrder := mruList.GetOrder()
+sorted := x11.SortWindowsByMRU(windows, mruOrder)
+// sorted[0] = most recently used
+----
+
+**Sorting Logic:**
+* Windows in MRU list: sorted by MRU position
+* Windows not in MRU: placed at the end
+* O(n²) complexity (acceptable for typical window counts)
+
+=== Integration (cmd/qws/main.go)
+
+**Initialization:**
+[source,go]
+----
+mruList := mru.NewMRUList()
+watcher, _ := focus.NewWatcher(conn, root, mruList)
+capturer, _ := composite.NewCapturer(conn, root)
+----
+
+**Event Loop:**
+[source,go]
+----
+case xproto.PropertyNotifyEvent:
+    watcher.HandlePropertyNotify(e)  // Update MRU
+case xproto.FocusInEvent:
+    watcher.HandleFocusIn(e)         // Fallback MRU
+case xproto.KeyPressEvent:
+    // Sort by MRU + capture thumbnails
+    windows = x11.SortWindowsByMRU(windows, mruList.GetOrder())
+    for i := range windows {
+        windows[i].Preview, _ = capturer.CaptureWindow(...)
+    }
+----
+
+=== Technical Challenges & Solutions
+
+==== Challenge 1: XComposite API Usage
+
+**Problem:** `composite.NameWindowPixmap` requires pre-allocated pixmap ID
+
+**Solution:**
+[source,go]
+----
+pixmapID, _ := xproto.NewPixmapId(conn)
+composite.NameWindowPixmapChecked(conn, window, pixmapID)
+defer xproto.FreePixmap(conn, pixmapID)
+----
+
+==== Challenge 2: Icon Pixel Format
+
+**Problem:** `_NET_WM_ICON` uses ARGB, Go image uses RGBA
+
+**Solution:** Manual pixel conversion during parsing:
+[source,go]
+----
+pixel := data[2+y*width+x]
+r := uint8((pixel >> 16) & 0xFF)
+g := uint8((pixel >> 8) & 0xFF)
+b := uint8(pixel & 0xFF)
+a := uint8((pixel >> 24) & 0xFF)
+----
+
+==== Challenge 3: PropertyNotify Noise
+
+**Problem:** Root window receives many PropertyNotify events
+
+**Solution:** Filter by atom and window:
+[source,go]
+----
+if e.Window != fw.root || e.Atom != fw.netActiveWindow {
+    return  // Ignore irrelevant events
+}
+----
+
+=== Testing Results
+
+**MRU Tracking:**
+* ✅ Focus changes detected via PropertyNotify
+* ✅ Window order updates correctly
+* ✅ Thread-safe under concurrent access
+
+**Icon Loading:**
+* ✅ Most applications provide `_NET_WM_ICON`
+* ✅ Graceful handling when icon missing
+* ✅ ARGB to RGBA conversion works correctly
+
+**Thumbnail Capture:**
+* ✅ Works with picom/compton compositors
+* ✅ Scaling preserves aspect ratio
+* ⚠️ Requires compositor — fallback needed for systems without
+
+**Known Limitations:**
+* Thumbnails unavailable without compositor
+* First focus change after startup may be missed (race condition)
+* Large icons consume memory (no size limit yet)
 
 === Build and Testing
 
