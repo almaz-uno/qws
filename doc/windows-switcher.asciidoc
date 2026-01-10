@@ -1,0 +1,1963 @@
+= Carousel Window Switcher for X11
+:toc: left
+:toclevels: 3
+:icons: font
+:source-highlighter: rouge
+
+== Introduction
+
+This document describes architectural decisions and technologies for implementing a carousel-style window switcher for X11 environments.
+
+.Core Requirements
+* X11 support
+* Works with any window manager (WM) or without one
+* Window thumbnail previews
+* Keyboard shortcuts support: Alt+Tab, Alt+Win+Tab, etc.
+
+== Key Technical Decisions
+
+Before starting development, the following architectural decisions must be made:
+
+=== 1. Programming Language and Core X11 Library
+
+[cols="1,2,2"]
+|===
+| Option | Advantages | Disadvantages
+
+| **Go + `github.com/jezek/xgb`** ⭐
+| Pure Go, no CGo, modern API, good documentation
+| Requires understanding of X11 protocol
+
+| Go + `github.com/BurntSushi/xgbutil`
+| Simplifies working with keysym, EWMH, ICCCM
+| Less active development
+
+| Go + CGo + Xlib
+| Maximum compatibility, all examples from C
+| CGo overhead, complex build
+|===
+
+**Recommendation:** `github.com/jezek/xgb` — active development, good extension support.
+
+=== 2. Application Architecture
+
+[cols="1,2,2"]
+|===
+| Option | When to Use | How It Works
+
+| **Monolithic Application** ⭐
+| Most cases (like alttab)
+| • Starts once at system startup
+• Grabs Alt+Tab globally
+• Shows window on keypress
+• Terminates on Ctrl+C or logout
+
+| Daemon + GUI Client
+| Only if thumbnail caching between calls or different GUIs needed
+| • Daemon: continuous monitoring, MRU, cache
+• GUI: launched on daemon request
+
+| i3-specific Solution
+| Only for i3wm, simplified version
+| • i3 IPC instead of X11 events
+• Can work without MRU (i3 manages order itself)
+|===
+
+**Recommendation:** Monolithic application — simpler, less code, works like alttab.
+
+.Why Monolithic?
+* **Simpler:** single executable file, no IPC
+* **Faster:** no GUI process startup overhead
+* **More Reliable:** no synchronization issues between processes
+* **Like alttab:** proven architecture
+
+.When Is Daemon Needed?
+* Persistent thumbnail caching (consumes significant memory)
+* Separate GUIs in different languages (GTK, Qt, web)
+* Complex logic requiring isolation
+
+=== 3. GUI Framework
+
+[cols="1,1,1,1"]
+|===
+| Option | Size | Complexity | Capabilities
+
+| **xgb + `github.com/fogleman/gg`** ⭐
+| ~5 MB
+| Medium
+| 2D graphics, full control
+
+| `github.com/gotk3/gotk3`
+| ~50 MB*
+| Low
+| CSS, ready-made widgets, animations
+
+| Fyne.io
+| ~10 MB
+| Low
+| Cross-platform, but weak X11-specific support
+|===
+
+**Recommendation:** xgb+gg for minimalism and control, gotk3 for rapid development with nice UI.
+
+=== 4. Window Thumbnail Capture
+
+[cols="1,2,2"]
+|===
+| Method | Requirements | Quality
+
+| **XComposite + XRender** ⭐
+| Compositor (picom, compton)
+| Excellent: real content, OpenGL, video
+
+| XGetImage
+| No requirements
+| Limited: doesn't work for overlapped windows
+
+| XShm
+| Shared memory
+| Good: fast capture, but same limitations
+|===
+
+**Recommendation:** XComposite as primary method, XGetImage as fallback.
+
+=== 5. Focus Tracking (MRU Order)
+
+[cols="1,2,1"]
+|===
+| Method | When to Use | Latency
+
+| **PropertyNotify on `_NET_ACTIVE_WINDOW`** ⭐
+| EWMH-compatible WM
+| 0 ms
+
+| FocusIn events
+| Without EWMH or without WM
+| 0 ms
+
+| i3 IPC `window::focus`
+| Only i3wm
+| 0 ms
+
+| Polling `XGetInputFocus`
+| Fallback
+| 50-100 ms
+|===
+
+**Recommendation:** PropertyNotify + FocusIn as fallback, i3 IPC for i3 version.
+
+=== 6. Key Grabbing
+
+[cols="1,2"]
+|===
+| Option | Description
+
+| **XGrabKey via xgb** ⭐
+| Direct call, requires handling modifiers (NumLock, CapsLock)
+
+| xgbutil/keybind
+| Simplified API: `"Mod1-Tab"`, `"Mod1-Shift-Tab"`
+|===
+
+**Recommendation:** xgbutil/keybind for simplicity, xgb directly for full control.
+
+=== 7. MRU State Storage
+
+```go
+type MRUList struct {
+    mu    sync.RWMutex
+    items []xproto.Window  // [0] = most recent
+}
+```
+
+**Key Operations:**
+* `Touch(window)` — move to front on focus
+* `Remove(window)` — remove on close
+* `SortWindowsByMRU(windows)` — sort list for display
+
+=== 8. Carousel Rendering
+
+[cols="1,2"]
+|===
+| Approach | Implementation
+
+| 2.5D (pseudo-3D)
+| Scaling + offset via `gg` or Cairo
+
+| 3D (real)
+| Qt/QML PathView with Rotation transform (requires C++/QML)
+|===
+
+**Recommendation:** 2.5D for Go project, sufficient for Cover Flow effect.
+
+=== Minimal MVP Stack
+
+[source,text]
+----
+Language:          Go 1.21+
+X11:               github.com/jezek/xgb + composite + xproto
+GUI:               github.com/fogleman/gg (rendering)
+Keybind:           github.com/BurntSushi/xgbutil/keybind
+Images:            image, image/draw (standard library)
+MRU:               sync.RWMutex + []xproto.Window
+Architecture:      Monolith (like alttab)
+Launch:            From ~/.xinitrc or autostart
+----
+
+.Application Lifecycle
+[source,text]
+----
+1. System startup → launch switcher in background
+2. XGrabKey(Alt+Tab) → wait for keypress
+3. Alt+Tab pressed → show window, read window list
+4. Alt still pressed → handle Tab (next window)
+5. Alt released → activate selected, hide window
+6. Wait for next Alt+Tab...
+----
+
+=== Development Roadmap
+
+. **Phase 1: Basic Functionality (1-2 weeks)** ✅ *IMPLEMENTED*
+   - ✅ X11 connection, getting window list
+   - ✅ Alt+Tab grabbing
+   - ✅ Simple window list menu (text)
+   - ✅ Activating selected window
+
+. **Phase 2: MRU and Thumbnails (1-2 weeks)**
+   - MRU list implementation with focus tracking
+   - Getting window icons from `_NET_WM_ICON`
+   - Thumbnail capture via XComposite
+
+. **Phase 3: Carousel UI (1-2 weeks)**
+   - 2.5D carousel rendering via gg
+   - Switching animations
+   - Styling (transparency, shadows, borders)
+
+. **Phase 4: Polish (1 week)**
+   - Configuration file
+   - Fallback for systems without compositor
+   - Testing on different WMs (i3, bspwm, openbox, xfce)
+
+== Phase 1 (MVP) Implementation
+
+=== Adopted Architectural Decisions
+
+.Project Structure
+[source,text]
+----
+qws/
+├── cmd/qws/              # Main application
+│   └── main.go           # Event loop, Alt+Tab handling
+├── pkg/
+│   ├── x11/              # X11 operations
+│   │   ├── conn.go       # Connection to X server
+│   │   └── windows.go    # EWMH: getting windows, activation
+│   ├── keygrab/          # Key grabbing
+│   │   └── keygrab.go    # XGrabKey for Alt+Tab
+│   └── ui/               # User interface
+│       └── selector.go   # Text selector with navigation
+└── doc/
+    └── windows-switcher.asciidoc
+----
+
+.Implemented Functionality
+
+**pkg/x11/conn.go** — X11 connection::
+* `Connect()` — connect to X server via `DISPLAY` environment variable
+* `InternAtom()` — get EWMH atoms
+* Get root window and screen information
+
+**pkg/x11/windows.go** — window operations::
+* `GetClientList()` — get window list via `_NET_CLIENT_LIST`
+* `GetWindowName()` — get window name via `_NET_WM_NAME` (UTF-8) or `WM_NAME` (fallback)
+* `GetWindowList()` — collect information about all windows
+* `ActivateWindow()` — activate window via `_NET_ACTIVE_WINDOW` ClientMessage
+
+**pkg/keygrab/keygrab.go** — key grabbing::
+* `GrabAltTab()` — global grab of `Alt+Tab` and `Alt+Shift+Tab`
+* NumLock and CapsLock modifier handling
+* `keysymToKeycode()` — convert keysym (XK_Tab) to keycode
+
+**pkg/ui/selector.go** — text interface::
+* Switch terminal to raw mode
+* Arrow navigation (↑↓) or vim-style (j/k)
+* Selected item highlighting
+* Return selected window or nil on cancel (ESC/q)
+
+**cmd/qws/main.go** — main application::
+* Monolithic architecture (single process)
+* Event loop on `WaitForEvent()`
+* KeyPressEvent handling for Alt+Tab
+* Graceful shutdown on Ctrl+C
+
+=== Implementation Technical Details
+
+.Alt+Tab Grabbing
+For correct operation on all systems, we grab the combination accounting for NumLock and CapsLock:
+
+[source,go]
+----
+ignoreMods := []uint16{
+    0,                      // without additional modifiers
+    uint16(Mod2),           // NumLock
+    uint16(ModLock),        // CapsLock
+    uint16(Mod2 | ModLock), // NumLock + CapsLock
+}
+----
+
+.Getting Window List
+Uses EWMH `_NET_CLIENT_LIST` instead of `_NET_CLIENT_LIST_STACKING`, as MRU order is not yet implemented at this stage.
+
+.Window Activation
+Sends a ClientMessage event with `_NET_ACTIVE_WINDOW` to root window:
+
+[source,go]
+----
+event := xproto.ClientMessageEvent{
+    Format: 32,
+    Window: window,
+    Type:   netActiveWindow,
+    Data:   []uint32{2, 0, 0, 0, 0}, // source=pager
+}
+----
+
+.Text UI
+Uses terminal raw mode for arrow key handling without waiting for Enter. ESC sequences are recognized by pattern `27 91 <code>`.
+
+=== Current Implementation Limitations
+
+* No MRU order — windows displayed in WM order
+* No window thumbnails or icons
+* No window filtering (all windows displayed, including service ones)
+* Requires EWMH-compatible WM
+* Text UI blocks terminal during operation
+
+These limitations will be addressed in subsequent development phases.
+
+=== Build and Testing
+
+.Building the Project
+[source,bash]
+----
+# Install dependencies
+make deps
+
+# Build
+make build
+
+# Run
+./qws
+# or
+make run
+----
+
+.Testing on Different WMs
+
+* Number of open windows
+
+.System Installation
+[source,bash]
+----
+make install  # Copies to /usr/local/bin/
+----
+
+.Usage
+[source,bash]
+----
+# 1. Start qws in background
+./qws &
+
+# 2. Press Alt+Tab
+# 3. Select window with arrows (↑↓) or j/k
+# 4. Enter to activate, ESC to cancel
+----
+
+== X11 Window Switcher Architecture
+
+=== Getting Window List
+
+In X11, there are two main ways to get the window list:
+
+==== EWMH (Extended Window Manager Hints)
+
+Modern WMs support the EWMH specification, which provides:
+
+* `_NET_CLIENT_LIST` — list of all client windows
+* `_NET_CLIENT_LIST_STACKING` — list of windows in stacking order (z-order)
+* `_NET_ACTIVE_WINDOW` — current active window
+* `_NET_WM_NAME` — window name in UTF-8
+* `_NET_WM_ICON` — window icon
+
+[source,go]
+----
+package x11
+
+import (
+    "github.com/jezek/xgb"
+    "github.com/jezek/xgb/xproto"
+)
+
+// GetClientList gets window list via EWMH _NET_CLIENT_LIST_STACKING
+func GetClientList(conn *xgb.Conn, root xproto.Window) ([]xproto.Window, error) {
+    // Get _NET_CLIENT_LIST_STACKING atom
+    atomReply, err := xproto.InternAtom(conn, false,
+        uint16(len("_NET_CLIENT_LIST_STACKING")),
+        "_NET_CLIENT_LIST_STACKING").Reply()
+    if err != nil {
+        return nil, err
+    }
+
+    // Read property
+    prop, err := xproto.GetProperty(conn, false, root,
+        atomReply.Atom,        // property
+        xproto.AtomWindow,     // type
+        0,                     // offset
+        ^uint32(0),            // length (maximum)
+    ).Reply()
+    if err != nil {
+        return nil, err
+    }
+
+    // Convert bytes to []Window
+    windows := make([]xproto.Window, prop.ValueLen)
+    for i := uint32(0); i < prop.ValueLen; i++ {
+        windows[i] = xproto.Window(
+            uint32(prop.Value[i*4]) |
+            uint32(prop.Value[i*4+1])<<8 |
+            uint32(prop.Value[i*4+2])<<16 |
+            uint32(prop.Value[i*4+3])<<24,
+        )
+    }
+    return windows, nil
+}
+----
+
+==== Direct Window Tree Traversal
+
+If WM is absent or doesn't support EWMH:
+
+[source,go]
+----
+// QueryTree gets list of child windows directly via X11
+func QueryTree(conn *xgb.Conn, root xproto.Window) ([]xproto.Window, error) {
+    reply, err := xproto.QueryTree(conn, root).Reply()
+    if err != nil {
+        return nil, err
+    }
+    return reply.Children, nil
+}
+----
+
+=== Building Window List with MRU (Focus Order)
+
+For window switcher, "Most Recently Used First" (MRU) order is critically important.
+`_NET_CLIENT_LIST_STACKING` only provides z-order (stacking order), which doesn't always correspond to usage order.
+
+==== The Problem
+
+[cols="1,1"]
+|===
+| Stacking Order (z-order) | Focus Order (MRU)
+
+| Which window is on top of which
+| Which window was active last
+
+| `_NET_CLIENT_LIST_STACKING`
+| No standard atom in EWMH!
+|===
+
+WM don't provide a ready-made MRU list — it must be maintained independently.
+
+==== Solution: Sortlist (like in alttab)
+
+The `alttab` project approach: maintain `sortlist` — a doubly-linked list of windows in MRU order — in parallel with `winlist` (display list).
+
+.MRU List Architecture
+[plantuml]
+----
+@startuml
+skinparam backgroundColor transparent
+
+class WindowManager {
+  windows []WindowInfo
+  mru     *MRUList
+}
+
+class WindowInfo {
+  ID      xproto.Window
+  Name    string
+  Icon    image.Image
+  Preview image.Image
+}
+
+class MRUList {
+  mu    sync.RWMutex
+  items []xproto.Window
+  --
+  Touch(windowID)
+  Remove(windowID)
+  GetOrder() []Window
+}
+
+note right of MRUList
+  Slice with mutex
+  items[0] = recently used
+  items[len-1] = long ago used
+end note
+
+WindowManager --> WindowInfo : "display"
+WindowManager --> MRUList : "MRU order"
+@enduml
+----
+
+.Key Operations with MRU List
+[source,go]
+----
+package mru
+
+import (
+    "sync"
+
+    "github.com/jezek/xgb/xproto"
+)
+
+// MRUList — thread-safe list of windows in MRU order
+type MRUList struct {
+    mu    sync.RWMutex
+    items []xproto.Window // [0] = most recent
+}
+
+// NewMRUList creates new MRU list
+func NewMRUList() *MRUList {
+    return &MRUList{
+        items: make([]xproto.Window, 0),
+    }
+}
+
+// Touch — move window to front (called on focus)
+func (m *MRUList) Touch(windowID xproto.Window) {
+    m.mu.Lock()
+    defer m.mu.Unlock()
+
+    // Find and remove if already exists
+    for i, id := range m.items {
+        if id == windowID {
+            // Remove from current position
+            m.items = append(m.items[:i], m.items[i+1:]...)
+            break
+        }
+    }
+
+    // Add to front
+    m.items = append([]xproto.Window{windowID}, m.items...)
+}
+
+// Remove — remove window from list (called on close)
+func (m *MRUList) Remove(windowID xproto.Window) {
+    m.mu.Lock()
+    defer m.mu.Unlock()
+
+    for i, id := range m.items {
+        if id == windowID {
+            m.items = append(m.items[:i], m.items[i+1:]...)
+            return
+        }
+    }
+}
+
+// GetOrder — return copy of list in MRU order
+func (m *MRUList) GetOrder() []xproto.Window {
+    m.mu.RLock()
+    defer m.mu.RUnlock()
+
+    result := make([]xproto.Window, len(m.items))
+    copy(result, m.items)
+    return result
+}
+----
+
+==== Focus Change Tracking
+
+There are two ways to know about active window change:
+
+===== Method 1: PropertyNotify on _NET_ACTIVE_WINDOW (EWMH)
+
+For WMs supporting EWMH:
+
+[source,go]
+----
+package focus
+
+import (
+    "github.com/jezek/xgb"
+    "github.com/jezek/xgb/xproto"
+)
+
+// FocusWatcher tracks focus change via EWMH
+type FocusWatcher struct {
+    conn              *xgb.Conn
+    root              xproto.Window
+    netActiveWindow   xproto.Atom
+    mru               *MRUList
+    uiWindow          xproto.Window // our switcher window
+}
+
+// NewFocusWatcher creates focus watcher
+func NewFocusWatcher(conn *xgb.Conn, root xproto.Window, mru *MRUList) (*FocusWatcher, error) {
+    // Get _NET_ACTIVE_WINDOW atom
+    reply, err := xproto.InternAtom(conn, false,
+        uint16(len("_NET_ACTIVE_WINDOW")),
+        "_NET_ACTIVE_WINDOW").Reply()
+    if err != nil {
+        return nil, err
+    }
+
+    // Subscribe to PropertyChange events on root window
+    err = xproto.ChangeWindowAttributesChecked(conn, root,
+        xproto.CwEventMask,
+        []uint32{xproto.EventMaskPropertyChange},
+    ).Check()
+    if err != nil {
+        return nil, err
+    }
+
+    return &FocusWatcher{
+        conn:            conn,
+        root:            root,
+        netActiveWindow: reply.Atom,
+        mru:             mru,
+    }, nil
+}
+
+// HandlePropertyNotify handles property change event
+func (fw *FocusWatcher) HandlePropertyNotify(e xproto.PropertyNotifyEvent) {
+    // Only interested in root window and _NET_ACTIVE_WINDOW atom
+    if e.Window != fw.root || e.Atom != fw.netActiveWindow {
+        return
+    }
+
+    // Get current active window
+    active, err := fw.GetActiveWindow()
+    if err != nil || active == 0 || active == fw.uiWindow {
+        return
+    }
+
+    // Move to front of MRU list
+    fw.mru.Touch(active)
+}
+
+// GetActiveWindow returns current active window
+func (fw *FocusWatcher) GetActiveWindow() (xproto.Window, error) {
+    prop, err := xproto.GetProperty(fw.conn, false, fw.root,
+        fw.netActiveWindow, xproto.AtomWindow, 0, 1).Reply()
+    if err != nil || prop.ValueLen == 0 {
+        return 0, err
+    }
+    return xproto.Window(
+        uint32(prop.Value[0]) |
+        uint32(prop.Value[1])<<8 |
+        uint32(prop.Value[2])<<16 |
+        uint32(prop.Value[3])<<24,
+    ), nil
+}
+----
+
+===== Method 2: FocusIn Events (without EWMH)
+
+For WMs without EWMH support or without WM at all:
+
+[source,go]
+----
+// SubscribeToFocusEvents subscribes to focus and window close events
+func SubscribeToFocusEvents(conn *xgb.Conn, window xproto.Window) error {
+    return xproto.ChangeWindowAttributesChecked(conn, window,
+        xproto.CwEventMask,
+        []uint32{
+            xproto.EventMaskFocusChange |
+            xproto.EventMaskStructureNotify,
+        },
+    ).Check()
+}
+
+// HandleFocusIn handles focus gained event
+func (fw *FocusWatcher) HandleFocusIn(e xproto.FocusInEvent) {
+    // Ignore Grab/Ungrab — only real focus change
+    if e.Mode != xproto.NotifyModeNormal {
+        return
+    }
+
+    // Ignore our own window
+    if e.Event == fw.uiWindow {
+        return
+    }
+
+    // Move to front of MRU
+    fw.mru.Touch(e.Event)
+}
+----
+
+===== Method 3: Regular Polling (fallback)
+
+If event subscription is not possible:
+
+[source,go]
+----
+import "time"
+
+// PollFocusChanges polls focus every interval
+func (fw *FocusWatcher) PollFocusChanges(ctx context.Context, interval time.Duration) {
+    ticker := time.NewTicker(interval)
+    defer ticker.Stop()
+
+    var lastFocused xproto.Window
+
+    for {
+        select {
+        case <-ctx.Done():
+            return
+        case <-ticker.C:
+            current, err := fw.GetInputFocus()
+            if err != nil {
+                continue
+            }
+            if current != lastFocused && current != 0 {
+                fw.mru.Touch(current)
+                lastFocused = current
+            }
+        }
+    }
+}
+
+// GetInputFocus returns window with input focus
+func (fw *FocusWatcher) GetInputFocus() (xproto.Window, error) {
+    reply, err := xproto.GetInputFocus(fw.conn).Reply()
+    if err != nil {
+        return 0, err
+    }
+    return reply.Focus, nil
+}
+----
+
+==== Window Close Handling
+
+It's important to remove windows from MRU list when they're destroyed:
+
+[source,go]
+----
+// HandleDestroyNotify handles window close event
+func (fw *FocusWatcher) HandleDestroyNotify(e xproto.DestroyNotifyEvent) {
+    // Remove window from MRU list
+    fw.mru.Remove(e.Window)
+}
+----
+
+==== Sorting Window List by MRU
+
+When showing switcher — sort display list by MRU:
+
+[source,go]
+----
+import "sort"
+
+// SortWindowsByMRU sorts window list by MRU order
+func (m *MRUList) SortWindowsByMRU(windows []xproto.Window) []xproto.Window {
+    order := m.GetOrder()
+
+    // Create map for fast position lookup in MRU
+    orderMap := make(map[xproto.Window]int, len(order))
+    for i, id := range order {
+        orderMap[id] = i
+    }
+
+    // Copy and sort
+    sorted := make([]xproto.Window, len(windows))
+    copy(sorted, windows)
+
+    sort.Slice(sorted, func(i, j int) bool {
+        posI, okI := orderMap[sorted[i]]
+        posJ, okJ := orderMap[sorted[j]]
+
+        // Windows not in MRU list go to the end
+        if !okI {
+            posI = len(order) + 1
+        }
+        if !okJ {
+            posJ = len(order) + 1
+        }
+
+        return posI < posJ
+    })
+
+    return sorted
+}
+
+// PrepareWindowList prepares window list for display
+func (wm *WindowManager) PrepareWindowList() ([]WindowInfo, error) {
+    // Get window list from WM
+    windows, err := GetClientList(wm.conn, wm.root)
+    if err != nil {
+        return nil, err
+    }
+
+    // Sort by MRU
+    sorted := wm.mru.SortWindowsByMRU(windows)
+
+    // Fill information about each window
+    result := make([]WindowInfo, 0, len(sorted))
+    for _, wid := range sorted {
+        info, err := wm.GetWindowInfo(wid)
+        if err != nil {
+            continue // skip problematic windows
+        }
+        result = append(result, info)
+    }
+
+    return result, nil
+}
+----
+
+==== Main Event Loop in Go
+
+[source,go]
+----
+package main
+
+import (
+    "log"
+
+    "github.com/jezek/xgb"
+    "github.com/jezek/xgb/xproto"
+)
+
+// RunEventLoop starts main X11 event processing loop
+func (wm *WindowManager) RunEventLoop() error {
+    for {
+        ev, err := wm.conn.WaitForEvent()
+        if err != nil {
+            log.Printf("X11 event error: %v", err)
+            continue
+        }
+        if ev == nil {
+            return nil // connection closed
+        }
+
+        switch e := ev.(type) {
+        case xproto.PropertyNotifyEvent:
+            wm.focusWatcher.HandlePropertyNotify(e)
+
+        case xproto.FocusInEvent:
+            wm.focusWatcher.HandleFocusIn(e)
+
+        case xproto.DestroyNotifyEvent:
+            wm.focusWatcher.HandleDestroyNotify(e)
+
+        case xproto.KeyPressEvent:
+            wm.HandleKeyPress(e)
+
+        case xproto.KeyReleaseEvent:
+            wm.HandleKeyRelease(e)
+        }
+    }
+}
+----
+
+==== i3 IPC Integration
+
+For i3wm, you can use its IPC instead of X11 events:
+
+[source,go]
+----
+import "go.i3wm.org/i3/v4"
+
+func subscribeToFocusEvents(mru *MRUList) {
+    recv := i3.Subscribe(i3.WindowEventType)
+
+    for event := range recv.Events {
+        if we, ok := event.(*i3.WindowEvent); ok {
+            switch we.Change {
+            case "focus":
+                mru.Touch(uint32(we.Container.Window))
+            case "close":
+                mru.Remove(uint32(we.Container.Window))
+            }
+        }
+    }
+}
+----
+
+==== Focus Tracking Methods Comparison Table
+
+[cols="2,1,1,1,1"]
+|===
+| Method | EWMH WM | Non-EWMH WM | Without WM | Latency
+
+| `PropertyNotify` on `_NET_ACTIVE_WINDOW`
+| ✅
+| ❌
+| ❌
+| Instant
+
+| `FocusIn` events
+| ✅
+| ✅
+| ✅
+| Instant
+
+| i3 IPC (`window::focus`)
+| ✅ (i3 only)
+| ❌
+| ❌
+| Instant
+
+| Polling `XGetInputFocus`
+| ✅
+| ✅
+| ✅
+| Polling delay
+|===
+
+Recommended to use combination: `PropertyNotify` for EWMH-WM, `FocusIn` as fallback.
+
+=== Window Thumbnail Capture
+
+This is the key and most complex part of implementation.
+
+==== Method 1: XComposite Extension (recommended)
+
+The most reliable way for modern X11 systems.
+For Go, use `github.com/jezek/xgb/composite` package:
+
+[source,go]
+----
+package thumbnail
+
+import (
+    "image"
+
+    "github.com/jezek/xgb"
+    "github.com/jezek/xgb/composite"
+    "github.com/jezek/xgb/xproto"
+)
+
+// ThumbnailCapture captures window thumbnails via XComposite
+type ThumbnailCapture struct {
+    conn *xgb.Conn
+}
+
+// NewThumbnailCapture creates new thumbnail capturer
+func NewThumbnailCapture(conn *xgb.Conn) (*ThumbnailCapture, error) {
+    // Initialize Composite extension
+    if err := composite.Init(conn); err != nil {
+        return nil, err
+    }
+
+    // Check version
+    _, err := composite.QueryVersion(conn, 0, 4).Reply()
+    if err != nil {
+        return nil, err
+    }
+
+    return &ThumbnailCapture{conn: conn}, nil
+}
+
+// CaptureWindow captures window content to Pixmap
+func (tc *ThumbnailCapture) CaptureWindow(window xproto.Window) (xproto.Pixmap, error) {
+    // Redirect window to off-screen buffer
+    // RedirectAutomatic = 0 — compositor manages
+    err := composite.RedirectWindowChecked(tc.conn, window,
+        composite.RedirectAutomatic).Check()
+    if err != nil {
+        return 0, err
+    }
+
+    // Get window's Pixmap
+    pixmap, err := composite.NameWindowPixmap(tc.conn, window).Reply()
+    if err != nil {
+        return 0, err
+    }
+
+    return pixmap.Pixmap, nil
+}
+
+// GetWindowImage gets window image as image.Image
+func (tc *ThumbnailCapture) GetWindowImage(window xproto.Window) (image.Image, error) {
+    // Get window geometry
+    geom, err := xproto.GetGeometry(tc.conn, xproto.Drawable(window)).Reply()
+    if err != nil {
+        return nil, err
+    }
+
+    // Capture image
+    img, err := xproto.GetImage(tc.conn, xproto.ImageFormatZPixmap,
+        xproto.Drawable(window),
+        0, 0, geom.Width, geom.Height,
+        0xFFFFFFFF).Reply()
+    if err != nil {
+        return nil, err
+    }
+
+    // Convert to image.RGBA
+    return tc.bytesToImage(img.Data, int(geom.Width), int(geom.Height), int(geom.Depth))
+}
+
+// bytesToImage converts X11 data to image.Image
+func (tc *ThumbnailCapture) bytesToImage(data []byte, width, height, depth int) (image.Image, error) {
+    img := image.NewRGBA(image.Rect(0, 0, width, height))
+
+    // For 24/32-bit depth (BGRA → RGBA)
+    for y := 0; y < height; y++ {
+        for x := 0; x < width; x++ {
+            i := (y*width + x) * 4
+            if i+3 < len(data) {
+                // X11 uses BGRA
+                img.Pix[(y*width+x)*4+0] = data[i+2] // R
+                img.Pix[(y*width+x)*4+1] = data[i+1] // G
+                img.Pix[(y*width+x)*4+2] = data[i+0] // B
+                img.Pix[(y*width+x)*4+3] = data[i+3] // A
+            }
+        }
+    }
+
+    return img, nil
+}
+----
+
+.Advantages
+* Works with any window content (including OpenGL, video)
+* Doesn't require activation/switching to window
+* Real content in real time
+
+.Disadvantages
+* Requires running compositor (picom, compton, xcompmgr)
+* Increases memory consumption
+
+==== Method 2: XGetImage (without compositor)
+
+Direct window content capture via xgb:
+
+[source,go]
+----
+// GetImageDirect captures image directly (without compositor)
+func GetImageDirect(conn *xgb.Conn, window xproto.Window) (image.Image, error) {
+    geom, err := xproto.GetGeometry(conn, xproto.Drawable(window)).Reply()
+    if err != nil {
+        return nil, err
+    }
+
+    reply, err := xproto.GetImage(conn, xproto.ImageFormatZPixmap,
+        xproto.Drawable(window),
+        0, 0, geom.Width, geom.Height,
+        0xFFFFFFFF).Reply()
+    if err != nil {
+        return nil, err
+    }
+
+    // Convert reply.Data to image.Image...
+    return convertToImage(reply.Data, int(geom.Width), int(geom.Height))
+}
+----
+
+.Limitations
+* Doesn't work for windows overlapped by others
+* Doesn't capture OpenGL surfaces directly
+
+==== Method 3: XShm (Shared Memory)
+
+For high-performance capture, use `github.com/jezek/xgb/shm`:
+
+[source,go]
+----
+import (
+    "github.com/jezek/xgb/shm"
+    "syscall"
+)
+
+// ShmCapture — capture via shared memory
+type ShmCapture struct {
+    conn   *xgb.Conn
+    seg    shm.Seg
+    shmid  int
+    data   []byte
+}
+
+// NewShmCapture creates capturer via shared memory
+func NewShmCapture(conn *xgb.Conn, width, height int) (*ShmCapture, error) {
+    if err := shm.Init(conn); err != nil {
+        return nil, err
+    }
+
+    size := width * height * 4
+
+    // Create shared memory segment
+    shmid, err := syscall.Shmget(syscall.IPC_PRIVATE, size, syscall.IPC_CREAT|0777)
+    if err != nil {
+        return nil, err
+    }
+
+    // Attach
+    data, err := syscall.Shmat(shmid, 0, 0)
+    if err != nil {
+        syscall.Shmctl(shmid, syscall.IPC_RMID, nil)
+        return nil, err
+    }
+
+    // Create X11 shm segment
+    seg, _ := shm.NewSegId(conn)
+    shm.Attach(conn, seg, uint32(shmid), false)
+
+    return &ShmCapture{
+        conn:  conn,
+        seg:   seg,
+        shmid: shmid,
+        data:  data,
+    }, nil
+}
+
+// Capture captures window image
+func (sc *ShmCapture) Capture(drawable xproto.Drawable, x, y int16, w, h uint16) error {
+    _, err := shm.GetImage(sc.conn, drawable, x, y, w, h,
+        0xFFFFFFFF, xproto.ImageFormatZPixmap, sc.seg, 0).Reply()
+    return err
+}
+----
+
+=== Key Combination Grabbing
+
+==== XGrabKey — Global Grab
+
+[source,go]
+----
+package keygrab
+
+import (
+    "github.com/jezek/xgb"
+    "github.com/jezek/xgb/xproto"
+)
+
+// Key modifiers
+const (
+    ModAlt   = xproto.ModMask1 // Alt = Mod1
+    ModSuper = xproto.ModMask4 // Super/Win = Mod4
+    ModShift = xproto.ModMaskShift
+)
+
+// KeyGrabber grabs key combinations
+type KeyGrabber struct {
+    conn    *xgb.Conn
+    root    xproto.Window
+    tabCode xproto.Keycode
+    altCode xproto.Keycode
+}
+
+// NewKeyGrabber creates new key grabber
+func NewKeyGrabber(conn *xgb.Conn, root xproto.Window) (*KeyGrabber, error) {
+    // Get keycode for Tab
+    setup := xproto.Setup(conn)
+    tabCode := keysymToKeycode(conn, setup, 0xFF09) // XK_Tab
+    altCode := keysymToKeycode(conn, setup, 0xFFE9) // XK_Alt_L
+
+    return &KeyGrabber{
+        conn:    conn,
+        root:    root,
+        tabCode: tabCode,
+        altCode: altCode,
+    }, nil
+}
+
+// GrabAltTab grabs Alt+Tab and Alt+Shift+Tab
+func (kg *KeyGrabber) GrabAltTab() error {
+    // Get masks for ignored modifiers (NumLock, CapsLock, ScrollLock)
+    ignoredMasks := []uint16{0, xproto.ModMaskLock, xproto.ModMask2,
+                             xproto.ModMaskLock | xproto.ModMask2}
+
+    for _, ignored := range ignoredMasks {
+        // Alt+Tab
+        err := xproto.GrabKeyChecked(kg.conn, true, kg.root,
+            ModAlt|ignored, kg.tabCode,
+            xproto.GrabModeAsync, xproto.GrabModeAsync).Check()
+        if err != nil {
+            return err
+        }
+
+        // Alt+Shift+Tab (reverse)
+        err = xproto.GrabKeyChecked(kg.conn, true, kg.root,
+            ModAlt|ModShift|ignored, kg.tabCode,
+            xproto.GrabModeAsync, xproto.GrabModeAsync).Check()
+        if err != nil {
+            return err
+        }
+
+        // Alt+Super+Tab (additional combination)
+        err = xproto.GrabKeyChecked(kg.conn, true, kg.root,
+            ModAlt|ModSuper|ignored, kg.tabCode,
+            xproto.GrabModeAsync, xproto.GrabModeAsync).Check()
+        if err != nil {
+            return err
+        }
+    }
+
+    return nil
+}
+
+// UngrabAltTab releases grab
+func (kg *KeyGrabber) UngrabAltTab() {
+    xproto.UngrabKey(kg.conn, kg.tabCode, kg.root, xproto.ModMaskAny)
+}
+
+// IsAltPressed checks if Alt is pressed
+func (kg *KeyGrabber) IsAltPressed() bool {
+    reply, err := xproto.QueryKeymap(kg.conn).Reply()
+    if err != nil {
+        return false
+    }
+
+    // Check bit for altCode
+    byteIndex := int(kg.altCode) / 8
+    bitMask := byte(1 << (uint(kg.altCode) % 8))
+    return reply.Keys[byteIndex]&bitMask != 0
+}
+
+// HandleKeyPress handles keypress
+func (kg *KeyGrabber) HandleKeyPress(e xproto.KeyPressEvent, switcher *Switcher) {
+    if e.Detail != kg.tabCode {
+        return
+    }
+
+    if e.State&ModAlt == 0 {
+        return // Alt not pressed
+    }
+
+    if !switcher.IsVisible() {
+        // First press — show switcher
+        backward := e.State&ModShift != 0
+        switcher.Show(backward)
+    } else {
+        // Repeated press — switch window
+        if e.State&ModShift != 0 {
+            switcher.Previous()
+        } else {
+            switcher.Next()
+        }
+    }
+}
+
+// HandleKeyRelease handles key release
+func (kg *KeyGrabber) HandleKeyRelease(e xproto.KeyReleaseEvent, switcher *Switcher) {
+    // If Alt is released — activate selected window
+    if e.Detail == kg.altCode && switcher.IsVisible() {
+        switcher.ActivateSelected()
+        switcher.Hide()
+    }
+}
+
+// keysymToKeycode converts keysym to keycode
+func keysymToKeycode(conn *xgb.Conn, setup *xproto.SetupInfo, keysym uint32) xproto.Keycode {
+    min := setup.MinKeycode
+    max := setup.MaxKeycode
+
+    mapping, err := xproto.GetKeyboardMapping(conn, min, byte(max-min+1)).Reply()
+    if err != nil {
+        return 0
+    }
+
+    keysymsPerKeycode := int(mapping.KeysymsPerKeycode)
+    for i := 0; i < int(max-min+1); i++ {
+        for j := 0; j < keysymsPerKeycode; j++ {
+            if mapping.Keysyms[i*keysymsPerKeycode+j] == xproto.Keysym(keysym) {
+                return xproto.Keycode(int(min) + i)
+            }
+        }
+    }
+    return 0
+}
+----
+
+==== Альтернатива: использование xgbutil
+
+Библиотека `github.com/BurntSushi/xgbutil` упрощает работу с keysym:
+
+[source,go]
+----
+import (
+    "github.com/BurntSushi/xgbutil"
+    "github.com/BurntSushi/xgbutil/keybind"
+    "github.com/BurntSushi/xgbutil/xevent"
+)
+
+func SetupKeyBindings(xu *xgbutil.XUtil, switcher *Switcher) error {
+    keybind.Initialize(xu)
+
+    // Alt+Tab
+    err := keybind.KeyPressFun(
+        func(xu *xgbutil.XUtil, e xevent.KeyPressEvent) {
+            switcher.Next()
+        }).Connect(xu, xu.RootWin(), "Mod1-Tab", true)
+    if err != nil {
+        return err
+    }
+
+    // Alt+Shift+Tab
+    err = keybind.KeyPressFun(
+        func(xu *xgbutil.XUtil, e xevent.KeyPressEvent) {
+            switcher.Previous()
+        }).Connect(xu, xu.RootWin(), "Mod1-Shift-Tab", true)
+
+    return err
+}
+----
+
+=== Window Activation
+
+[source,go]
+----
+package activation
+
+import (
+    "github.com/jezek/xgb"
+    "github.com/jezek/xgb/xproto"
+)
+
+// WindowActivator activates windows
+type WindowActivator struct {
+    conn            *xgb.Conn
+    root            xproto.Window
+    netActiveWindow xproto.Atom
+}
+
+// NewWindowActivator creates window activator
+func NewWindowActivator(conn *xgb.Conn, root xproto.Window) (*WindowActivator, error) {
+    reply, err := xproto.InternAtom(conn, false,
+        uint16(len("_NET_ACTIVE_WINDOW")),
+        "_NET_ACTIVE_WINDOW").Reply()
+    if err != nil {
+        return nil, err
+    }
+
+    return &WindowActivator{
+        conn:            conn,
+        root:            root,
+        netActiveWindow: reply.Atom,
+    }, nil
+}
+
+// ActivateWindow activates specified window via EWMH
+func (wa *WindowActivator) ActivateWindow(window xproto.Window) error {
+    // Form ClientMessage for _NET_ACTIVE_WINDOW
+    data := xproto.ClientMessageDataUnionData32New([]uint32{
+        2,           // source: 2 = pager
+        0,           // timestamp (CurrentTime)
+        0,           // currently active window
+        0, 0,
+    })
+
+    event := xproto.ClientMessageEvent{
+        Response_type: xproto.ClientMessageEvent{}.Response_type,
+        Format:        32,
+        Window:        window,
+        Type:          wa.netActiveWindow,
+        Data:          data,
+    }
+
+    // Send event to root window
+    return xproto.SendEventChecked(wa.conn, false, wa.root,
+        xproto.EventMaskSubstructureNotify|xproto.EventMaskSubstructureRedirect,
+        string(event.Bytes())).Check()
+}
+
+// ActivateWindowFallback activates window without EWMH (for old WMs)
+func (wa *WindowActivator) ActivateWindowFallback(window xproto.Window) error {
+    // Raise window to top
+    err := xproto.ConfigureWindowChecked(wa.conn, window,
+        xproto.ConfigWindowStackMode,
+        []uint32{xproto.StackModeAbove}).Check()
+    if err != nil {
+        return err
+    }
+
+    // Set input focus
+    return xproto.SetInputFocusChecked(wa.conn, xproto.InputFocusPointerRoot,
+        window, xproto.TimeCurrentTime).Check()
+}
+
+// SwitchToWindow switches to window with fallback
+func (wa *WindowActivator) SwitchToWindow(window xproto.Window) error {
+    // First try EWMH
+    err := wa.ActivateWindow(window)
+    if err != nil {
+        // Fallback for old WMs
+        return wa.ActivateWindowFallback(window)
+    }
+    return nil
+}
+----
+
+== GUI Implementation Options
+
+=== Variant 1: Pure Xlib + Cairo
+
+.Advantages
+* Minimal dependencies
+* Full rendering control
+* Lightweight binary
+
+.Disadvantages
+* Lots of boilerplate code
+* Manual event management
+
+[source,go]
+----
+package gui
+
+import (
+    "github.com/jezek/xgb"
+    "github.com/jezek/xgb/xproto"
+)
+
+// CreateOverlayWindow creates overlay window for switcher
+func CreateOverlayWindow(conn *xgb.Conn, root xproto.Window, x, y, width, height int) (xproto.Window, error) {
+    // Create window identifier
+    wid, _ := xproto.NewWindowId(conn)
+
+    // Window attributes
+    mask := uint32(xproto.CwBackPixel | xproto.CwOverrideRedirect | xproto.CwEventMask)
+    values := []uint32{
+        0x80000000,    // background_pixel: semi-transparent black (if compositor supports it)
+        1,             // override_redirect = True (bypass WM)
+        xproto.EventMaskExposure | xproto.EventMaskKeyPress | xproto.EventMaskButtonPress,
+    }
+
+    // Get visual with alpha channel support (for transparency)
+    screen := xproto.Setup(conn).DefaultScreen(conn)
+
+    err := xproto.CreateWindowChecked(conn,
+        screen.RootDepth,           // depth
+        wid,                         // window ID
+        root,                        // parent
+        int16(x), int16(y),         // x, y
+        uint16(width), uint16(height), // width, height
+        0,                           // border_width
+        xproto.WindowClassInputOutput,
+        screen.RootVisual,
+        mask,
+        values,
+    ).Check()
+
+    if err != nil {
+        return 0, err
+    }
+
+    return wid, nil
+}
+----
+
+NOTE: For rendering in Go, you can use:
+
+* `github.com/fogleman/gg` — 2D graphics based on Cairo
+* `github.com/ungerik/go-cairo` — direct Cairo bindings via CGo
+* `image/draw` — Go standard library for raster graphics
+
+=== Variant 2: GTK3/GTK4
+
+.Advantages
+* Built-in CSS styling support
+* Ready-made widgets for working with images
+* Good X11 integration
+
+.Disadvantages
+* Heavy dependencies (~50 MB runtime)
+* Harder to control window z-order
+
+[source,go]
+----
+package gui
+
+import (
+    "github.com/gotk3/gotk3/gdk"
+    "github.com/gotk3/gotk3/gtk"
+)
+
+// CreateSwitcherWindow creates switcher window using GTK
+func CreateSwitcherWindow() (*gtk.Window, error) {
+    gtk.Init(nil)
+
+    // Create popup window (without WM decorations)
+    win, err := gtk.WindowNew(gtk.WINDOW_POPUP)
+    if err != nil {
+        return nil, err
+    }
+
+    // Center window
+    win.SetPosition(gtk.WIN_POS_CENTER_ALWAYS)
+    win.SetDecorated(false)
+
+    // Enable transparency (RGBA)
+    screen, err := win.GetScreen()
+    if err == nil {
+        visual, err := screen.GetRGBAVisual()
+        if err == nil {
+            win.SetVisual(visual)
+        }
+    }
+
+    // Set property so window is always on top
+    win.SetKeepAbove(true)
+
+    // Create horizontal layout for carousel
+    box, err := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 10)
+    if err != nil {
+        return nil, err
+    }
+    box.SetMarginTop(20)
+    box.SetMarginBottom(20)
+    box.SetMarginStart(20)
+    box.SetMarginEnd(20)
+
+    win.Add(box)
+
+    // CSS for styling
+    cssProvider, _ := gtk.CssProviderNew()
+    cssProvider.LoadFromData(`
+        window {
+            background-color: rgba(0, 0, 0, 0.8);
+            border-radius: 10px;
+        }
+    `)
+    screen, _ = gdk.ScreenGetDefault()
+    gtk.AddProviderForScreen(screen, cssProvider, gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
+    return win, nil
+}
+----
+
+=== Variant 3: Qt5/Qt6
+
+.Advantages
+* Powerful rendering system (QPainter, QML)
+* Good animation support
+* Cross-platform (Wayland in future)
+
+.Disadvantages
+* Even heavier dependencies
+* C++ or QML
+
+[source,cpp]
+----
+#include <QApplication>
+#include <QWidget>
+#include <X11/Xlib.h>
+
+class CarouselSwitcher : public QWidget {
+public:
+    CarouselSwitcher() {
+        setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::X11BypassWindowManagerHint);
+        setAttribute(Qt::WA_TranslucentBackground);
+    }
+
+protected:
+    void paintEvent(QPaintEvent *) override {
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing);
+        // Рисование карусели
+    }
+};
+----
+
+=== Variant 4: Go + CGo (Xlib bindings)
+
+.Advantages
+* Fast development
+* Convenient concurrency handling
+* Static linking
+
+.Disadvantages
+* CGo overhead for X11 calls
+* Fewer ready-made GUI libraries
+
+[source,go]
+----
+package main
+
+/*
+#cgo LDFLAGS: -lX11 -lXcomposite -lXrender
+#include <X11/Xlib.h>
+#include <X11/extensions/Xcomposite.h>
+*/
+import "C"
+import "unsafe"
+
+func getWindowList(dpy *C.Display, root C.Window) []C.Window {
+    prop := C.XInternAtom(dpy, C.CString("_NET_CLIENT_LIST_STACKING"), C.False)
+    // ...
+}
+----
+
+Alternatives:
+
+* `github.com/BurntSushi/xgb` — pure Go X11 protocol
+* `github.com/BurntSushi/xgbutil` — utilities on top of xgb
+* `fyne.io/fyne` — GUI framework (but weak low-level X11 support)
+
+=== Variant 5: Go + GTK (gotk3/gotk4)
+
+[source,go]
+----
+package main
+
+import (
+    "github.com/gotk3/gotk3/gtk"
+    "github.com/gotk3/gotk3/gdk"
+)
+
+func createSwitcherWindow() *gtk.Window {
+    win, _ := gtk.WindowNew(gtk.WINDOW_POPUP)
+    win.SetPosition(gtk.WIN_POS_CENTER_ALWAYS)
+    win.SetDecorated(false)
+
+    // Прозрачность
+    screen, _ := win.GetScreen()
+    visual, _ := screen.GetRGBAVisual()
+    win.SetVisual(visual)
+
+    return win
+}
+----
+
+== Comparison Table
+
+[cols="2,1,1,1,1,1"]
+|===
+| Criterion | Xlib+Cairo | GTK | Qt | Go+xgb | Go+gotk3
+
+| Binary size
+| ~100 KB
+| ~50 MB*
+| ~100 MB*
+| ~5 MB
+| ~50 MB*
+
+| Implementation complexity
+| High
+| Medium
+| Medium
+| High
+| Medium
+
+| Performance
+| Excellent
+| Good
+| Good
+| Good
+| Good
+
+| Animations
+| Manual
+| CSS transitions
+| QML/QPropertyAnimation
+| Manual
+| CSS transitions
+
+| Thumbnail capture
+| XComposite
+| XComposite
+| XComposite
+| XComposite
+| XComposite
+
+| Readiness
+| Lots of code
+| Quick start
+| Quick start
+| Lots of code
+| Quick start
+|===
+
+_* — runtime dependencies, static linking will increase size_
+
+== Recommendations
+
+=== For Minimal Solution (like alttab)
+
+*Language:* C
+*Stack:* Xlib + XComposite + Cairo
+
+This is the `alttab` project path. Minimal dependencies, full control, but requires deep understanding of X11.
+
+=== For Rapid Development with Beautiful UI
+
+*Language:* C or Go
+*Stack:* GTK3
+
+GTK is well integrated with X11, supports CSS styles, ready-made widgets for working with Pixbuf.
+
+=== For Maximum Flexibility and Animations
+
+*Language:* C++
+*Stack:* Qt5/Qt6 + QML
+
+Qt provides powerful animation and rendering system. QML allows declaratively describing carousel.
+
+=== For Go Project (like i3qws)
+
+*Language:* Go
+*Stack:* xgb/xgbutil + separate GUI process
+
+Recommended to split into two components:
+
+. *Go Daemon* — tracks windows, handles keys via xgb
+. *GUI Process* — lightweight renderer (can even be GTK/Qt), launched on demand
+
+This avoids CGo overhead for continuous monitoring.
+
+== Carousel UI Implementation
+
+=== 3D Carousel (Cover Flow)
+
+[plantuml]
+----
+@startuml
+skinparam backgroundColor transparent
+
+rectangle "Perspective View" {
+    card "Win 1" as w1 #lightgray
+    card "Win 2" as w2 #lightblue
+    card "**Win 3**\n(selected)" as w3 #yellow
+    card "Win 4" as w4 #lightblue
+    card "Win 5" as w5 #lightgray
+}
+
+w1 -[hidden]-> w2
+w2 -[hidden]-> w3
+w3 -[hidden]-> w4
+w4 -[hidden]-> w5
+
+note bottom of w3
+  Central window is larger,
+  side ones — with perspective
+  distortion
+end note
+@enduml
+----
+
+.Key Elements
+* Central element — maximum size, no distortions
+* Side elements — reduced, rotated in 3D
+* Smooth animation when switching
+* Reflections (optional)
+
+=== 3D Transformations Implementation
+
+.Go + gg (2.5D graphics)
+[source,go]
+----
+package carousel
+
+import (
+    "image"
+    "github.com/fogleman/gg"
+)
+
+// Draw3DCarousel draws 2.5D carousel with perspective effect
+func Draw3DCarousel(thumbnails []image.Image, selected int, width, height int) *image.RGBA {
+    dc := gg.NewContext(width, height)
+
+    // Background
+    dc.SetRGBA(0, 0, 0, 0.8)
+    dc.Clear()
+
+    centerX := float64(width) / 2
+    centerY := float64(height) / 2
+
+    for i, thumb := range thumbnails {
+        // Position relative to center
+        offset := float64(i - selected)
+
+        // Transformation parameters
+        var scale, x, alpha float64
+        if i == selected {
+            // Central window — full size
+            scale = 1.0
+            x = centerX
+            alpha = 1.0
+        } else {
+            // Side windows — reduced with perspective
+            perspective := 0.6
+            scale = perspective + (1.0-perspective)/(1.0+abs(offset)*0.5)
+            x = centerX + offset*150*scale
+            alpha = 0.7
+        }
+
+        // Thumbnail size
+        thumbW := float64(thumb.Bounds().Dx()) * scale
+        thumbH := float64(thumb.Bounds().Dy()) * scale
+
+        // Apply transformations
+        dc.Push()
+        dc.Translate(x, centerY)
+        dc.Scale(scale, scale)
+        dc.Translate(-thumbW/2, -thumbH/2)
+
+        // Draw thumbnail with alpha channel
+        dc.SetRGBA(1, 1, 1, alpha)
+        dc.DrawImage(thumb, 0, 0)
+
+        dc.Pop()
+    }
+
+    return dc.Image().(*image.RGBA)
+}
+
+func abs(x float64) float64 {
+    if x < 0 {
+        return -x
+    }
+    return x
+}
+----
+
+.Qt/QML (real 3D)
+[source,qml]
+----
+PathView {
+    id: carousel
+    model: windowModel
+
+    path: Path {
+        startX: 0; startY: height / 2
+        PathAttribute { name: "scale"; value: 0.5 }
+        PathAttribute { name: "angle"; value: -45 }
+
+        PathLine { x: width / 2; y: height / 2 }
+        PathAttribute { name: "scale"; value: 1.0 }
+        PathAttribute { name: "angle"; value: 0 }
+
+        PathLine { x: width; y: height / 2 }
+        PathAttribute { name: "scale"; value: 0.5 }
+        PathAttribute { name: "angle"; value: 45 }
+    }
+
+    delegate: Item {
+        transform: Rotation {
+            origin.x: width / 2
+            axis { x: 0; y: 1; z: 0 }
+            angle: PathView.angle
+        }
+        scale: PathView.scale
+
+        Image {
+            source: thumbnailSource
+            anchors.fill: parent
+        }
+    }
+}
+----
+
+== Handling Without Window Manager
+
+If WM is absent:
+
+. `_NET_CLIENT_LIST` will be unavailable — use `XQueryTree`
+. Filter windows by `override_redirect`, `map_state`
+. Activation via `XSetInputFocus` + `XRaiseWindow`
+. No guarantee of stacking order
+
+[source,go]
+----
+package windowfilter
+
+import (
+    "github.com/jezek/xgb"
+    "github.com/jezek/xgb/xproto"
+)
+
+// FilterNormalWindows filters windows, leaving only regular applications
+func FilterNormalWindows(conn *xgb.Conn, windows []xproto.Window) []xproto.Window {
+    result := make([]xproto.Window, 0, len(windows))
+
+    for _, win := range windows {
+        if IsNormalWindow(conn, win) {
+            result = append(result, win)
+        }
+    }
+
+    return result
+}
+
+// IsNormalWindow checks if window is a regular application
+func IsNormalWindow(conn *xgb.Conn, win xproto.Window) bool {
+    // Get window attributes
+    attrs, err := xproto.GetWindowAttributes(conn, win).Reply()
+    if err != nil {
+        return false
+    }
+
+    // Check 1: window must be visible
+    if attrs.MapState != xproto.MapStateViewable {
+        return false
+    }
+
+    // Check 2: not override_redirect (not popup/tooltip/menu)
+    if attrs.OverrideRedirect {
+        return false
+    }
+
+    // Check 3: WM_STATE must be NormalState
+    wmState, err := GetWMState(conn, win)
+    if err != nil || wmState != WMStateNormal {
+        return false
+    }
+
+    return true
+}
+
+// WM_STATE constants
+const (
+    WMStateWithdrawn = 0
+    WMStateNormal    = 1
+    WMStateIconic    = 3
+)
+
+// GetWMState gets window's WM_STATE
+func GetWMState(conn *xgb.Conn, win xproto.Window) (uint32, error) {
+    // Get WM_STATE atom
+    atom, err := xproto.InternAtom(conn, false,
+        uint16(len("WM_STATE")), "WM_STATE").Reply()
+    if err != nil {
+        return 0, err
+    }
+
+    // Read property
+    prop, err := xproto.GetProperty(conn, false, win,
+        atom.Atom,     // property
+        atom.Atom,     // type
+        0,             // offset
+        2,             // length (WM_STATE — 2 longs)
+    ).Reply()
+
+    if err != nil || prop.ValueLen == 0 {
+        return 0, err
+    }
+
+    // First long — state
+    state := uint32(prop.Value[0]) |
+        uint32(prop.Value[1])<<8 |
+        uint32(prop.Value[2])<<16 |
+        uint32(prop.Value[3])<<24
+
+    return state, nil
+}
+----
+
+== Conclusion
+
+For a project similar to i3qws, recommended:
+
+. *Go Daemon* using `xgb` — window monitoring, key grabbing
+. *GTK GUI* (can be via gotk3) — carousel display
+. *XComposite* — window thumbnail capture
+. *IPC* (unix socket or D-Bus) — communication between daemon and GUI
+
+This architecture provides:
+
+* Low overhead for continuous monitoring
+* Fast GUI launch on demand
+* Flexibility in carousel style choice
