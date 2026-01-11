@@ -91,3 +91,14 @@ func (m *MRUList) Clear() {
 	defer m.mu.Unlock()
 	m.items = make([]xproto.Window, 0)
 }
+
+// GetCurrent returns the currently most recently used window (index 0).
+// Returns 0 if the list is empty.
+func (m *MRUList) GetCurrent() xproto.Window {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if len(m.items) > 0 {
+		return m.items[0]
+	}
+	return 0
+}

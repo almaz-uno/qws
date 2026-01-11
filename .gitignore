@@ -1,5 +1,5 @@
 # Binaries
-qws
+/qws
 *.exe
 *.exe~
 *.dll
@@ -30,3 +30,4 @@ go.work.sum
 # OS
 .DS_Store
 Thumbs.db
+console/capture/capture

@@ -2,8 +2,10 @@ package focus
 
 import (
 	"fmt"
-	"log"
+	"image"
+	"sync"
 
+	"github.com/almaz-uno/qws/pkg/composite"
 	"github.com/almaz-uno/qws/pkg/mru"
 	"github.com/jezek/xgb"
 	"github.com/jezek/xgb/xproto"
@@ -16,11 +18,14 @@ type Watcher struct {
 	netActiveWindow xproto.Atom
 	mru             *mru.MRUList
 	switcherWindow  xproto.Window // our switcher window to ignore
+	capturer        *composite.Capturer
+	thumbnails      map[xproto.Window]image.Image
+	thumbMutex      sync.RWMutex
 }
 
 // NewWatcher creates a new focus watcher.
 // It subscribes to PropertyNotify events on the root window to track _NET_ACTIVE_WINDOW changes.
-func NewWatcher(conn *xgb.Conn, root xproto.Window, mru *mru.MRUList) (*Watcher, error) {
+func NewWatcher(conn *xgb.Conn, root xproto.Window, mru *mru.MRUList, capturer *composite.Capturer) (*Watcher, error) {
 	// Get _NET_ACTIVE_WINDOW atom
 	atomReply, err := xproto.InternAtom(conn, false,
 		uint16(len("_NET_ACTIVE_WINDOW")),
@@ -34,6 +39,8 @@ func NewWatcher(conn *xgb.Conn, root xproto.Window, mru *mru.MRUList) (*Watcher,
 		root:            root,
 		netActiveWindow: atomReply.Atom,
 		mru:             mru,
+		capturer:        capturer,
+		thumbnails:      make(map[xproto.Window]image.Image),
 	}
 
 	// Subscribe to PropertyChange events on root window
@@ -72,18 +79,21 @@ func (fw *Watcher) HandlePropertyNotify(e xproto.PropertyNotifyEvent) {
 	// Get the new active window
 	activeWin, err := fw.GetActiveWindow()
 	if err != nil {
-		log.Printf("Warning: failed to get active window: %v", err)
 		return
 	}
 
-	// Ignore our switcher window
-	if activeWin == fw.switcherWindow || activeWin == 0 {
+	// Ignore our switcher window, root window, or no window
+	if activeWin == fw.switcherWindow || activeWin == 0 || activeWin == fw.root {
 		return
 	}
 
 	// Update MRU list
 	fw.mru.Touch(activeWin)
-	log.Printf("Focus changed to window 0x%x (MRU updated)", activeWin)
+
+	// Capture thumbnail for the newly focused window
+	if fw.capturer != nil {
+		go fw.captureThumbnail(activeWin)
+	}
 }
 
 // HandleFocusIn handles FocusIn events as a fallback.
@@ -96,7 +106,6 @@ func (fw *Watcher) HandleFocusIn(e xproto.FocusInEvent) {
 
 	// Update MRU list
 	fw.mru.Touch(e.Event)
-	log.Printf("FocusIn event for window 0x%x (MRU updated)", e.Event)
 }
 
 // GetActiveWindow returns the currently active window via _NET_ACTIVE_WINDOW.
@@ -145,4 +154,33 @@ func (fw *Watcher) SubscribeToFocusEvents(window xproto.Window) error {
 		xproto.CwEventMask,
 		[]uint32{newMask},
 	).Check()
+}
+
+// captureThumbnail captures and caches a thumbnail for the given window
+func (fw *Watcher) captureThumbnail(window xproto.Window) {
+	// Capture thumbnail (always refresh to get latest window content)
+	img, err := fw.capturer.CaptureWindow(window, 512, 512)
+	if err != nil {
+		return
+	}
+
+	// Cache thumbnail
+	fw.thumbMutex.Lock()
+	fw.thumbnails[window] = img
+	fw.thumbMutex.Unlock()
+}
+
+// GetThumbnail returns cached thumbnail for the given window
+func (fw *Watcher) GetThumbnail(window xproto.Window) (image.Image, bool) {
+	fw.thumbMutex.RLock()
+	defer fw.thumbMutex.RUnlock()
+	img, ok := fw.thumbnails[window]
+	return img, ok
+}
+
+// ClearThumbnail removes cached thumbnail for the given window
+func (fw *Watcher) ClearThumbnail(window xproto.Window) {
+	fw.thumbMutex.Lock()
+	defer fw.thumbMutex.Unlock()
+	delete(fw.thumbnails, window)
 }

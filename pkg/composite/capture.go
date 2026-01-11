@@ -29,7 +29,8 @@ func NewCapturer(conn *xgb.Conn, root xproto.Window) (*Capturer, error) {
 		return nil, fmt.Errorf("failed to query Composite version: %w", err)
 	}
 
-	if version.MajorVersion < 1 || (version.MajorVersion == 0 && version.MinorVersion < 2) {
+	// Check version: need at least 0.2
+	if version.MajorVersion == 0 && version.MinorVersion < 2 {
 		return nil, fmt.Errorf("Composite extension version too old: %d.%d (need at least 0.2)",
 			version.MajorVersion, version.MinorVersion)
 	}
@@ -43,6 +44,22 @@ func NewCapturer(conn *xgb.Conn, root xproto.Window) (*Capturer, error) {
 // CaptureWindow captures a thumbnail of the specified window.
 // Returns nil if the window cannot be captured (e.g., not redirected by compositor).
 func (c *Capturer) CaptureWindow(window xproto.Window, maxWidth, maxHeight int) (image.Image, error) {
+	// Skip root window or invalid windows
+	if window == 0 || window == c.root {
+		return nil, fmt.Errorf("cannot capture root or invalid window")
+	}
+
+	// Check if window exists and is mapped
+	attrs, err := xproto.GetWindowAttributes(c.conn, window).Reply()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get window attributes: %w", err)
+	}
+
+	// Skip unmapped windows
+	if attrs.MapState != xproto.MapStateViewable {
+		return nil, fmt.Errorf("window is not viewable (map_state=%d)", attrs.MapState)
+	}
+
 	// Get window geometry
 	geom, err := xproto.GetGeometry(c.conn, xproto.Drawable(window)).Reply()
 	if err != nil {
@@ -71,7 +88,7 @@ func (c *Capturer) CaptureWindow(window xproto.Window, maxWidth, maxHeight int) 
 	scaledWidth := int(float64(width) * scale)
 	scaledHeight := int(float64(height) * scale)
 
-	// Create a pixmap ID for NameWindowPixmap
+	// Try to get window pixmap via XComposite first
 	pixmapID, err := xproto.NewPixmapId(c.conn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create pixmap ID: %w", err)
@@ -79,53 +96,93 @@ func (c *Capturer) CaptureWindow(window xproto.Window, maxWidth, maxHeight int) 
 
 	// Get window pixmap via XComposite
 	// Note: This requires the window to be redirected by a compositor
+	var img *xproto.GetImageReply
 	if err := composite.NameWindowPixmapChecked(c.conn, window, pixmapID).Check(); err != nil {
-		return nil, fmt.Errorf("failed to get window pixmap: %w", err)
-	}
-	defer xproto.FreePixmap(c.conn, pixmapID)
+		// Composite failed - try direct capture from window
+		img, err = xproto.GetImage(c.conn,
+			xproto.ImageFormatZPixmap,
+			xproto.Drawable(window), // Direct from window, not pixmap
+			0, 0,
+			uint16(width), uint16(height),
+			^uint32(0), // all planes
+		).Reply()
+		if err != nil {
+			return nil, fmt.Errorf("failed to capture window directly: %w", err)
+		}
+	} else {
+		defer xproto.FreePixmap(c.conn, pixmapID)
 
-	// Get image data from pixmap
-	img, err := xproto.GetImage(c.conn,
-		xproto.ImageFormatZPixmap,
-		xproto.Drawable(pixmapID),
-		0, 0,
-		uint16(width), uint16(height),
-		^uint32(0), // all planes
-	).Reply()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get image data: %w", err)
+		// Get image data from pixmap
+		img, err = xproto.GetImage(c.conn,
+			xproto.ImageFormatZPixmap,
+			xproto.Drawable(pixmapID),
+			0, 0,
+			uint16(width), uint16(height),
+			^uint32(0), // all planes
+		).Reply()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get image data: %w", err)
+		}
 	}
 
 	// Convert to image.Image
 	rgba := image.NewRGBA(image.Rect(0, 0, width, height))
 
-	// Parse pixel data based on depth
-	depth := geom.Depth
-	if depth == 24 || depth == 32 {
-		// BGRA or BGR format (most common)
-		bytesPerPixel := int(depth) / 8
-		for y := 0; y < height; y++ {
-			for x := 0; x < width; x++ {
-				srcOffset := (y*width + x) * bytesPerPixel
-				if srcOffset+2 < len(img.Data) {
-					b := img.Data[srcOffset]
-					g := img.Data[srcOffset+1]
-					r := img.Data[srcOffset+2]
-					a := uint8(255)
-					if bytesPerPixel == 4 && srcOffset+3 < len(img.Data) {
-						a = img.Data[srcOffset+3]
-					}
+	// According to X11 documentation, ZPixmap format returns pixels with:
+	// - bits_per_pixel field indicating bits per pixel (usually 32 for 24-bit depth)
+	// - bytes_per_line indicating actual scanline width including padding
+	// - byte_order indicating LSBFirst or MSBFirst
 
-					dstOffset := rgba.PixOffset(x, y)
-					rgba.Pix[dstOffset+0] = r
-					rgba.Pix[dstOffset+1] = g
-					rgba.Pix[dstOffset+2] = b
-					rgba.Pix[dstOffset+3] = a
-				}
-			}
-		}
+	// The GetImageReply from xgb doesn't expose all XImage fields,
+	// so we need to infer the format from the data size and depth
+
+	depth := img.Depth // Use depth from GetImageReply, not geometry
+	dataSize := len(img.Data)
+
+	// Calculate expected bytes per pixel
+	// For depth 24, X usually uses 32 bits per pixel (4 bytes) with padding
+	var bitsPerPixel int
+	if depth == 24 {
+		bitsPerPixel = 32 // X11 typically uses 32 bpp for 24-bit depth
+	} else if depth == 32 {
+		bitsPerPixel = 32
 	} else {
 		return nil, fmt.Errorf("unsupported color depth: %d", depth)
+	}
+	bytesPerPixel := bitsPerPixel / 8
+
+	// Calculate bytes_per_line from actual data size
+	// XGetImage returns data with scanline padding aligned to bitmap_pad (typically 32 bits)
+	expectedMinSize := width * height * bytesPerPixel
+	bytesPerLine := dataSize / height
+
+	if dataSize < expectedMinSize {
+		return nil, fmt.Errorf("insufficient image data: got %d bytes, expected at least %d", dataSize, expectedMinSize)
+	}
+
+	// Parse pixel data
+	// X11 on little-endian systems typically uses BGRA byte order for 32bpp
+	for y := 0; y < height; y++ {
+		lineOffset := y * bytesPerLine
+		for x := 0; x < width; x++ {
+			srcOffset := lineOffset + x*bytesPerPixel
+			if srcOffset+3 < len(img.Data) {
+				// Try BGRA order (typical for X11 on little-endian)
+				b := img.Data[srcOffset]
+				g := img.Data[srcOffset+1]
+				r := img.Data[srcOffset+2]
+				a := uint8(255)
+				if bytesPerPixel == 4 {
+					a = img.Data[srcOffset+3]
+				}
+
+				dstOffset := rgba.PixOffset(x, y)
+				rgba.Pix[dstOffset+0] = r
+				rgba.Pix[dstOffset+1] = g
+				rgba.Pix[dstOffset+2] = b
+				rgba.Pix[dstOffset+3] = a
+			}
+		}
 	}
 
 	// Scale down if necessary
