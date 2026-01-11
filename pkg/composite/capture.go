@@ -7,6 +7,7 @@ import (
 	"github.com/jezek/xgb"
 	"github.com/jezek/xgb/composite"
 	"github.com/jezek/xgb/xproto"
+	"github.com/rs/zerolog/log"
 )
 
 // Capturer captures window thumbnails using XComposite extension.
@@ -49,17 +50,6 @@ func (c *Capturer) CaptureWindow(window xproto.Window, maxWidth, maxHeight int) 
 		return nil, fmt.Errorf("cannot capture root or invalid window")
 	}
 
-	// Check if window exists and is mapped
-	attrs, err := xproto.GetWindowAttributes(c.conn, window).Reply()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get window attributes: %w", err)
-	}
-
-	// Skip unmapped windows
-	if attrs.MapState != xproto.MapStateViewable {
-		return nil, fmt.Errorf("window is not viewable (map_state=%d)", attrs.MapState)
-	}
-
 	// Get window geometry
 	geom, err := xproto.GetGeometry(c.conn, xproto.Drawable(window)).Reply()
 	if err != nil {
@@ -99,6 +89,7 @@ func (c *Capturer) CaptureWindow(window xproto.Window, maxWidth, maxHeight int) 
 	var img *xproto.GetImageReply
 	if err := composite.NameWindowPixmapChecked(c.conn, window, pixmapID).Check(); err != nil {
 		// Composite failed - try direct capture from window
+		log.Debug().Err(err).Uint32("window", uint32(window)).Msg("XComposite unavailable, using direct capture")
 		img, err = xproto.GetImage(c.conn,
 			xproto.ImageFormatZPixmap,
 			xproto.Drawable(window), // Direct from window, not pixmap
@@ -162,19 +153,19 @@ func (c *Capturer) CaptureWindow(window xproto.Window, maxWidth, maxHeight int) 
 
 	// Parse pixel data
 	// X11 on little-endian systems typically uses BGRA byte order for 32bpp
+	// Note: We ignore alpha channel from X11 data and always set it to 255 (opaque)
+	// because most windows don't use real transparency and have garbage/zero in alpha channel
 	for y := 0; y < height; y++ {
 		lineOffset := y * bytesPerLine
 		for x := 0; x < width; x++ {
 			srcOffset := lineOffset + x*bytesPerPixel
-			if srcOffset+3 < len(img.Data) {
-				// Try BGRA order (typical for X11 on little-endian)
+			if srcOffset+2 < len(img.Data) {
+				// BGRA order (typical for X11 on little-endian)
 				b := img.Data[srcOffset]
 				g := img.Data[srcOffset+1]
 				r := img.Data[srcOffset+2]
+				// Always use opaque alpha - ignore X11 alpha channel
 				a := uint8(255)
-				if bytesPerPixel == 4 {
-					a = img.Data[srcOffset+3]
-				}
 
 				dstOffset := rgba.PixOffset(x, y)
 				rgba.Pix[dstOffset+0] = r

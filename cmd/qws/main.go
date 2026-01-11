@@ -116,6 +116,7 @@ func handleKeyPress(conn *x11.Connection, e xproto.KeyPressEvent, selector *ui.S
 	// Fill thumbnails from watcher cache
 	if watcher != nil {
 		for i := range windows {
+			// Try to get from cache first
 			if img, ok := watcher.GetThumbnail(xproto.Window(windows[i].ID)); ok {
 				windows[i].Preview = img
 			}

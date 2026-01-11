@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/almaz-uno/qws/pkg/composite"
@@ -37,7 +38,7 @@ func main() {
 		log.Fatalf("Failed to get home directory: %v", err)
 	}
 	thumbnailsDir := filepath.Join(homeDir, "twd", "thumbnails")
-	if err := os.MkdirAll(thumbnailsDir, 0755); err != nil {
+	if err := os.MkdirAll(thumbnailsDir, 0o755); err != nil {
 		log.Fatalf("Failed to create thumbnails directory: %v", err)
 	}
 
@@ -117,7 +118,7 @@ func main() {
 				mruList.Touch(activeWin)
 
 				// Capture and save thumbnail
-				captureThumbnail(capturer, activeWin, thumbnailsDir)
+				captureThumbnail(conn.Conn, capturer, activeWin, thumbnailsDir)
 			}
 		}
 	}
@@ -151,15 +152,24 @@ func getActiveWindow(conn *xgb.Conn, root xproto.Window, netActiveWindow xproto.
 }
 
 // captureThumbnail captures window image and saves it to disk
-func captureThumbnail(capturer *composite.Capturer, window xproto.Window, dir string) error {
+func captureThumbnail(conn *xgb.Conn, capturer *composite.Capturer, window xproto.Window, dir string) error {
 	// Capture window thumbnail
 	img, err := capturer.CaptureWindow(window, 512, 512)
 	if err != nil {
 		return fmt.Errorf("capture failed: %w", err)
 	}
 
+	// Get window title
+	title := getWindowTitle(conn, window)
+	if title == "" {
+		title = "untitled"
+	}
+
+	// Sanitize title for filename
+	sanitizedTitle := sanitizeFilename(title)
+
 	// Create output file
-	filename := filepath.Join(dir, fmt.Sprintf("%d.png", window))
+	filename := filepath.Join(dir, fmt.Sprintf("%d-%s.png", window, sanitizedTitle))
 	file, err := os.Create(filename)
 	if err != nil {
 		return fmt.Errorf("failed to create file: %w", err)
@@ -172,4 +182,52 @@ func captureThumbnail(capturer *composite.Capturer, window xproto.Window, dir st
 	}
 
 	return nil
+}
+
+// getWindowTitle gets the window title from _NET_WM_NAME or WM_NAME
+func getWindowTitle(conn *xgb.Conn, window xproto.Window) string {
+	// Try _NET_WM_NAME first (UTF8_STRING)
+	netWMName, err := xproto.InternAtom(conn, true, uint16(len("_NET_WM_NAME")), "_NET_WM_NAME").Reply()
+	if err == nil {
+		utf8String, err := xproto.InternAtom(conn, true, uint16(len("UTF8_STRING")), "UTF8_STRING").Reply()
+		if err == nil {
+			prop, err := xproto.GetProperty(conn, false, window, netWMName.Atom, utf8String.Atom, 0, 1024).Reply()
+			if err == nil && prop.ValueLen > 0 {
+				return string(prop.Value)
+			}
+		}
+	}
+
+	// Fallback to WM_NAME (STRING)
+	prop, err := xproto.GetProperty(conn, false, window, xproto.AtomWmName, xproto.AtomString, 0, 1024).Reply()
+	if err == nil && prop.ValueLen > 0 {
+		return string(prop.Value)
+	}
+
+	return ""
+}
+
+// sanitizeFilename removes characters that are invalid in filenames
+func sanitizeFilename(s string) string {
+	// Replace invalid characters with underscore
+	replacer := strings.NewReplacer(
+		"/", "_",
+		"\\", "_",
+		":", "_",
+		"*", "_",
+		"?", "_",
+		"\"", "_",
+		"<", "_",
+		">", "_",
+		"|", "_",
+	)
+	sanitized := replacer.Replace(s)
+
+	// Trim spaces and limit length
+	sanitized = strings.TrimSpace(sanitized)
+	if len(sanitized) > 100 {
+		sanitized = sanitized[:100]
+	}
+
+	return sanitized
 }
