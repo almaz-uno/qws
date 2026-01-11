@@ -31,3 +31,4 @@ go.work.sum
 .DS_Store
 Thumbs.db
 console/capture/capture
+console/snapshot/snapshot

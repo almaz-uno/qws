@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"sync"
+	"time"
 
 	"github.com/almaz-uno/qws/pkg/composite"
 	"github.com/almaz-uno/qws/pkg/mru"
@@ -92,7 +93,11 @@ func (fw *Watcher) HandlePropertyNotify(e xproto.PropertyNotifyEvent) {
 
 	// Capture thumbnail for the newly focused window
 	if fw.capturer != nil {
-		go fw.captureThumbnail(activeWin)
+		go func(win xproto.Window) {
+			// Wait for window to finish redrawing
+			time.Sleep(100 * time.Millisecond)
+			fw.captureThumbnail(win)
+		}(activeWin)
 	}
 }
 

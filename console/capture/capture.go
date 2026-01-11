@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/almaz-uno/qws/pkg/composite"
 	"github.com/almaz-uno/qws/pkg/mru"
@@ -117,8 +118,14 @@ func main() {
 				// Update MRU list
 				mruList.Touch(activeWin)
 
-				// Capture and save thumbnail
-				captureThumbnail(conn.Conn, capturer, activeWin, thumbnailsDir)
+				// Capture thumbnail in background after delay
+				go func(win xproto.Window) {
+					// Wait for window to finish redrawing
+					time.Sleep(100 * time.Millisecond)
+
+					// Capture and save thumbnail
+					captureThumbnail(conn.Conn, capturer, win, thumbnailsDir)
+				}(activeWin)
 			}
 		}
 	}
@@ -154,7 +161,7 @@ func getActiveWindow(conn *xgb.Conn, root xproto.Window, netActiveWindow xproto.
 // captureThumbnail captures window image and saves it to disk
 func captureThumbnail(conn *xgb.Conn, capturer *composite.Capturer, window xproto.Window, dir string) error {
 	// Capture window thumbnail
-	img, err := capturer.CaptureWindow(window, 512, 512)
+	img, err := capturer.CaptureWindow(window, 2512, 2512)
 	if err != nil {
 		return fmt.Errorf("capture failed: %w", err)
 	}

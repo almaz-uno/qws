@@ -6,14 +6,17 @@ import (
 
 	"github.com/jezek/xgb"
 	"github.com/jezek/xgb/composite"
+	"github.com/jezek/xgb/shm"
 	"github.com/jezek/xgb/xproto"
 	"github.com/rs/zerolog/log"
+	"golang.org/x/sys/unix"
 )
 
 // Capturer captures window thumbnails using XComposite extension.
 type Capturer struct {
-	conn *xgb.Conn
-	root xproto.Window
+	conn         *xgb.Conn
+	root         xproto.Window
+	shmAvailable bool
 }
 
 // NewCapturer creates a new thumbnail capturer.
@@ -36,9 +39,24 @@ func NewCapturer(conn *xgb.Conn, root xproto.Window) (*Capturer, error) {
 			version.MajorVersion, version.MinorVersion)
 	}
 
+	// Try to initialize SHM extension
+	shmAvailable := false
+	if err := shm.Init(conn); err == nil {
+		// Query SHM version to verify it's available
+		if _, err := shm.QueryVersion(conn).Reply(); err == nil {
+			shmAvailable = true
+			log.Debug().Msg("XSHM extension available")
+		} else {
+			log.Debug().Err(err).Msg("XSHM extension query failed")
+		}
+	} else {
+		log.Debug().Err(err).Msg("XSHM extension unavailable")
+	}
+
 	return &Capturer{
-		conn: conn,
-		root: root,
+		conn:         conn,
+		root:         root,
+		shmAvailable: shmAvailable,
 	}, nil
 }
 
@@ -78,42 +96,120 @@ func (c *Capturer) CaptureWindow(window xproto.Window, maxWidth, maxHeight int) 
 	scaledWidth := int(float64(width) * scale)
 	scaledHeight := int(float64(height) * scale)
 
-	// Try to get window pixmap via XComposite first
+	// Define capture strategy chain
+	type captureResult struct {
+		img     *xproto.GetImageReply
+		shmData []byte
+		shmid   int
+	}
+
+	type captureFunc func() (*captureResult, error)
+
+	// Build capture strategy chain
+	strategies := []struct {
+		name string
+		fn   captureFunc
+	}{}
+
+	// Strategy 1: Try XComposite pixmap with XSHM
 	pixmapID, err := xproto.NewPixmapId(c.conn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create pixmap ID: %w", err)
 	}
 
-	// Get window pixmap via XComposite
-	// Note: This requires the window to be redirected by a compositor
-	var img *xproto.GetImageReply
-	if err := composite.NameWindowPixmapChecked(c.conn, window, pixmapID).Check(); err != nil {
-		// Composite failed - try direct capture from window
-		log.Debug().Err(err).Uint32("window", uint32(window)).Msg("XComposite unavailable, using direct capture")
-		img, err = xproto.GetImage(c.conn,
-			xproto.ImageFormatZPixmap,
-			xproto.Drawable(window), // Direct from window, not pixmap
-			0, 0,
-			uint16(width), uint16(height),
-			^uint32(0), // all planes
-		).Reply()
-		if err != nil {
-			return nil, fmt.Errorf("failed to capture window directly: %w", err)
-		}
-	} else {
+	if err := composite.NameWindowPixmapChecked(c.conn, window, pixmapID).Check(); err == nil {
+		// XComposite available - add pixmap-based strategies
 		defer xproto.FreePixmap(c.conn, pixmapID)
 
-		// Get image data from pixmap
-		img, err = xproto.GetImage(c.conn,
+		if c.shmAvailable {
+			strategies = append(strategies, struct {
+				name string
+				fn   captureFunc
+			}{"XComposite+XSHM", func() (*captureResult, error) {
+				img, shmData, shmid, err := c.captureWithSHM(xproto.Drawable(pixmapID), width, height)
+				if err != nil {
+					return nil, err
+				}
+				return &captureResult{img, shmData, shmid}, nil
+			}})
+		}
+
+		strategies = append(strategies, struct {
+			name string
+			fn   captureFunc
+		}{"XComposite+XGetImage", func() (*captureResult, error) {
+			img, err := xproto.GetImage(c.conn,
+				xproto.ImageFormatZPixmap,
+				xproto.Drawable(pixmapID),
+				0, 0,
+				uint16(width), uint16(height),
+				^uint32(0),
+			).Reply()
+			if err != nil {
+				return nil, err
+			}
+			return &captureResult{img: img}, nil
+		}})
+	} else {
+		log.Debug().Err(err).Uint32("window", uint32(window)).Msg("XComposite unavailable")
+	}
+
+	// Strategy 2: Direct window capture with XSHM
+	if c.shmAvailable {
+		strategies = append(strategies, struct {
+			name string
+			fn   captureFunc
+		}{"Direct+XSHM", func() (*captureResult, error) {
+			img, shmData, shmid, err := c.captureWithSHM(xproto.Drawable(window), width, height)
+			if err != nil {
+				return nil, err
+			}
+			return &captureResult{img, shmData, shmid}, nil
+		}})
+	}
+
+	// Strategy 3: Direct window capture with XGetImage (always available)
+	strategies = append(strategies, struct {
+		name string
+		fn   captureFunc
+	}{"Direct+XGetImage", func() (*captureResult, error) {
+		img, err := xproto.GetImage(c.conn,
 			xproto.ImageFormatZPixmap,
-			xproto.Drawable(pixmapID),
+			xproto.Drawable(window),
 			0, 0,
 			uint16(width), uint16(height),
-			^uint32(0), // all planes
+			^uint32(0),
 		).Reply()
 		if err != nil {
-			return nil, fmt.Errorf("failed to get image data: %w", err)
+			return nil, err
 		}
+		return &captureResult{img: img}, nil
+	}})
+
+	// Execute strategy chain
+	var result *captureResult
+	for _, strategy := range strategies {
+		res, err := strategy.fn()
+		if err != nil {
+			log.Debug().Err(err).Str("strategy", strategy.name).Msg("Capture strategy failed")
+			continue
+		}
+		log.Debug().Str("strategy", strategy.name).Msg("Capture successful")
+		result = res
+		break
+	}
+
+	if result == nil {
+		return nil, fmt.Errorf("all capture strategies failed")
+	}
+
+	img := result.img
+	shmData := result.shmData
+	shmid := result.shmid
+
+	// Clean up shared memory if it was used
+	if shmData != nil {
+		defer c.cleanupSHM(shmData, shmid)
 	}
 
 	// Convert to image.Image
@@ -133,11 +229,10 @@ func (c *Capturer) CaptureWindow(window xproto.Window, maxWidth, maxHeight int) 
 	// Calculate expected bytes per pixel
 	// For depth 24, X usually uses 32 bits per pixel (4 bytes) with padding
 	var bitsPerPixel int
-	if depth == 24 {
+	switch depth {
+	case 24, 32:
 		bitsPerPixel = 32 // X11 typically uses 32 bpp for 24-bit depth
-	} else if depth == 32 {
-		bitsPerPixel = 32
-	} else {
+	default:
 		return nil, fmt.Errorf("unsupported color depth: %d", depth)
 	}
 	bytesPerPixel := bitsPerPixel / 8
@@ -193,6 +288,90 @@ func (c *Capturer) CaptureWindow(window xproto.Window, maxWidth, maxHeight int) 
 	}
 
 	return rgba, nil
+}
+
+// captureWithSHM captures image using X Shared Memory extension for better performance.
+// Returns GetImageReply, shared memory data slice, shmid, and error.
+func (c *Capturer) captureWithSHM(drawable xproto.Drawable, width, height int) (*xproto.GetImageReply, []byte, int, error) {
+	// Calculate required buffer size (assuming 32 bits per pixel)
+	bytesPerPixel := 4
+	imageSize := width * height * bytesPerPixel
+
+	// Create shared memory segment
+	shmid, err := unix.SysvShmGet(unix.IPC_PRIVATE, imageSize, unix.IPC_CREAT|0o600)
+	if err != nil {
+		return nil, nil, 0, fmt.Errorf("failed to create shared memory: %w", err)
+	}
+
+	// Attach shared memory
+	shmData, err := unix.SysvShmAttach(shmid, 0, 0)
+	if err != nil {
+		unix.SysvShmCtl(shmid, unix.IPC_RMID, nil)
+		return nil, nil, 0, fmt.Errorf("failed to attach shared memory: %w", err)
+	}
+
+	// Create SHM segment ID for X server
+	seg, err := shm.NewSegId(c.conn)
+	if err != nil {
+		unix.SysvShmDetach(shmData)
+		unix.SysvShmCtl(shmid, unix.IPC_RMID, nil)
+		return nil, nil, 0, fmt.Errorf("failed to create SHM segment ID: %w", err)
+	}
+
+	// Attach SHM segment to X server
+	if err := shm.AttachChecked(c.conn, seg, uint32(shmid), false).Check(); err != nil {
+		unix.SysvShmDetach(shmData)
+		unix.SysvShmCtl(shmid, unix.IPC_RMID, nil)
+		return nil, nil, 0, fmt.Errorf("failed to attach SHM to X server: %w", err)
+	}
+
+	// Ensure we detach from X server when done
+	defer shm.Detach(c.conn, seg)
+
+	// Get image using SHM
+	reply, err := shm.GetImage(c.conn,
+		drawable,
+		0, 0,
+		uint16(width), uint16(height),
+		^uint32(0), // all planes
+		xproto.ImageFormatZPixmap,
+		seg, 0, // offset 0 in shared memory
+	).Reply()
+	if err != nil {
+		unix.SysvShmDetach(shmData)
+		unix.SysvShmCtl(shmid, unix.IPC_RMID, nil)
+		return nil, nil, 0, fmt.Errorf("failed to get SHM image: %w", err)
+	}
+
+	// Wait for X server to complete the operation
+	c.conn.Sync()
+
+	// Create a GetImageReply-like structure with data from shared memory
+	// We need to copy the data because we'll detach the shared memory
+	dataCopy := make([]byte, imageSize)
+	copy(dataCopy, shmData[:imageSize])
+
+	img := &xproto.GetImageReply{
+		Depth:  reply.Depth,
+		Visual: reply.Visual,
+		Data:   dataCopy,
+	}
+
+	return img, shmData, shmid, nil
+}
+
+// cleanupSHM detaches and removes shared memory segment.
+func (c *Capturer) cleanupSHM(shmData []byte, shmid int) {
+	if shmData != nil {
+		// Detach shared memory
+		if err := unix.SysvShmDetach(shmData); err != nil {
+			log.Debug().Err(err).Msg("Failed to detach shared memory")
+		}
+	}
+	// Mark for removal (will be removed when all processes detach)
+	if _, err := unix.SysvShmCtl(shmid, unix.IPC_RMID, nil); err != nil {
+		log.Debug().Err(err).Msg("Failed to remove shared memory")
+	}
 }
 
 // IsCompositorRunning checks if a compositor is running.
