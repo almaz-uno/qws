@@ -21,16 +21,25 @@ type Selector struct {
 	animOffset    float64
 	animating     bool
 	resultChan    chan *x11.WindowInfo
+	altPressed    bool // Track if Alt is currently pressed
 }
 
 // NewSelector creates a new graphical window selector
 func NewSelector(conn *xgb.Conn, root xproto.Window, windows []x11.WindowInfo) *Selector {
+	// Get screen dimensions
+	setup := xproto.Setup(conn)
+	screen := setup.DefaultScreen(conn)
+
+	config := carousel.DefaultConfig()
+	config.Width = int(screen.WidthInPixels)
+	config.Height = int(screen.HeightInPixels)
+
 	return &Selector{
 		conn:          conn,
 		root:          root,
 		windows:       windows,
 		selectedIndex: 0,
-		config:        carousel.DefaultConfig(),
+		config:        config,
 		resultChan:    make(chan *x11.WindowInfo, 1),
 	}
 }
@@ -87,6 +96,25 @@ func (s *Selector) Show() (*x11.WindowInfo, error) {
 	).Reply()
 	defer xproto.UngrabKeyboard(s.conn, xproto.TimeCurrentTime)
 
+	// Check if Alt is currently pressed when showing the selector
+	// Mod1Mask is Alt modifier
+	s.altPressed = s.isModifierPressed(xproto.ModMask1) // Mod1 is Alt
+
+	// If Alt is not pressed (quick Alt+Tab), close immediately after rendering
+	if !s.altPressed {
+		// Initial render
+		s.render(thumbnails)
+		// Small delay to show the selection
+		s.conn.Sync()
+		// Return the selected window immediately
+		if s.selectedIndex >= 0 && s.selectedIndex < len(s.windows) {
+			s.window.Hide()
+			return &s.windows[s.selectedIndex], nil
+		}
+		s.window.Hide()
+		return nil, nil
+	}
+
 	// Initial render
 	s.render(thumbnails)
 
@@ -109,6 +137,11 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 
 		switch e := event.(type) {
 		case xproto.KeyPressEvent:
+			// Track Alt presses
+			if e.Detail == 64 || e.Detail == 108 {
+				s.altPressed = true
+			}
+
 			if s.handleKeyPressSimple(e, thumbnails) {
 				// ESC pressed
 				return nil
@@ -117,11 +150,15 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 		case xproto.KeyReleaseEvent:
 			// Check if Alt was released (keycode 64 = left Alt, 108 = right Alt)
 			if e.Detail == 64 || e.Detail == 108 {
-				// Return selected window when Alt is released
-				if s.selectedIndex >= 0 && s.selectedIndex < len(s.windows) {
-					return &s.windows[s.selectedIndex]
+				// Only react to Alt release if Alt was pressed while selector was open
+				if s.altPressed {
+					s.altPressed = false
+					// Return selected window when Alt is released
+					if s.selectedIndex >= 0 && s.selectedIndex < len(s.windows) {
+						return &s.windows[s.selectedIndex]
+					}
+					return nil
 				}
-				return nil
 			}
 
 		case xproto.ExposeEvent:
@@ -146,9 +183,29 @@ func (s *Selector) prepareThumbnails() []image.Image {
 	return thumbnails
 }
 
+// prepareWindowData prepares window data for rendering with icons and titles
+func (s *Selector) prepareWindowData() []carousel.WindowData {
+	data := make([]carousel.WindowData, len(s.windows))
+	for i, win := range s.windows {
+		thumbnail := win.Preview
+		if thumbnail == nil {
+			// Use placeholder if no thumbnail available
+			thumbnail = carousel.DrawPlaceholder(256, 256, win.Name)
+		}
+		data[i] = carousel.WindowData{
+			Thumbnail: thumbnail,
+			Icon:      win.Icon,
+			Title:     win.Name,
+		}
+	}
+	return data
+}
+
 // render renders the carousel with current state
 func (s *Selector) render(thumbnails []image.Image) {
-	img := carousel.Draw3DCarousel(thumbnails, s.selectedIndex, s.animOffset, s.config)
+	// Use new rendering with icons and titles
+	windowData := s.prepareWindowData()
+	img := carousel.Draw3DCarouselWithData(windowData, s.selectedIndex, s.animOffset, s.config)
 	s.window.DrawImage(img)
 }
 
@@ -156,12 +213,25 @@ func (s *Selector) render(thumbnails []image.Image) {
 // Returns true if ESC was pressed (cancel)
 func (s *Selector) handleKeyPressSimple(e xproto.KeyPressEvent, thumbnails []image.Image) bool {
 	keycode := e.Detail
+	state := e.State
+
+	// Check for Shift modifier (Shift = 0x1)
+	shiftPressed := (state & xproto.ModMaskShift) != 0
 
 	switch keycode {
 	case 9: // Escape
 		return true // Cancel
 
-	case 23, 114: // Tab or Right Arrow - next window
+	case 23: // Tab
+		if shiftPressed {
+			// Alt+Shift+Tab - previous window
+			s.selectPrevious(thumbnails)
+		} else {
+			// Alt+Tab - next window
+			s.selectNext(thumbnails)
+		}
+
+	case 114: // Right Arrow - next window
 		s.selectNext(thumbnails)
 
 	case 113: // Left Arrow - previous window
@@ -223,4 +293,13 @@ func (s *Selector) GetWindowID() xproto.Window {
 		return s.window.GetWindowID()
 	}
 	return 0
+}
+
+// isModifierPressed checks if a modifier key is currently pressed
+func (s *Selector) isModifierPressed(mask uint16) bool {
+	reply, err := xproto.QueryPointer(s.conn, s.root).Reply()
+	if err != nil {
+		return false
+	}
+	return (reply.Mask & mask) != 0
 }

@@ -1,8 +1,13 @@
 package x11
 
 import (
+	"bufio"
 	"fmt"
 	"image"
+	_ "image/png" // Register PNG decoder
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/jezek/xgb/xproto"
 )
@@ -88,6 +93,7 @@ func (c *Connection) GetWindowName(window xproto.Window) (string, error) {
 
 // GetWindowIcon retrieves window icon from _NET_WM_ICON property.
 // Returns nil if the icon is not available.
+// If multiple icons are available, returns the largest one or closest to 48x48.
 func (c *Connection) GetWindowIcon(window xproto.Window) (image.Image, error) {
 	// Get _NET_WM_ICON atom
 	netWmIcon, err := c.InternAtom("_NET_WM_ICON", true)
@@ -116,39 +122,86 @@ func (c *Connection) GetWindowIcon(window xproto.Window) (image.Image, error) {
 			uint32(prop.Value[i*4+3])<<24
 	}
 
+	// Find the best icon (closest to 48x48 or largest available)
+	bestIcon := findBestIcon(data)
+	if bestIcon == nil {
+		return nil, nil
+	}
+
+	return bestIcon, nil
+}
+
+// findBestIcon finds the best icon from _NET_WM_ICON data
+// Prefers icons close to 48x48, or the largest available
+func findBestIcon(data []uint32) image.Image {
 	if len(data) < 2 {
-		return nil, nil // invalid icon data
+		return nil
 	}
 
-	width := int(data[0])
-	height := int(data[1])
+	var bestImg image.Image
+	var bestScore int
+	targetSize := 48
+	pos := 0
 
-	if width <= 0 || height <= 0 || len(data) < 2+width*height {
-		return nil, nil // invalid dimensions or insufficient data
-	}
+	// Parse all icons in the data
+	for pos < len(data)-1 {
+		width := int(data[pos])
+		height := int(data[pos+1])
 
-	// Create RGBA image
-	img := image.NewRGBA(image.Rect(0, 0, width, height))
-
-	// Copy pixel data (ARGB format)
-	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
-			pixel := data[2+y*width+x]
-			a := uint8((pixel >> 24) & 0xFF)
-			r := uint8((pixel >> 16) & 0xFF)
-			g := uint8((pixel >> 8) & 0xFF)
-			b := uint8(pixel & 0xFF)
-
-			img.SetRGBA(x, y, image.NewRGBA(image.Rect(0, 0, 1, 1)).RGBAAt(0, 0))
-			offset := img.PixOffset(x, y)
-			img.Pix[offset+0] = r
-			img.Pix[offset+1] = g
-			img.Pix[offset+2] = b
-			img.Pix[offset+3] = a
+		if width <= 0 || height <= 0 || width > 512 || height > 512 {
+			break // Invalid dimensions
 		}
+
+		pixelsNeeded := width * height
+		if pos+2+pixelsNeeded > len(data) {
+			break // Not enough data
+		}
+
+		// Calculate score (prefer icons close to target size)
+		size := width
+		if height > width {
+			size = height
+		}
+		score := 0
+		if size >= targetSize {
+			// Prefer larger icons, but not too large
+			score = 1000 - (size - targetSize)
+		} else {
+			// Smaller icons get lower score
+			score = size * 10
+		}
+
+		// Create image if this is the best so far
+		if bestImg == nil || score > bestScore {
+			img := image.NewRGBA(image.Rect(0, 0, width, height))
+
+			// Copy pixel data (ARGB format with premultiplied alpha)
+			for y := 0; y < height; y++ {
+				for x := 0; x < width; x++ {
+					pixel := data[pos+2+y*width+x]
+					a := uint8((pixel >> 24) & 0xFF)
+					r := uint8((pixel >> 16) & 0xFF)
+					g := uint8((pixel >> 8) & 0xFF)
+					b := uint8(pixel & 0xFF)
+
+					// Store RGBA directly
+					offset := img.PixOffset(x, y)
+					img.Pix[offset+0] = r
+					img.Pix[offset+1] = g
+					img.Pix[offset+2] = b
+					img.Pix[offset+3] = a
+				}
+			}
+
+			bestImg = img
+			bestScore = score
+		}
+
+		// Move to next icon
+		pos += 2 + pixelsNeeded
 	}
 
-	return img, nil
+	return bestImg
 }
 
 // GetWindowList retrieves list of windows with names
@@ -168,6 +221,13 @@ func (c *Connection) GetWindowList() ([]WindowInfo, error) {
 
 		// Try to get window icon (ignore errors)
 		icon, _ := c.GetWindowIcon(win)
+
+		// If no icon from _NET_WM_ICON, try to find from WM_CLASS
+		if icon == nil {
+			if wmClass, err := c.GetWindowClass(win); err == nil {
+				icon = findIconByClass(wmClass)
+			}
+		}
 
 		result = append(result, WindowInfo{
 			ID:   win,
@@ -237,4 +297,213 @@ func (c *Connection) ActivateWindow(window xproto.Window) error {
 	// Send event to root window
 	mask := xproto.EventMaskSubstructureRedirect | xproto.EventMaskSubstructureNotify
 	return xproto.SendEventChecked(c.Conn, false, c.Root, uint32(mask), string(event.Bytes())).Check()
+}
+
+// GetWindowClass retrieves WM_CLASS property (instance, class)
+func (c *Connection) GetWindowClass(window xproto.Window) (string, error) {
+	prop, err := xproto.GetProperty(c.Conn, false, window,
+		xproto.AtomWmClass,
+		xproto.AtomString,
+		0,
+		^uint32(0),
+	).Reply()
+	if err != nil || prop.ValueLen == 0 {
+		return "", fmt.Errorf("no WM_CLASS property")
+	}
+
+	// WM_CLASS format: "instance\0class\0"
+	// We're interested in the class (second part)
+	parts := strings.Split(string(prop.Value), "\x00")
+	if len(parts) >= 2 {
+		return strings.ToLower(parts[1]), nil
+	}
+	if len(parts) >= 1 {
+		return strings.ToLower(parts[0]), nil
+	}
+	return "", fmt.Errorf("invalid WM_CLASS format")
+}
+
+// findIconByClass tries to find an icon file for the given WM_CLASS
+// Uses the same logic as i3qws: searches desktop files and icon directories
+func findIconByClass(wmClass string) image.Image {
+	if wmClass == "" {
+		return nil
+	}
+
+	// Get icon name from desktop files
+	iconName := findIconNameFromDesktop(wmClass)
+	if iconName == "" {
+		// Fallback to window class as icon name
+		iconName = strings.ToLower(wmClass)
+	}
+
+	// Search for icon file in standard directories
+	return findIconFile(iconName)
+}
+
+// findIconNameFromDesktop searches desktop files for icon name
+func findIconNameFromDesktop(windowClass string) string {
+	dirs := []string{
+		"/usr/share/applications",
+		"/usr/local/share/applications",
+	}
+
+	// Add user local directory
+	if home := os.Getenv("HOME"); home != "" {
+		dirs = append(dirs, filepath.Join(home, ".local/share/applications"))
+	}
+
+	// Add XDG_DATA_DIRS
+	if xdgDataDirs := os.Getenv("XDG_DATA_DIRS"); xdgDataDirs != "" {
+		for _, dir := range strings.Split(xdgDataDirs, ":") {
+			if dir != "" {
+				dirs = append(dirs, filepath.Join(dir, "applications"))
+			}
+		}
+	}
+
+	windowClassLower := strings.ToLower(windowClass)
+
+	for _, dir := range dirs {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".desktop") {
+				continue
+			}
+
+			desktopFile := filepath.Join(dir, entry.Name())
+			if iconName := parseDesktopFileForIcon(desktopFile, windowClass, windowClassLower); iconName != "" {
+				return iconName
+			}
+		}
+	}
+
+	return ""
+}
+
+// parseDesktopFileForIcon parses a desktop file and returns icon name if matches
+func parseDesktopFileForIcon(path, windowClass, windowClassLower string) string {
+	file, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+
+	var icon, startupWMClass, name string
+	inDesktopEntry := false
+	scanner := bufio.NewScanner(file)
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+
+		// Skip comments and empty lines
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		// Check for [Desktop Entry] section
+		if strings.HasPrefix(line, "[") {
+			inDesktopEntry = line == "[Desktop Entry]"
+			continue
+		}
+
+		if !inDesktopEntry {
+			continue
+		}
+
+		// Parse key=value pairs
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
+
+		switch key {
+		case "Icon":
+			icon = value
+		case "StartupWMClass":
+			startupWMClass = value
+		case "Name":
+			name = value
+		}
+
+		// Early exit if we have all we need
+		if icon != "" && startupWMClass != "" && name != "" {
+			break
+		}
+	}
+
+	if icon == "" {
+		return ""
+	}
+
+	// Match by StartupWMClass first
+	if startupWMClass != "" && strings.EqualFold(startupWMClass, windowClass) {
+		return icon
+	}
+
+	// Match by Name
+	if name != "" && strings.EqualFold(name, windowClass) {
+		return icon
+	}
+
+	// Match by desktop filename (without .desktop)
+	baseName := strings.TrimSuffix(filepath.Base(path), ".desktop")
+	if strings.EqualFold(baseName, windowClass) || strings.Contains(strings.ToLower(baseName), windowClassLower) {
+		return icon
+	}
+
+	return ""
+}
+
+// findIconFile searches for icon file in standard icon directories
+func findIconFile(iconName string) image.Image {
+	// Icon directories in order of preference
+	iconDirs := []string{
+		"/usr/share/icons/hicolor/128x128/apps",
+		"/usr/share/icons/hicolor/64x64/apps",
+		"/usr/share/icons/hicolor/48x48/apps",
+		"/usr/share/pixmaps",
+	}
+
+	// Add user local icons
+	if home := os.Getenv("HOME"); home != "" {
+		iconDirs = append([]string{
+			filepath.Join(home, ".local/share/icons/hicolor/128x128/apps"),
+			filepath.Join(home, ".local/share/icons/hicolor/64x64/apps"),
+			filepath.Join(home, ".local/share/icons/hicolor/48x48/apps"),
+		}, iconDirs...)
+	}
+
+	// Try PNG first, then SVG
+	extensions := []string{".png", ".svg", ".xpm"}
+
+	for _, dir := range iconDirs {
+		for _, ext := range extensions {
+			iconPath := filepath.Join(dir, iconName+ext)
+			if img, err := loadImageFile(iconPath); err == nil {
+				return img
+			}
+		}
+	}
+
+	return nil
+}
+
+// loadImageFile loads an image from a file path
+func loadImageFile(path string) (image.Image, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	img, _, err := image.Decode(file)
+	return img, err
 }

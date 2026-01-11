@@ -37,27 +37,42 @@ func NewWindow(conn *xgb.Conn, root xproto.Window, width, height int) (*Window, 
 	setup := xproto.Setup(conn)
 	screen := setup.DefaultScreen(conn)
 
+	// Try to use ARGB visual for transparency
+	visualID, depth := findARGBVisual(conn)
+	if visualID == 0 {
+		// Fallback to default visual
+		visualID = screen.RootVisual
+		depth = screen.RootDepth
+	}
+	w.depth = depth
+
+	// Create colormap for ARGB visual
+	colormap, _ := xproto.NewColormapId(conn)
+	xproto.CreateColormap(conn, xproto.ColormapAllocNone, colormap, root, visualID)
+
 	// Create window
-	mask := uint32(xproto.CwBackPixel | xproto.CwOverrideRedirect | xproto.CwEventMask)
+	mask := uint32(xproto.CwBackPixel | xproto.CwBorderPixel | xproto.CwOverrideRedirect | xproto.CwEventMask | xproto.CwColormap)
 	values := []uint32{
-		screen.BlackPixel,
+		0, // Background pixel (transparent)
+		0, // Border pixel
 		1, // Override redirect (no WM decorations)
 		xproto.EventMaskKeyPress | xproto.EventMaskKeyRelease | xproto.EventMaskExposure,
+		uint32(colormap),
 	}
 
 	err := xproto.CreateWindowChecked(
 		conn,
-		screen.RootDepth,
+		depth,
 		w.window,
 		root,
-		// Center window on screen
-		int16((screen.WidthInPixels-w.width)/2),
-		int16((screen.HeightInPixels-w.height)/2),
+		// Fullscreen position
+		0,
+		0,
 		w.width,
 		w.height,
 		0, // Border width
 		xproto.WindowClassInputOutput,
-		screen.RootVisual,
+		visualID,
 		mask,
 		values,
 	).Check()
@@ -67,7 +82,6 @@ func NewWindow(conn *xgb.Conn, root xproto.Window, width, height int) (*Window, 
 
 	// Create pixmap for double buffering with same depth as window
 	w.pixmap, _ = xproto.NewPixmapId(conn)
-	w.depth = screen.RootDepth
 	err = xproto.CreatePixmapChecked(
 		conn,
 		w.depth,
@@ -358,4 +372,23 @@ func (w *Window) SetGrabKeys() error {
 
 	w.conn.Sync()
 	return nil
+}
+
+// findARGBVisual finds a 32-bit ARGB visual for transparency support
+func findARGBVisual(conn *xgb.Conn) (xproto.Visualid, byte) {
+	setup := xproto.Setup(conn)
+	screen := setup.DefaultScreen(conn)
+
+	// Look for a 32-bit depth visual
+	for _, depth := range screen.AllowedDepths {
+		if depth.Depth == 32 {
+			// Return first visual with 32-bit depth
+			if len(depth.Visuals) > 0 {
+				return depth.Visuals[0].VisualId, 32
+			}
+		}
+	}
+
+	// No ARGB visual found
+	return 0, 0
 }

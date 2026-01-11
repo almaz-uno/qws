@@ -8,16 +8,23 @@ import (
 	"github.com/fogleman/gg"
 )
 
+// WindowData contains window information for rendering
+type WindowData struct {
+	Thumbnail image.Image
+	Icon      image.Image
+	Title     string
+}
+
 // Config holds configuration for carousel rendering
 type Config struct {
-	Width         int     // Window width
-	Height        int     // Window height
-	ThumbWidth    int     // Thumbnail width
-	ThumbHeight   int     // Thumbnail height
-	Spacing       float64 // Spacing between thumbnails
+	Width             int     // Window width
+	Height            int     // Window height
+	ThumbWidth        int     // Thumbnail width
+	ThumbHeight       int     // Thumbnail height
+	Spacing           float64 // Spacing between thumbnails
 	PerspectiveFactor float64 // Perspective distortion factor (0.0-1.0)
-	ShadowOffset  float64 // Shadow offset
-	ShadowBlur    float64 // Shadow blur radius
+	ShadowOffset      float64 // Shadow offset
+	ShadowBlur        float64 // Shadow blur radius
 }
 
 // DefaultConfig returns default carousel configuration
@@ -41,8 +48,8 @@ func DefaultConfig() Config {
 func Draw3DCarousel(thumbnails []image.Image, selected int, animOffset float64, cfg Config) *image.RGBA {
 	dc := gg.NewContext(cfg.Width, cfg.Height)
 
-	// Background - semi-transparent dark gray
-	dc.SetRGBA(0.1, 0.1, 0.1, 0.95)
+	// Background - fully transparent
+	dc.SetRGBA(0, 0, 0, 0)
 	dc.Clear()
 
 	centerX := float64(cfg.Width) / 2
@@ -53,7 +60,30 @@ func Draw3DCarousel(thumbnails []image.Image, selected int, animOffset float64, 
 		drawThumbnail(dc, thumbnails[i], i, selected, animOffset, centerX, centerY, cfg)
 	}
 
-	// Get the RGBA image directly
+	return getImageRGBA(dc)
+}
+
+// Draw3DCarouselWithData renders a 2.5D carousel with icons and titles
+func Draw3DCarouselWithData(windowData []WindowData, selected int, animOffset float64, cfg Config) *image.RGBA {
+	dc := gg.NewContext(cfg.Width, cfg.Height)
+
+	// Background - fully transparent
+	dc.SetRGBA(0, 0, 0, 0)
+	dc.Clear()
+
+	centerX := float64(cfg.Width) / 2
+	centerY := float64(cfg.Height) / 2
+
+	// Draw each window with icon, title, and thumbnail
+	for i := range windowData {
+		drawWindowWithData(dc, &windowData[i], i, selected, animOffset, centerX, centerY, cfg)
+	}
+
+	return getImageRGBA(dc)
+}
+
+// getImageRGBA converts gg.Context image to RGBA
+func getImageRGBA(dc *gg.Context) *image.RGBA {
 	img := dc.Image()
 	rgba, ok := img.(*image.RGBA)
 	if !ok {
@@ -66,7 +96,6 @@ func Draw3DCarousel(thumbnails []image.Image, selected int, animOffset float64, 
 			}
 		}
 	}
-
 	return rgba
 }
 
@@ -173,6 +202,142 @@ func drawShadow(dc *gg.Context, x, y, w, h, rotation, scale float64, cfg Config)
 	dc.Pop()
 }
 
+// drawWindowWithData draws a window with icon, title, and thumbnail
+func drawWindowWithData(dc *gg.Context, data *WindowData, index, selected int, animOffset, centerX, centerY float64, cfg Config) {
+	if data == nil || data.Thumbnail == nil {
+		return
+	}
+
+	// Position relative to center (with animation offset)
+	offset := float64(index-selected) - animOffset
+
+	// Don't draw items too far from center (performance optimization)
+	if math.Abs(offset) > 5 {
+		return
+	}
+
+	// Calculate transformation parameters
+	var scale, x, y, alpha, rotation float64
+
+	if math.Abs(offset) < 0.01 {
+		// Central window — full size, no distortion
+		scale = 1.0
+		x = centerX
+		y = centerY
+		alpha = 1.0
+		rotation = 0
+	} else {
+		// Side windows — reduced with perspective
+		scale = cfg.PerspectiveFactor + (1.0-cfg.PerspectiveFactor)/(1.0+math.Abs(offset)*0.5)
+		x = centerX + offset*cfg.Spacing*scale
+		arcHeight := math.Abs(offset) * 10
+		y = centerY + arcHeight
+		alpha = 0.5 + 0.5*scale
+		rotation = 0
+	}
+
+	// Calculate thumbnail dimensions
+	thumbBounds := data.Thumbnail.Bounds()
+	thumbW := float64(thumbBounds.Dx())
+	thumbH := float64(thumbBounds.Dy())
+
+	scaleW := float64(cfg.ThumbWidth) / thumbW
+	scaleH := float64(cfg.ThumbHeight) / thumbH
+	scaleMin := math.Min(scaleW, scaleH)
+
+	finalW := thumbW * scaleMin * scale
+	finalH := thumbH * scaleMin * scale
+
+	// Icon size and position
+	iconSize := 48.0 * scale
+	iconY := y - finalH/2 - 80*scale // Above thumbnail
+
+	// Title position
+	titleY := y - finalH/2 - 30*scale // Between icon and thumbnail
+
+	dc.Push()
+
+	// Draw shadow
+	if math.Abs(offset) < 3 {
+		drawShadow(dc, x, y, finalW, finalH, rotation, scale, cfg)
+	}
+
+	// Draw icon (if available)
+	if data.Icon != nil {
+		iconBounds := data.Icon.Bounds()
+		iconW := float64(iconBounds.Dx())
+		iconH := float64(iconBounds.Dy())
+		iconScale := iconSize / math.Max(iconW, iconH)
+
+		dc.Push()
+		dc.Translate(x, iconY)
+		dc.Scale(iconScale, iconScale)
+		dc.Translate(-iconW/2, -iconH/2)
+		dc.SetRGBA(1, 1, 1, alpha)
+		dc.DrawImage(data.Icon, 0, 0)
+		dc.Pop()
+	}
+
+	// Draw title (if available)
+	if data.Title != "" {
+		fontSize := 16.0 * scale
+		if err := dc.LoadFontFace("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", fontSize); err == nil {
+			title := data.Title
+			// Truncate long titles by runes (Unicode characters), not bytes
+			maxLen := int(30 / scale)
+			if maxLen < 10 {
+				maxLen = 10
+			}
+			runes := []rune(title)
+			if len(runes) > maxLen {
+				title = string(runes[:maxLen]) + "..."
+			}
+
+			// Measure text to draw background
+			textWidth, textHeight := dc.MeasureString(title)
+			padding := 8.0 * scale
+			borderRadius := 6.0 * scale
+
+			// Draw semi-transparent black rounded rectangle background
+			dc.SetRGBA(0, 0, 0, 0.7*alpha)
+			dc.DrawRoundedRectangle(
+				x-textWidth/2-padding,
+				titleY-textHeight/2-padding,
+				textWidth+padding*2,
+				textHeight+padding*2,
+				borderRadius,
+			)
+			dc.Fill()
+
+			// Draw title text
+			dc.SetRGBA(1, 1, 1, alpha)
+			dc.DrawStringAnchored(title, x, titleY, 0.5, 0.5)
+		}
+	}
+
+	// Draw thumbnail
+	dc.Translate(x, y)
+	dc.Rotate(rotation)
+	dc.Scale(scaleMin*scale, scaleMin*scale)
+	dc.Translate(-thumbW/2, -thumbH/2)
+
+	dc.SetRGBA(1, 1, 1, alpha)
+	dc.DrawImage(data.Thumbnail, 0, 0)
+
+	// Draw border around thumbnail
+	dc.SetRGBA(1, 1, 1, alpha*0.8)
+	dc.SetLineWidth(2.0 / (scaleMin * scale))
+	dc.DrawRectangle(0, 0, thumbW, thumbH)
+	dc.Stroke()
+
+	dc.Pop()
+
+	// Highlight selected item
+	if math.Abs(offset) < 0.01 {
+		drawSelectionIndicator(dc, x, y, finalW, finalH, cfg)
+	}
+}
+
 // drawSelectionIndicator draws a highlight around selected thumbnail
 func drawSelectionIndicator(dc *gg.Context, x, y, w, h float64, cfg Config) {
 	dc.Push()
@@ -225,9 +390,10 @@ func DrawPlaceholder(width, height int, title string) image.Image {
 	if title != "" {
 		dc.SetRGBA(1, 1, 1, 0.9)
 		if err := dc.LoadFontFace("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 14); err == nil {
-			// Truncate long titles
-			if len(title) > 20 {
-				title = title[:20] + "..."
+			// Truncate long titles by runes (Unicode characters), not bytes
+			runes := []rune(title)
+			if len(runes) > 20 {
+				title = string(runes[:20]) + "..."
 			}
 			dc.DrawStringAnchored(title, centerX, centerY+iconSize/2+20, 0.5, 0.5)
 		}
