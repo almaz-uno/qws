@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"os/signal"
 	"syscall"
@@ -20,12 +21,27 @@ func main() {
 	// Setup zerolog with console writer
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 
+	// Create root context with signal handling
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	// Connect to X server
 	conn, err := x11.Connect()
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to connect to X11")
 	}
-	defer conn.Close()
+
+	// Handle signals for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	// Start goroutine to handle signals
+	go func() {
+		<-sigChan
+		log.Info().Msg("Received signal, shutting down...")
+		cancel()
+		conn.Close() // Close connection to unblock WaitForEvent
+	}()
 
 	// Create MRU list
 	mruList := mru.NewMRUList()
@@ -37,9 +53,12 @@ func main() {
 	}
 
 	// Create Focus Watcher to track active windows
-	watcher, err := focus.NewWatcher(conn.Conn, conn.Root, mruList, capturer)
+	watcher, err := focus.NewWatcher(ctx, conn.Conn, conn.Root, mruList, capturer)
 	if err != nil {
 		log.Warn().Err(err).Msg("Focus watcher unavailable, MRU order will be disabled")
+	}
+	if watcher != nil {
+		defer watcher.Stop()
 	}
 
 	// Create key grabber
@@ -50,16 +69,6 @@ func main() {
 		log.Fatal().Err(err).Msg("Failed to grab Alt+Tab")
 	}
 	defer grabber.UngrabAll()
-
-	// Handle signals for graceful shutdown
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-
-	// Start goroutine to handle signals
-	go func() {
-		<-sigChan
-		os.Exit(0)
-	}()
 
 	// Create selector once to preserve state between calls
 	var selector *ui.Selector
@@ -72,13 +81,15 @@ func main() {
 	// Main event loop
 	for {
 		event, err := conn.Conn.WaitForEvent()
-		if err != nil {
-			continue
+		if event == nil {
+			// Connection closed or error - exit gracefully
+			log.Debug().Err(err).Msg("Event loop terminated")
+			return
 		}
 
 		switch e := event.(type) {
 		case xproto.KeyPressEvent:
-			selector = handleKeyPress(conn, e, selector, mruList, watcher)
+			selector = handleKeyPress(ctx, conn, e, selector, mruList, watcher)
 		case xproto.PropertyNotifyEvent:
 			// Handle focus changes via PropertyNotify
 			if watcher != nil {
@@ -95,7 +106,7 @@ func main() {
 
 // handleKeyPress handles Alt+Tab key press
 // Returns updated selector to preserve state
-func handleKeyPress(conn *x11.Connection, e xproto.KeyPressEvent, selector *ui.Selector,
+func handleKeyPress(ctx context.Context, conn *x11.Connection, e xproto.KeyPressEvent, selector *ui.Selector,
 	mruList *mru.MRUList, watcher *focus.Watcher) *ui.Selector {
 	// Get window list
 	windows, err := conn.GetWindowList()
@@ -125,7 +136,7 @@ func handleKeyPress(conn *x11.Connection, e xproto.KeyPressEvent, selector *ui.S
 
 	// Create or reuse selector
 	if selector == nil {
-		selector = ui.NewSelector(conn.Conn, conn.Root, windows)
+		selector = ui.NewSelector(ctx, conn.Conn, conn.Root, windows)
 	} else {
 		// Update window list, preserving position
 		selector.UpdateWindows(windows)

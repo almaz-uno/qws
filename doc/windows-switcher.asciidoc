@@ -424,7 +424,8 @@ Tracks active window changes via two methods:
 
 [source,go]
 ----
-watcher := focus.NewWatcher(conn, root, mruList)
+ctx := context.Background()
+watcher := focus.NewWatcher(ctx, conn, root, mruList, capturer)
 
 // In event loop:
 case xproto.PropertyNotifyEvent:
@@ -500,9 +501,10 @@ sorted := x11.SortWindowsByMRU(windows, mruOrder)
 **Initialization:**
 [source,go]
 ----
+ctx := context.Background()
 mruList := mru.NewMRUList()
-watcher, _ := focus.NewWatcher(conn, root, mruList)
 capturer, _ := composite.NewCapturer(conn, root)
+watcher, _ := focus.NewWatcher(ctx, conn, root, mruList, capturer)
 ----
 
 **Event Loop:**

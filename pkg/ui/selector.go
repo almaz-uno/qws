@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"image"
 
@@ -12,6 +13,7 @@ import (
 
 // Selector provides a graphical carousel interface for window selection
 type Selector struct {
+	ctx           context.Context
 	conn          *xgb.Conn
 	root          xproto.Window
 	windows       []x11.WindowInfo
@@ -25,7 +27,7 @@ type Selector struct {
 }
 
 // NewSelector creates a new graphical window selector
-func NewSelector(conn *xgb.Conn, root xproto.Window, windows []x11.WindowInfo) *Selector {
+func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, windows []x11.WindowInfo) *Selector {
 	// Get screen dimensions
 	setup := xproto.Setup(conn)
 	screen := setup.DefaultScreen(conn)
@@ -35,6 +37,7 @@ func NewSelector(conn *xgb.Conn, root xproto.Window, windows []x11.WindowInfo) *
 	config.Height = int(screen.HeightInPixels)
 
 	return &Selector{
+		ctx:           ctx,
 		conn:          conn,
 		root:          root,
 		windows:       windows,
@@ -130,9 +133,10 @@ func (s *Selector) Show() (*x11.WindowInfo, error) {
 // handleEventsSync processes keyboard events synchronously
 func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 	for {
-		event, err := s.conn.WaitForEvent()
-		if err != nil {
-			continue
+		event, _ := s.conn.WaitForEvent()
+		if event == nil {
+			// Connection closed or context cancelled
+			return nil
 		}
 
 		switch e := event.(type) {

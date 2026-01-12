@@ -1,6 +1,7 @@
 package focus
 
 import (
+	"context"
 	"fmt"
 	"image"
 	"sync"
@@ -22,11 +23,17 @@ type Watcher struct {
 	capturer        *composite.Capturer
 	thumbnails      map[xproto.Window]image.Image
 	thumbMutex      sync.RWMutex
+
+	// Background snapshot capture
+	snapshotInterval time.Duration
+	snapshotCtx      context.Context
+	snapshotCancel   context.CancelFunc
+	snapshotDone     sync.WaitGroup
 }
 
 // NewWatcher creates a new focus watcher.
 // It subscribes to PropertyNotify events on the root window to track _NET_ACTIVE_WINDOW changes.
-func NewWatcher(conn *xgb.Conn, root xproto.Window, mru *mru.MRUList, capturer *composite.Capturer) (*Watcher, error) {
+func NewWatcher(ctx context.Context, conn *xgb.Conn, root xproto.Window, mru *mru.MRUList, capturer *composite.Capturer) (*Watcher, error) {
 	// Get _NET_ACTIVE_WINDOW atom
 	atomReply, err := xproto.InternAtom(conn, false,
 		uint16(len("_NET_ACTIVE_WINDOW")),
@@ -35,13 +42,18 @@ func NewWatcher(conn *xgb.Conn, root xproto.Window, mru *mru.MRUList, capturer *
 		return nil, fmt.Errorf("failed to get _NET_ACTIVE_WINDOW atom: %w", err)
 	}
 
+	ctx, cancel := context.WithCancel(ctx)
+
 	fw := &Watcher{
-		conn:            conn,
-		root:            root,
-		netActiveWindow: atomReply.Atom,
-		mru:             mru,
-		capturer:        capturer,
-		thumbnails:      make(map[xproto.Window]image.Image),
+		conn:             conn,
+		root:             root,
+		netActiveWindow:  atomReply.Atom,
+		mru:              mru,
+		capturer:         capturer,
+		thumbnails:       make(map[xproto.Window]image.Image),
+		snapshotInterval: 10 * time.Second,
+		snapshotCtx:      ctx,
+		snapshotCancel:   cancel,
 	}
 
 	// Subscribe to PropertyChange events on root window
@@ -59,6 +71,9 @@ func NewWatcher(conn *xgb.Conn, root xproto.Window, mru *mru.MRUList, capturer *
 	if activeWin, err := fw.GetActiveWindow(); err == nil && activeWin != 0 {
 		mru.Touch(activeWin)
 	}
+
+	// Start background snapshot goroutine
+	fw.startSnapshotRoutine()
 
 	return fw, nil
 }
@@ -188,4 +203,40 @@ func (fw *Watcher) ClearThumbnail(window xproto.Window) {
 	fw.thumbMutex.Lock()
 	defer fw.thumbMutex.Unlock()
 	delete(fw.thumbnails, window)
+}
+
+// SetSnapshotInterval sets the interval for background snapshot capture
+func (fw *Watcher) SetSnapshotInterval(interval time.Duration) {
+	fw.snapshotInterval = interval
+}
+
+// startSnapshotRoutine starts background goroutine that captures snapshots periodically
+func (fw *Watcher) startSnapshotRoutine() {
+	fw.snapshotDone.Go(func() {
+		ticker := time.NewTicker(fw.snapshotInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				// Get current active window
+				activeWin, err := fw.GetActiveWindow()
+				if err != nil || activeWin == 0 || activeWin == fw.root || activeWin == fw.switcherWindow {
+					continue
+				}
+
+				// Capture thumbnail for the active window
+				fw.captureThumbnail(activeWin)
+
+			case <-fw.snapshotCtx.Done():
+				return
+			}
+		}
+	})
+}
+
+// Stop stops the background snapshot routine and waits for it to finish
+func (fw *Watcher) Stop() {
+	fw.snapshotCancel()
+	fw.snapshotDone.Wait()
 }
