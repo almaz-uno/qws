@@ -4,18 +4,6 @@ A carousel-style window switcher for X11.
 
 Inspired by [alttab](https://github.com/sagb/alttab) — the X11 window switcher designed for minimalistic window managers.
 
-## Status: Phase 3 (Carousel UI) ✅
-
-Phase 1 (MVP) and Phase 2 (MRU & Thumbnails) are complete. Phase 3 with carousel UI is now implemented:
-- ✅ X11 connection
-- ✅ Fetching window list via EWMH
-- ✅ Alt+Tab keygrab
-- ✅ MRU (Most Recently Used) window ordering
-- ✅ Window thumbnails via XComposite
-- ✅ 2.5D carousel rendering with perspective effect
-- ✅ Smooth transition animations
-- ✅ Graphical window selection interface
-
 ## Build
 
 ```bash
@@ -35,17 +23,16 @@ After launch:
 4. Press `Enter` to activate the selected window
 5. Press `ESC` to cancel
 
-The carousel displays window thumbnails in a 3D perspective view with smooth animations.
+The carousel displays window thumbnails in a 3D perspective view.
 
 ## Features
 
 - **2.5D Carousel UI**: Cover Flow-style window display with perspective effect
-- **Smooth Animations**: 150ms transitions between windows with 15-frame animations
 - **MRU Ordering**: Windows sorted by Most Recently Used order
 - **Thumbnail Previews**: Live window thumbnails via XComposite
 - **Smart Placeholders**: Fallback icons when thumbnails unavailable
 - **Keyboard Navigation**: Arrow keys, Tab, Enter, and Escape support
-- **Mouse Support**: Hover to highlight windows, click to select
+- **Mouse Support**: Hover to highlight windows (orange glow), click to select
 - **Always On Top**: Overlay window with no WM decorations
 
 ## Screenshots
@@ -54,7 +41,7 @@ The carousel shows windows in a 3D perspective:
 - Center window is displayed at full size
 - Side windows are scaled down and slightly rotated
 - Blue glow highlights the selected window
-- Orange glow highlights hovered windows (mouse support)
+- Orange glow highlights hovered windows
 - Shadows provide depth perception
 
 ## Requirements
