@@ -13,6 +13,7 @@ type WindowData struct {
 	Thumbnail image.Image
 	Icon      image.Image
 	Title     string
+	Workspace string
 }
 
 // Config holds configuration for carousel rendering
@@ -255,6 +256,9 @@ func drawWindowWithData(dc *gg.Context, data *WindowData, index, selected, hover
 	// Title position
 	titleY := y - finalH/2 - 30*scale // Between icon and thumbnail
 
+	// Workspace position
+	workspaceY := y + finalH/2 + 30*scale // Below thumbnail
+
 	dc.Push()
 
 	// Draw shadow
@@ -312,6 +316,43 @@ func drawWindowWithData(dc *gg.Context, data *WindowData, index, selected, hover
 			// Draw title text
 			dc.SetRGBA(1, 1, 1, alpha)
 			dc.DrawStringAnchored(title, x, titleY, 0.5, 0.5)
+		}
+	}
+
+	// Draw workspace name (if available)
+	if data.Workspace != "" {
+		fontSize := 14.0 * scale
+		if err := dc.LoadFontFace("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", fontSize); err == nil {
+			workspace := data.Workspace
+			// Truncate long workspace names
+			maxLen := int(20 / scale)
+			if maxLen < 8 {
+				maxLen = 8
+			}
+			runes := []rune(workspace)
+			if len(runes) > maxLen {
+				workspace = string(runes[:maxLen]) + "..."
+			}
+
+			// Measure text to draw background
+			textWidth, textHeight := dc.MeasureString(workspace)
+			padding := 6.0 * scale
+			borderRadius := 4.0 * scale
+
+			// Draw semi-transparent dark blue rounded rectangle background
+			dc.SetRGBA(0.1, 0.2, 0.4, 0.6*alpha)
+			dc.DrawRoundedRectangle(
+				x-textWidth/2-padding,
+				workspaceY-textHeight/2-padding,
+				textWidth+padding*2,
+				textHeight+padding*2,
+				borderRadius,
+			)
+			dc.Fill()
+
+			// Draw workspace text
+			dc.SetRGBA(0.8, 0.9, 1.0, alpha)
+			dc.DrawStringAnchored(workspace, x, workspaceY, 0.5, 0.5)
 		}
 	}
 

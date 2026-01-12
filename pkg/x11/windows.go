@@ -14,10 +14,11 @@ import (
 
 // WindowInfo contains information about a window
 type WindowInfo struct {
-	ID      xproto.Window
-	Name    string
-	Icon    image.Image // Window icon from _NET_WM_ICON
-	Preview image.Image // Window thumbnail (to be implemented)
+	ID        xproto.Window
+	Name      string
+	Icon      image.Image // Window icon from _NET_WM_ICON
+	Preview   image.Image // Window thumbnail (to be implemented)
+	Workspace string      // Workspace name
 }
 
 // GetClientList retrieves the list of client windows via EWMH _NET_CLIENT_LIST
@@ -229,10 +230,14 @@ func (c *Connection) GetWindowList() ([]WindowInfo, error) {
 			}
 		}
 
+		// Get workspace name
+		workspace := c.GetWindowWorkspaceName(win)
+
 		result = append(result, WindowInfo{
-			ID:   win,
-			Name: name,
-			Icon: icon,
+			ID:        win,
+			Name:      name,
+			Icon:      icon,
+			Workspace: workspace,
 		})
 	}
 
@@ -321,6 +326,87 @@ func (c *Connection) GetWindowClass(window xproto.Window) (string, error) {
 		return strings.ToLower(parts[0]), nil
 	}
 	return "", fmt.Errorf("invalid WM_CLASS format")
+}
+
+// GetWindowDesktop retrieves the desktop/workspace ID for a window via _NET_WM_DESKTOP
+func (c *Connection) GetWindowDesktop(window xproto.Window) (uint32, error) {
+	netWmDesktop, err := c.InternAtom("_NET_WM_DESKTOP", true)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get _NET_WM_DESKTOP atom: %w", err)
+	}
+
+	prop, err := xproto.GetProperty(c.Conn, false, window,
+		netWmDesktop,
+		xproto.AtomCardinal,
+		0,
+		1,
+	).Reply()
+	if err != nil || prop.ValueLen == 0 {
+		return 0, fmt.Errorf("no _NET_WM_DESKTOP property")
+	}
+
+	desktop := uint32(prop.Value[0]) |
+		uint32(prop.Value[1])<<8 |
+		uint32(prop.Value[2])<<16 |
+		uint32(prop.Value[3])<<24
+
+	return desktop, nil
+}
+
+// GetDesktopNames retrieves the list of desktop/workspace names via _NET_DESKTOP_NAMES
+func (c *Connection) GetDesktopNames() ([]string, error) {
+	netDesktopNames, err := c.InternAtom("_NET_DESKTOP_NAMES", true)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get _NET_DESKTOP_NAMES atom: %w", err)
+	}
+
+	utf8String, err := c.InternAtom("UTF8_STRING", true)
+	if err != nil {
+		utf8String = xproto.AtomString
+	}
+
+	prop, err := xproto.GetProperty(c.Conn, false, c.Root,
+		netDesktopNames,
+		utf8String,
+		0,
+		^uint32(0),
+	).Reply()
+	if err != nil || prop.ValueLen == 0 {
+		return nil, fmt.Errorf("no _NET_DESKTOP_NAMES property")
+	}
+
+	// Names are null-terminated strings
+	names := strings.Split(string(prop.Value), "\x00")
+	// Remove empty strings
+	result := make([]string, 0, len(names))
+	for _, name := range names {
+		if name != "" {
+			result = append(result, name)
+		}
+	}
+
+	return result, nil
+}
+
+// GetWindowWorkspaceName retrieves the workspace name for a window
+func (c *Connection) GetWindowWorkspaceName(window xproto.Window) string {
+	desktop, err := c.GetWindowDesktop(window)
+	if err != nil {
+		return ""
+	}
+
+	names, err := c.GetDesktopNames()
+	if err != nil {
+		// Fallback to desktop number if names are not available
+		return fmt.Sprintf("%d", desktop+1)
+	}
+
+	if int(desktop) < len(names) {
+		return names[desktop]
+	}
+
+	// Fallback to desktop number
+	return fmt.Sprintf("%d", desktop+1)
 }
 
 // findIconByClass tries to find an icon file for the given WM_CLASS

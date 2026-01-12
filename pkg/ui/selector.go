@@ -292,6 +292,7 @@ func (s *Selector) prepareWindowData() []carousel.WindowData {
 			Thumbnail: thumbnail,
 			Icon:      win.Icon,
 			Title:     win.Name,
+			Workspace: win.Workspace,
 		}
 	}
 	return data
