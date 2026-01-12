@@ -31,8 +31,9 @@ go build -o qws ./cmd/qws
 After launch:
 1. Press `Alt+Tab` to invoke the carousel switcher
 2. Use `←→` (arrow keys) or `Tab` to navigate through windows
-3. Press `Enter` to activate the selected window
-4. Press `ESC` to cancel
+3. **Mouse support**: Hover over any window card to highlight it, click to select
+4. Press `Enter` to activate the selected window
+5. Press `ESC` to cancel
 
 The carousel displays window thumbnails in a 3D perspective view with smooth animations.
 
@@ -44,6 +45,7 @@ The carousel displays window thumbnails in a 3D perspective view with smooth ani
 - **Thumbnail Previews**: Live window thumbnails via XComposite
 - **Smart Placeholders**: Fallback icons when thumbnails unavailable
 - **Keyboard Navigation**: Arrow keys, Tab, Enter, and Escape support
+- **Mouse Support**: Hover to highlight windows, click to select
 - **Always On Top**: Overlay window with no WM decorations
 
 ## Screenshots
@@ -52,6 +54,7 @@ The carousel shows windows in a 3D perspective:
 - Center window is displayed at full size
 - Side windows are scaled down and slightly rotated
 - Blue glow highlights the selected window
+- Orange glow highlights hovered windows (mouse support)
 - Shadows provide depth perception
 
 ## Requirements

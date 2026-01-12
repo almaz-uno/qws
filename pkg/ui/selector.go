@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"math"
+	"time"
 
 	"github.com/almaz-uno/qws/pkg/carousel"
 	"github.com/almaz-uno/qws/pkg/x11"
@@ -14,18 +16,20 @@ import (
 
 // Selector provides a graphical carousel interface for window selection
 type Selector struct {
-	ctx           context.Context
-	conn          *xgb.Conn
-	root          xproto.Window
-	windows       []x11.WindowInfo
-	selectedIndex int
-	window        *carousel.Window
-	config        carousel.Config
-	monitorGeom   x11.MonitorGeometry // Current monitor geometry
-	animOffset    float64
-	animating     bool
-	resultChan    chan *x11.WindowInfo
-	altPressed    bool // Track if Alt is currently pressed
+	ctx             context.Context
+	conn            *xgb.Conn
+	root            xproto.Window
+	windows         []x11.WindowInfo
+	selectedIndex   int
+	hoverIndex      int // Index of window under mouse cursor (-1 if none)
+	window          *carousel.Window
+	config          carousel.Config
+	monitorGeom     x11.MonitorGeometry // Current monitor geometry
+	animOffset      float64
+	animating       bool
+	resultChan      chan *x11.WindowInfo
+	altPressed      bool      // Track if Alt is currently pressed
+	lastMouseUpdate time.Time // Last time mouse hover was processed
 }
 
 // NewSelector creates a new graphical window selector
@@ -62,6 +66,7 @@ func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, window
 		root:          root,
 		windows:       windows,
 		selectedIndex: 0,
+		hoverIndex:    -1,
 		config:        config,
 		monitorGeom:   monitor,
 		resultChan:    make(chan *x11.WindowInfo, 1),
@@ -200,6 +205,14 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 				s.altPressed = true
 			}
 
+			// Handle Enter key - select current window
+			if e.Detail == 36 { // Return/Enter
+				if s.selectedIndex >= 0 && s.selectedIndex < len(s.windows) {
+					return &s.windows[s.selectedIndex]
+				}
+				return nil
+			}
+
 			if s.handleKeyPressSimple(e, thumbnails) {
 				// ESC pressed
 				return nil
@@ -222,6 +235,31 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 		case xproto.ExposeEvent:
 			if e.Window == s.window.GetWindowID() {
 				s.render(thumbnails)
+			}
+
+		case xproto.MotionNotifyEvent:
+			// Throttle mouse events to ~60fps (16ms) to avoid excessive redraws
+			now := time.Now()
+			if now.Sub(s.lastMouseUpdate) < 16*time.Millisecond {
+				continue
+			}
+			s.lastMouseUpdate = now
+
+			// Update hover index based on mouse position
+			newHoverIndex := s.getWindowIndexAtPosition(int(e.EventX), int(e.EventY))
+			if newHoverIndex != s.hoverIndex {
+				s.hoverIndex = newHoverIndex
+				s.render(thumbnails)
+			}
+
+		case xproto.ButtonPressEvent:
+			// Left mouse button (button 1)
+			if e.Detail == 1 {
+				windowIndex := s.getWindowIndexAtPosition(int(e.EventX), int(e.EventY))
+				if windowIndex >= 0 && windowIndex < len(s.windows) {
+					// Select and return the clicked window
+					return &s.windows[windowIndex]
+				}
 			}
 		}
 	}
@@ -263,7 +301,7 @@ func (s *Selector) prepareWindowData() []carousel.WindowData {
 func (s *Selector) render(thumbnails []image.Image) {
 	// Use new rendering with icons and titles
 	windowData := s.prepareWindowData()
-	img := carousel.Draw3DCarouselWithData(windowData, s.selectedIndex, s.animOffset, s.config)
+	img := carousel.Draw3DCarouselWithData(windowData, s.selectedIndex, s.hoverIndex, s.animOffset, s.config)
 	s.window.DrawImage(img)
 }
 
@@ -360,4 +398,53 @@ func (s *Selector) isModifierPressed(mask uint16) bool {
 		return false
 	}
 	return (reply.Mask & mask) != 0
+}
+
+// getWindowIndexAtPosition calculates which window card is at the given mouse position
+// Returns -1 if no window is at that position
+func (s *Selector) getWindowIndexAtPosition(mouseX, mouseY int) int {
+	if len(s.windows) == 0 {
+		return -1
+	}
+
+	centerX := float64(s.config.Width) / 2
+	centerY := float64(s.config.Height) / 2
+
+	// Check each window's position
+	for i := range s.windows {
+		offset := float64(i - s.selectedIndex)
+
+		// Skip windows too far from center
+		if math.Abs(offset) > 5 {
+			continue
+		}
+
+		// Calculate card position and size (same logic as in renderer)
+		var scale, x, y float64
+
+		if math.Abs(offset) < 0.01 {
+			// Central window
+			scale = 1.0
+			x = centerX
+			y = centerY
+		} else {
+			// Side windows
+			scale = s.config.PerspectiveFactor + (1.0-s.config.PerspectiveFactor)/(1.0+math.Abs(offset)*0.5)
+			x = centerX + offset*s.config.Spacing*scale
+			arcHeight := math.Abs(offset) * 10
+			y = centerY + arcHeight
+		}
+
+		// Calculate final dimensions
+		finalW := float64(s.config.ThumbWidth) * scale
+		finalH := float64(s.config.ThumbHeight) * scale
+
+		// Check if mouse is within card bounds
+		if float64(mouseX) >= x-finalW/2 && float64(mouseX) <= x+finalW/2 &&
+			float64(mouseY) >= y-finalH/2 && float64(mouseY) <= y+finalH/2 {
+			return i
+		}
+	}
+
+	return -1
 }

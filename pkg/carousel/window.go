@@ -61,7 +61,8 @@ func NewWindowAt(conn *xgb.Conn, root xproto.Window, x, y, width, height int) (*
 		0, // Background pixel (transparent)
 		0, // Border pixel
 		1, // Override redirect (no WM decorations)
-		xproto.EventMaskKeyPress | xproto.EventMaskKeyRelease | xproto.EventMaskExposure,
+		xproto.EventMaskKeyPress | xproto.EventMaskKeyRelease | xproto.EventMaskExposure |
+			xproto.EventMaskButtonPress | xproto.EventMaskPointerMotion,
 		uint32(colormap),
 	}
 

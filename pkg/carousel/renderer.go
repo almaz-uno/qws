@@ -64,7 +64,7 @@ func Draw3DCarousel(thumbnails []image.Image, selected int, animOffset float64, 
 }
 
 // Draw3DCarouselWithData renders a 2.5D carousel with icons and titles
-func Draw3DCarouselWithData(windowData []WindowData, selected int, animOffset float64, cfg Config) *image.RGBA {
+func Draw3DCarouselWithData(windowData []WindowData, selected int, hoverIndex int, animOffset float64, cfg Config) *image.RGBA {
 	dc := gg.NewContext(cfg.Width, cfg.Height)
 
 	// Background - fully transparent
@@ -76,7 +76,7 @@ func Draw3DCarouselWithData(windowData []WindowData, selected int, animOffset fl
 
 	// Draw each window with icon, title, and thumbnail
 	for i := range windowData {
-		drawWindowWithData(dc, &windowData[i], i, selected, animOffset, centerX, centerY, cfg)
+		drawWindowWithData(dc, &windowData[i], i, selected, hoverIndex, animOffset, centerX, centerY, cfg)
 	}
 
 	return getImageRGBA(dc)
@@ -203,7 +203,7 @@ func drawShadow(dc *gg.Context, x, y, w, h, rotation, scale float64, cfg Config)
 }
 
 // drawWindowWithData draws a window with icon, title, and thumbnail
-func drawWindowWithData(dc *gg.Context, data *WindowData, index, selected int, animOffset, centerX, centerY float64, cfg Config) {
+func drawWindowWithData(dc *gg.Context, data *WindowData, index, selected, hoverIndex int, animOffset, centerX, centerY float64, cfg Config) {
 	if data == nil || data.Thumbnail == nil {
 		return
 	}
@@ -336,6 +336,11 @@ func drawWindowWithData(dc *gg.Context, data *WindowData, index, selected int, a
 	if math.Abs(offset) < 0.01 {
 		drawSelectionIndicator(dc, x, y, finalW, finalH, cfg)
 	}
+
+	// Highlight hovered item (if different from selected)
+	if index == hoverIndex && hoverIndex != selected {
+		drawHoverIndicator(dc, x, y, finalW, finalH, cfg)
+	}
 }
 
 // drawSelectionIndicator draws a highlight around selected thumbnail
@@ -354,6 +359,27 @@ func drawSelectionIndicator(dc *gg.Context, x, y, w, h float64, cfg Config) {
 	dc.SetRGBA(0.5, 0.8, 1.0, 0.8) // Lighter blue
 	dc.SetLineWidth(3)
 	dc.DrawRectangle(-w/2-5, -h/2-5, w+10, h+10)
+	dc.Stroke()
+
+	dc.Pop()
+}
+
+// drawHoverIndicator draws a highlight around hovered thumbnail
+func drawHoverIndicator(dc *gg.Context, x, y, w, h float64, cfg Config) {
+	dc.Push()
+
+	dc.Translate(x, y)
+
+	// Outer glow effect - yellow/orange for hover
+	dc.SetRGBA(1.0, 0.7, 0.2, 0.4) // Orange glow
+	dc.SetLineWidth(4)
+	dc.DrawRectangle(-w/2-8, -h/2-8, w+16, h+16)
+	dc.Stroke()
+
+	// Inner highlight
+	dc.SetRGBA(1.0, 0.85, 0.4, 0.7) // Lighter orange
+	dc.SetLineWidth(2)
+	dc.DrawRectangle(-w/2-4, -h/2-4, w+8, h+8)
 	dc.Stroke()
 
 	dc.Pop()
