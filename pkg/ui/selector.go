@@ -20,6 +20,7 @@ type Selector struct {
 	conn            *xgb.Conn
 	root            xproto.Window
 	windows         []x11.WindowInfo
+	allWindows      []x11.WindowInfo // All windows (unfiltered)
 	selectedIndex   int
 	hoverIndex      int // Index of window under mouse cursor (-1 if none)
 	window          *carousel.Window
@@ -29,6 +30,7 @@ type Selector struct {
 	animating       bool
 	resultChan      chan *x11.WindowInfo
 	altPressed      bool      // Track if Alt is currently pressed
+	ctrlPressed     bool      // Track if Ctrl is currently pressed
 	lastMouseUpdate time.Time // Last time mouse hover was processed
 }
 
@@ -65,6 +67,7 @@ func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, window
 		conn:          conn,
 		root:          root,
 		windows:       windows,
+		allWindows:    windows,
 		selectedIndex: 0,
 		hoverIndex:    -1,
 		config:        config,
@@ -75,6 +78,7 @@ func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, window
 
 // UpdateWindows updates the window list, preserving the index
 func (s *Selector) UpdateWindows(windows []x11.WindowInfo) {
+	s.allWindows = windows
 	s.windows = windows
 	// Reset index if it's out of bounds of the new list
 	if s.selectedIndex >= len(windows) {
@@ -219,6 +223,19 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 			}
 
 		case xproto.KeyReleaseEvent:
+			// Check if Ctrl was released (keycode 37 = left Ctrl, 105 = right Ctrl)
+			if e.Detail == 37 || e.Detail == 105 {
+				if s.ctrlPressed {
+					s.ctrlPressed = false
+					s.removeWorkspaceFilter()
+					// Preserve selection if possible
+					if s.selectedIndex >= len(s.windows) {
+						s.selectedIndex = 0
+					}
+					s.render(s.prepareThumbnails())
+				}
+			}
+
 			// Check if Alt was released (keycode 64 = left Alt, 108 = right Alt)
 			if e.Detail == 64 || e.Detail == 108 {
 				// Only react to Alt release if Alt was pressed while selector was open
@@ -314,6 +331,20 @@ func (s *Selector) handleKeyPressSimple(e xproto.KeyPressEvent, thumbnails []ima
 
 	// Check for Shift modifier (Shift = 0x1)
 	shiftPressed := (state & xproto.ModMaskShift) != 0
+
+	// Track Ctrl key press (keycode 37 = left Ctrl, 105 = right Ctrl)
+	if keycode == 37 || keycode == 105 {
+		if !s.ctrlPressed {
+			s.ctrlPressed = true
+			s.applyWorkspaceFilter()
+			// Preserve selection if possible
+			if s.selectedIndex >= len(s.windows) {
+				s.selectedIndex = 0
+			}
+			s.render(s.prepareThumbnails())
+		}
+		return false
+	}
 
 	switch keycode {
 	case 9: // Escape
@@ -448,4 +479,96 @@ func (s *Selector) getWindowIndexAtPosition(mouseX, mouseY int) int {
 	}
 
 	return -1
+}
+
+// applyWorkspaceFilter filters windows to show only those in the current workspace
+func (s *Selector) applyWorkspaceFilter() {
+	// Get current workspace
+	currentWorkspace := s.getCurrentWorkspace()
+	if currentWorkspace == "" {
+		log.Warn().Msg("Cannot determine current workspace")
+		return
+	}
+
+	log.Debug().Str("workspace", currentWorkspace).Msg("Filtering windows by workspace")
+
+	// Find currently selected window ID to preserve selection
+	var selectedID xproto.Window
+	if s.selectedIndex >= 0 && s.selectedIndex < len(s.windows) {
+		selectedID = s.windows[s.selectedIndex].ID
+	}
+
+	// Filter windows by workspace
+	filteredWindows := make([]x11.WindowInfo, 0)
+	for _, win := range s.allWindows {
+		if win.Workspace == currentWorkspace {
+			filteredWindows = append(filteredWindows, win)
+		}
+	}
+
+	if len(filteredWindows) == 0 {
+		log.Warn().Msg("No windows in current workspace")
+		return
+	}
+
+	s.windows = filteredWindows
+
+	// Try to preserve selection by finding the same window in filtered list
+	s.selectedIndex = 0
+	for i, win := range s.windows {
+		if win.ID == selectedID {
+			s.selectedIndex = i
+			break
+		}
+	}
+}
+
+// removeWorkspaceFilter removes workspace filter and shows all windows
+func (s *Selector) removeWorkspaceFilter() {
+	log.Debug().Msg("Removing workspace filter")
+
+	// Find currently selected window ID to preserve selection
+	var selectedID xproto.Window
+	if s.selectedIndex >= 0 && s.selectedIndex < len(s.windows) {
+		selectedID = s.windows[s.selectedIndex].ID
+	}
+
+	s.windows = s.allWindows
+
+	// Try to preserve selection by finding the same window in full list
+	s.selectedIndex = 0
+	for i, win := range s.windows {
+		if win.ID == selectedID {
+			s.selectedIndex = i
+			break
+		}
+	}
+}
+
+// getCurrentWorkspace returns the name of the current active workspace
+func (s *Selector) getCurrentWorkspace() string {
+	// Create temporary connection wrapper to use existing methods
+	connWrapper := &x11.Connection{
+		Conn: s.conn,
+		Root: s.root,
+	}
+
+	desktop, err := connWrapper.GetCurrentDesktop()
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to get current desktop")
+		return ""
+	}
+
+	names, err := connWrapper.GetDesktopNames()
+	if err != nil {
+		// Fallback to desktop number
+		return fmt.Sprintf("%d", desktop+1)
+	}
+
+	if int(desktop) < len(names) {
+		return names[desktop]
+	}
+
+	// Fallback to desktop number
+	return fmt.Sprintf("%d", desktop+1)
 }

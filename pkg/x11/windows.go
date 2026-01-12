@@ -388,6 +388,31 @@ func (c *Connection) GetDesktopNames() ([]string, error) {
 	return result, nil
 }
 
+// GetCurrentDesktop retrieves the current active desktop/workspace via _NET_CURRENT_DESKTOP
+func (c *Connection) GetCurrentDesktop() (uint32, error) {
+	netCurrentDesktop, err := c.InternAtom("_NET_CURRENT_DESKTOP", true)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get _NET_CURRENT_DESKTOP atom: %w", err)
+	}
+
+	prop, err := xproto.GetProperty(c.Conn, false, c.Root,
+		netCurrentDesktop,
+		xproto.AtomCardinal,
+		0,
+		1,
+	).Reply()
+	if err != nil || prop.ValueLen == 0 {
+		return 0, fmt.Errorf("no _NET_CURRENT_DESKTOP property")
+	}
+
+	desktop := uint32(prop.Value[0]) |
+		uint32(prop.Value[1])<<8 |
+		uint32(prop.Value[2])<<16 |
+		uint32(prop.Value[3])<<24
+
+	return desktop, nil
+}
+
 // GetWindowWorkspaceName retrieves the workspace name for a window
 func (c *Connection) GetWindowWorkspaceName(window xproto.Window) string {
 	desktop, err := c.GetWindowDesktop(window)
