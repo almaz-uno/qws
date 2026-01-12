@@ -83,6 +83,38 @@ func (kg *KeyGrabber) GrabAltTab() error {
 		}
 	}
 
+	// Capture Alt+Ctrl+Tab
+	for _, mod := range ignoreMods {
+		err := xproto.GrabKeyChecked(kg.conn,
+			true,                          // owner_events
+			kg.root,                       // grab_window
+			uint16(ModAlt|ModControl)|mod, // modifiers
+			tabKeycode,                    // key
+			xproto.GrabModeAsync,          // pointer_mode
+			xproto.GrabModeAsync,          // keyboard_mode
+		).Check()
+		if err != nil {
+			kg.UngrabAll()
+			return fmt.Errorf("failed to capture Alt+Ctrl+Tab: %w", err)
+		}
+	}
+
+	// Capture Alt+Ctrl+Shift+Tab
+	for _, mod := range ignoreMods {
+		err := xproto.GrabKeyChecked(kg.conn,
+			true,                                 // owner_events
+			kg.root,                              // grab_window
+			uint16(ModAlt|ModControl|ModShift)|mod, // modifiers
+			tabKeycode,                           // key
+			xproto.GrabModeAsync,                 // pointer_mode
+			xproto.GrabModeAsync,                 // keyboard_mode
+		).Check()
+		if err != nil {
+			kg.UngrabAll()
+			return fmt.Errorf("failed to capture Alt+Ctrl+Shift+Tab: %w", err)
+		}
+	}
+
 	return nil
 }
 

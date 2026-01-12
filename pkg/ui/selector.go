@@ -166,6 +166,26 @@ func (s *Selector) Show() (*x11.WindowInfo, error) {
 	// Mod1Mask is Alt modifier
 	s.altPressed = s.isModifierPressed(xproto.ModMask1) // Mod1 is Alt
 
+	// Check if Ctrl is currently pressed when showing the selector
+	// ControlMask is Ctrl modifier
+	s.ctrlPressed = s.isModifierPressed(xproto.ModMaskControl)
+
+	// If Ctrl is pressed, apply workspace filter immediately
+	if s.ctrlPressed {
+		log.Debug().Msg("Ctrl pressed at startup, filtering by workspace")
+		s.applyWorkspaceFilter()
+		// Update selected index if it went out of bounds
+		if s.selectedIndex >= len(s.windows) {
+			if len(s.windows) > 1 {
+				s.selectedIndex = 1
+			} else {
+				s.selectedIndex = 0
+			}
+		}
+		// Re-prepare thumbnails after filtering
+		thumbnails = s.prepareThumbnails()
+	}
+
 	// If Alt is not pressed (quick Alt+Tab), close immediately after rendering
 	if !s.altPressed {
 		// Initial render
