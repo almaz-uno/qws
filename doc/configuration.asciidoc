@@ -1,0 +1,922 @@
+= QWS Configuration Design
+:toc: left
+:toclevels: 3
+:icons: font
+:source-highlighter: rouge
+
+This document outlines the configuration strategy for QWS (Quick Window Switcher) using Cobra + Viper.
+
+[NOTE]
+====
+*Implementation Status:* Phase 1 (Basic Structure) is complete. See <<phase-1-status>> for details.
+====
+
+toc::[]
+
+== Overview
+
+The configuration system should support three levels of configuration (in order of precedence):
+
+. Command-line flags (highest priority)
+. Environment variables
+. Configuration file (`~/.config/qws/config.yaml`)
+
+== Naming Conventions
+
+The configuration system uses different naming conventions for each format, with automatic conversion handled by Viper.
+
+=== Rules
+
+[cols="1,2,3"]
+|===
+| Format | Convention | Example
+
+| **YAML**
+| `snake_case` with dots for nesting
+| `keybindings.workspace_modifier`
+
+| **CLI Flags**
+| All dashes (dots and underscores → dashes)
+| `--keybindings-workspace-modifier`
+
+| **Environment Variables**
+| `UPPER_SNAKE_CASE` with `QWS_` prefix (dots → underscores)
+| `QWS_KEYBINDINGS_WORKSPACE_MODIFIER`
+|===
+
+=== Conversion Examples
+
+.Complete conversion chain
+[cols="3,3,4"]
+|===
+| YAML Key | CLI Flag | Environment Variable
+
+| `keybindings.modifier`
+| `--keybindings-modifier`
+| `QWS_KEYBINDINGS_MODIFIER`
+
+| `keybindings.workspace_modifier`
+| `--keybindings-workspace-modifier`
+| `QWS_KEYBINDINGS_WORKSPACE_MODIFIER`
+
+| `appearance.colors.dark.selection_frame`
+| `--appearance-colors-dark-selection-frame`
+| `QWS_APPEARANCE_COLORS_DARK_SELECTION_FRAME`
+
+| `behavior.snapshot_interval`
+| `--behavior-snapshot-interval`
+| `QWS_BEHAVIOR_SNAPSHOT_INTERVAL`
+
+| `windows.ignore_skip_taskbar`
+| `--windows-ignore-skip-taskbar`
+| `QWS_WINDOWS_IGNORE_SKIP_TASKBAR`
+|===
+
+=== Implementation Details
+
+The conversion is handled automatically by Viper:
+
+[source,go]
+----
+// Setup Viper for environment variables
+viper.SetEnvPrefix("QWS")
+viper.AutomaticEnv()
+viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+
+// Bind CLI flags to config keys
+viper.BindPFlag("keybindings.workspace_modifier",
+               cmd.Flags().Lookup("keybindings-workspace-modifier"))
+----
+
+**Key points:**
+
+* YAML keys with underscores (`workspace_modifier`) are preserved as-is internally
+* Dots (`.`) separate nesting levels in YAML and are converted to underscores for ENV
+* CLI flags convert both dots and underscores to dashes for GNU/POSIX compliance
+* Viper handles all conversions transparently — just use the YAML key in code
+
+== Configuration Categories
+
+=== Keybindings
+
+.Current hardcoded values in `pkg/keygrab/keygrab.go`
+[cols="2,2,3"]
+|===
+| Parameter | Default | Description
+
+| `modifier`
+| `Alt` (Mod1)
+| Main modifier key
+
+| `key`
+| `Tab`
+| Main trigger key
+
+| `backward_modifier`
+| `Shift`
+| Modifier for reverse navigation
+
+| `workspace_modifier`
+| `Ctrl`
+| When NOT pressed, shows windows from all workspaces; when pressed together with main modifier, filters to current workspace only
+
+| `cancel_key`
+| `Escape`
+| Key to cancel selection and close switcher
+|===
+
+.Proposed CLI flags
+[source,bash]
+----
+qws --modifier=Super --key=grave
+qws -m Alt -k Tab
+qws --workspace-modifier=Super  # Use Super+Alt+Tab to filter current workspace
+----
+
+.Proposed config
+[source,yaml]
+----
+keybindings:
+  modifier: Alt        # Alt, Super, Ctrl, Mod1-Mod5
+  key: Tab             # Tab, grave, space, etc.
+  backward: Shift
+  workspace_modifier: Ctrl  # Filter to current workspace when held
+  cancel: Escape
+----
+
+=== Appearance — Carousel
+
+.Current hardcoded values in `pkg/carousel/renderer.go`
+[cols="2,2,3"]
+|===
+| Parameter | Default | Description
+
+| `ThumbWidth`
+| 256
+| Thumbnail width in pixels
+
+| `ThumbHeight`
+| 256
+| Thumbnail height in pixels
+
+| `Spacing`
+| 300
+| Distance between carousel items
+
+| `PerspectiveFactor`
+| 0.6
+| Depth of perspective effect (0.0–1.0)
+
+| `ShadowOffset`
+| 10
+| Shadow offset in pixels
+
+| `ShadowBlur`
+| 15
+| Shadow blur radius
+|===
+
+.Fonts (hardcoded constants)
+[source,go]
+----
+fontSystem   = "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"
+fontFallback = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+----
+
+.Proposed config
+[source,yaml]
+----
+appearance:
+  thumbnail:
+    width: 256
+    height: 256
+  spacing: 300
+  perspective: 0.6
+  shadow:
+    offset: 10
+    blur: 15
+  font:
+    primary: "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"
+    fallback: "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+    size: 14
+  colors:
+    theme: auto  # auto (follow system), dark, light
+    # Custom colors for dark theme
+    # dark:
+    #   background: "#1a1a2e"
+    #   selection_frame: "#4a9eff"
+    #   text: "#ffffff"
+    #   shadow: "rgba(0, 0, 0, 0.8)"
+    #   inactive_frame: "#404050"
+    # Custom colors for light theme
+    # light:
+    #   background: "#f5f5f5"
+    #   selection_frame: "#0078d4"
+    #   text: "#1a1a1a"
+    #   shadow: "rgba(0, 0, 0, 0.3)"
+    #   inactive_frame: "#cccccc"
+----
+
+=== Behavior and Timing
+
+.Current hardcoded values in `pkg/focus/watcher.go`
+[cols="2,2,3"]
+|===
+| Parameter | Default | Description
+
+| `snapshotInterval`
+| 10s
+| Background thumbnail refresh interval
+|===
+
+.Proposed config
+[source,yaml]
+----
+behavior:
+  snapshot_interval: 10s
+  show_delay: 0ms          # Delay before showing UI
+  # close_on_release: true # Close when modifier is released
+----
+
+=== Window Filtering
+
+.Current behavior in `pkg/x11/windows.go`
+- Excludes `_NET_WM_WINDOW_TYPE_DOCK`
+- Excludes `_NET_WM_WINDOW_TYPE_DESKTOP`
+- Excludes windows with `_NET_WM_STATE_SKIP_TASKBAR`
+
+.Proposed config
+[source,yaml]
+----
+windows:
+  desktop: current           # current, all, all-except-current
+  ignore_skip_taskbar: false # Respect _NET_WM_STATE_SKIP_TASKBAR hint
+  sort_minimized_last: false
+  # exclude_classes:
+  #   - "conky"
+  #   - "plank"
+  #   - "polybar"
+----
+
+=== Logging
+
+.Proposed config
+[source,yaml]
+----
+log:
+  level: info    # trace, debug, info, warn, error
+  format: console # console, json
+----
+
+.Proposed CLI flags
+[source,bash]
+----
+qws --log-level=debug
+qws -v   # shorthand for --log-level=debug
+qws -vv  # shorthand for --log-level=trace
+----
+
+== Proposed Full Configuration File
+
+.~/.config/qws/config.yaml
+[source,yaml]
+----
+# QWS Configuration
+
+keybindings:
+  modifier: Alt
+  key: Tab
+  backward: Shift
+  workspace_modifier: Ctrl
+  cancel: Escape
+
+appearance:
+  thumbnail:
+    width: 256
+    height: 256
+  spacing: 300
+  perspective: 0.6
+  shadow:
+    offset: 10
+    blur: 15
+  font:
+    primary: "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"
+    fallback: "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+    size: 14
+  colors:
+    theme: auto  # auto (follow system), dark, light
+
+behavior:
+  snapshot_interval: 10s
+  show_delay: 0ms
+
+windows:
+  desktop: current
+  ignore_skip_taskbar: false
+  sort_minimized_last: false
+
+log:
+  level: info
+  format: console
+----
+
+== Configuration Reference
+
+=== All Configuration Options
+
+.Complete configuration options across all formats
+[cols="3,3,4,2,2,4"]
+|===
+| YAML | CLI Flag | Environment Variable | Type | Default | Description
+
+| _special_
+| `--config` / `-c`
+| `QWS_CONFIG`
+| `string`
+| `~/.config/qws/config.yaml`
+| Path to configuration file
+
+| `keybindings.modifier`
+| `--keybindings-modifier` / `-m`
+| `QWS_KEYBINDINGS_MODIFIER`
+| `string`
+| `Alt`
+| Main modifier key (Alt, Super, Ctrl, Mod1-Mod5)
+
+| `keybindings.key`
+| `--keybindings-key` / `-k`
+| `QWS_KEYBINDINGS_KEY`
+| `string`
+| `Tab`
+| Main trigger key (Tab, grave, space, etc.)
+
+| `keybindings.backward`
+| `--keybindings-backward`
+| `QWS_KEYBINDINGS_BACKWARD`
+| `string`
+| `Shift`
+| Modifier for reverse navigation
+
+| `keybindings.workspace_modifier`
+| `--keybindings-workspace-modifier`
+| `QWS_KEYBINDINGS_WORKSPACE_MODIFIER`
+| `string`
+| `Ctrl`
+| Modifier to filter current workspace
+
+| `keybindings.cancel`
+| `--keybindings-cancel`
+| `QWS_KEYBINDINGS_CANCEL`
+| `string`
+| `Escape`
+| Key to cancel selection
+
+| `appearance.thumbnail.width`
+| `--appearance-thumbnail-width`
+| `QWS_APPEARANCE_THUMBNAIL_WIDTH`
+| `int`
+| `256`
+| Thumbnail width in pixels
+
+| `appearance.thumbnail.height`
+| `--appearance-thumbnail-height`
+| `QWS_APPEARANCE_THUMBNAIL_HEIGHT`
+| `int`
+| `256`
+| Thumbnail height in pixels
+
+| `appearance.spacing`
+| `--appearance-spacing`
+| `QWS_APPEARANCE_SPACING`
+| `float`
+| `300`
+| Distance between carousel items
+
+| `appearance.perspective`
+| `--appearance-perspective`
+| `QWS_APPEARANCE_PERSPECTIVE`
+| `float`
+| `0.6`
+| Perspective effect factor (0.0-1.0)
+
+| `appearance.shadow.offset`
+| `--appearance-shadow-offset`
+| `QWS_APPEARANCE_SHADOW_OFFSET`
+| `float`
+| `10`
+| Shadow offset in pixels
+
+| `appearance.shadow.blur`
+| `--appearance-shadow-blur`
+| `QWS_APPEARANCE_SHADOW_BLUR`
+| `float`
+| `15`
+| Shadow blur radius
+
+| `appearance.font.primary`
+| `--appearance-font-primary`
+| `QWS_APPEARANCE_FONT_PRIMARY`
+| `string`
+| `/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf`
+| Primary font path
+
+| `appearance.font.fallback`
+| `--appearance-font-fallback`
+| `QWS_APPEARANCE_FONT_FALLBACK`
+| `string`
+| `/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf`
+| Fallback font path
+
+| `appearance.font.size`
+| `--appearance-font-size`
+| `QWS_APPEARANCE_FONT_SIZE`
+| `int`
+| `14`
+| Font size
+
+| `appearance.colors.theme`
+| `--appearance-colors-theme` / `-t`
+| `QWS_APPEARANCE_COLORS_THEME`
+| `string`
+| `auto`
+| Color theme: auto, dark, light
+
+| `appearance.colors.dark.background`
+| `--appearance-colors-dark-background`
+| `QWS_APPEARANCE_COLORS_DARK_BACKGROUND`
+| `string`
+| `#1a1a2e`
+| Dark theme background color
+
+| `appearance.colors.dark.selection_frame`
+| `--appearance-colors-dark-selection-frame`
+| `QWS_APPEARANCE_COLORS_DARK_SELECTION_FRAME`
+| `string`
+| `#4a9eff`
+| Dark theme selection frame color
+
+| `appearance.colors.dark.text`
+| `--appearance-colors-dark-text`
+| `QWS_APPEARANCE_COLORS_DARK_TEXT`
+| `string`
+| `#ffffff`
+| Dark theme text color
+
+| `appearance.colors.dark.shadow`
+| `--appearance-colors-dark-shadow`
+| `QWS_APPEARANCE_COLORS_DARK_SHADOW`
+| `string`
+| `rgba(0, 0, 0, 0.8)`
+| Dark theme shadow color
+
+| `appearance.colors.dark.inactive_frame`
+| `--appearance-colors-dark-inactive-frame`
+| `QWS_APPEARANCE_COLORS_DARK_INACTIVE_FRAME`
+| `string`
+| `#404050`
+| Dark theme inactive frame color
+
+| `appearance.colors.light.background`
+| `--appearance-colors-light-background`
+| `QWS_APPEARANCE_COLORS_LIGHT_BACKGROUND`
+| `string`
+| `#f5f5f5`
+| Light theme background color
+
+| `appearance.colors.light.selection_frame`
+| `--appearance-colors-light-selection-frame`
+| `QWS_APPEARANCE_COLORS_LIGHT_SELECTION_FRAME`
+| `string`
+| `#0078d4`
+| Light theme selection frame color
+
+| `appearance.colors.light.text`
+| `--appearance-colors-light-text`
+| `QWS_APPEARANCE_COLORS_LIGHT_TEXT`
+| `string`
+| `#1a1a1a`
+| Light theme text color
+
+| `appearance.colors.light.shadow`
+| `--appearance-colors-light-shadow`
+| `QWS_APPEARANCE_COLORS_LIGHT_SHADOW`
+| `string`
+| `rgba(0, 0, 0, 0.3)`
+| Light theme shadow color
+
+| `appearance.colors.light.inactive_frame`
+| `--appearance-colors-light-inactive-frame`
+| `QWS_APPEARANCE_COLORS_LIGHT_INACTIVE_FRAME`
+| `string`
+| `#cccccc`
+| Light theme inactive frame color
+
+| `behavior.snapshot_interval`
+| `--behavior-snapshot-interval`
+| `QWS_BEHAVIOR_SNAPSHOT_INTERVAL`
+| `duration`
+| `10s`
+| Background thumbnail refresh interval
+
+| `behavior.show_delay`
+| `--behavior-show-delay`
+| `QWS_BEHAVIOR_SHOW_DELAY`
+| `duration`
+| `0ms`
+| Delay before showing UI
+
+| `windows.desktop`
+| `--windows-desktop`
+| `QWS_WINDOWS_DESKTOP`
+| `string`
+| `current`
+| Desktop filter: current, all, all-except-current
+
+| `windows.ignore_skip_taskbar`
+| `--windows-ignore-skip-taskbar`
+| `QWS_WINDOWS_IGNORE_SKIP_TASKBAR`
+| `bool`
+| `false`
+| Ignore _NET_WM_STATE_SKIP_TASKBAR hint
+
+| `windows.sort_minimized_last`
+| `--windows-sort-minimized-last`
+| `QWS_WINDOWS_SORT_MINIMIZED_LAST`
+| `bool`
+| `false`
+| Sort minimized windows last
+
+| `log.level`
+| `--log-level`
+| `QWS_LOG_LEVEL`
+| `string`
+| `info`
+| Logging level: trace, debug, info, warn, error
+
+| `log.format`
+| `--log-format`
+| `QWS_LOG_FORMAT`
+| `string`
+| `console`
+| Log format: console, json
+
+| _special_
+| `-v`
+| _n/a_
+| `flag`
+| _n/a_
+| Verbose mode (equivalent to `--log-level=debug`)
+
+| _special_
+| `-vv`
+| _n/a_
+| `flag`
+| _n/a_
+| Very verbose mode (equivalent to `--log-level=trace`)
+
+| _special_
+| `--help` / `-h`
+| _n/a_
+| `flag`
+| _n/a_
+| Show help message
+
+| _special_
+| `--version`
+| _n/a_
+| `flag`
+| _n/a_
+| Show version information
+|===
+
+=== Usage Examples
+
+==== YAML Configuration
+
+[source,yaml]
+----
+# ~/.config/qws/config.yaml
+keybindings:
+  modifier: Super
+  key: grave
+
+appearance:
+  thumbnail:
+    width: 192
+    height: 192
+  colors:
+    theme: dark
+    dark:
+      selection_frame: "#ff6b6b"
+
+behavior:
+  snapshot_interval: 5s
+
+windows:
+  desktop: all
+----
+
+==== Command-Line Interface
+
+[source,bash]
+----
+# Use default configuration
+qws
+
+# Use custom config file
+qws --config ~/.config/qws/work.yaml
+qws -c ~/.config/qws/work.yaml
+
+# Override keybindings
+qws --keybindings-modifier=Super --keybindings-key=grave
+qws -m Super -k grave  # short form
+
+# Change appearance
+qws --appearance-thumbnail-width=192 --appearance-thumbnail-height=192
+
+# Force dark theme with custom selection color
+qws -t dark --appearance-colors-dark-selection-frame="#ff6b6b"
+
+# Configure behavior
+qws --behavior-snapshot-interval=5s --windows-desktop=all
+
+# Debug mode
+qws -v   # debug level
+qws -vv  # trace level
+----
+
+==== Environment Variables
+
+[source,bash]
+----
+# Set keybindings
+export QWS_KEYBINDINGS_MODIFIER=Super
+export QWS_KEYBINDINGS_KEY=grave
+
+# Set appearance
+export QWS_APPEARANCE_THUMBNAIL_WIDTH=192
+export QWS_APPEARANCE_COLORS_THEME=dark
+export QWS_APPEARANCE_COLORS_DARK_SELECTION_FRAME="#ff6b6b"
+
+# Set behavior
+export QWS_BEHAVIOR_SNAPSHOT_INTERVAL=5s
+
+# Set logging
+export QWS_LOG_LEVEL=debug
+
+# Run with environment variables
+qws
+----
+
+==== Combined Configuration
+
+[source,bash]
+----
+# Config file sets base configuration
+# Environment variables override specific settings
+# CLI flags have highest priority
+
+# Base: ~/.config/qws/config.yaml (theme: auto, modifier: Alt)
+# Override theme via env:
+QWS_APPEARANCE_COLORS_THEME=dark \
+# Override modifier via CLI (highest priority):
+qws --keybindings-modifier=Super
+----
+
+== Implementation Plan
+
+[[phase-1-status]]
+=== Phase 1: Basic Structure ✅
+
+[.green]
+*COMPLETED:* Phase 1 has been successfully implemented.
+
+. ✅ Create `internal/config/config.go` with configuration struct
+. ✅ Add Cobra root command in `cmd/qws/root.go`
+. ✅ Integrate Viper for config file loading
+. ✅ Support `--config` flag for custom config path
+
+.Implementation details
+* Created `internal/config/config.go` with complete configuration structure including all categories: Keybindings, Appearance, Behavior, Windows, and Log
+* Implemented `config.Load()` function that integrates Viper for loading from:
+  - Configuration file (`~/.config/qws/config.yaml` by default)
+  - Environment variables (with `QWS_` prefix)
+  - Command-line flags (via Cobra)
+* Created `cmd/qws/root.go` with full Cobra command setup:
+  - All flags from documentation are defined
+  - `-v` and `-vv` flags for verbose logging
+  - `--config` / `-c` flag for custom config path
+  - Priority order: CLI flags > Environment variables > Config file > Defaults
+* Refactored `cmd/qws/main.go` to use Cobra command execution
+* Added dependencies: `github.com/spf13/cobra` and `github.com/spf13/viper`
+
+.Usage examples
+[source,bash]
+----
+# Show help
+qws --help
+
+# Use custom config file
+qws --config ~/.config/qws/work.yaml
+
+# Override specific settings
+qws -m Super -k grave -v
+
+# Set log level
+qws --log-level=debug
+qws -vv  # trace level
+----# Override specific settings
+qws -m Super -k grave -v
+
+# Set log level
+qws --log-level=debug
+qws -vv  # trace level
+----
+
+=== Phase 2: Keybindings
+
+. Make modifier configurable (Alt/Super/Ctrl)
+. Make main key configurable
+. Add cancel key support
+
+=== Phase 3: Appearance
+
+. Extract carousel config to viper
+. Add font configuration
+. Implement theme system with auto-detection
+. Add color customization
+
+=== Phase 4: Behavior
+
+. Configurable snapshot interval
+. Window filtering options
+. Desktop selection modes
+
+== Environment Variables
+
+All configuration options should be accessible via environment variables with `QWS_` prefix:
+
+[source,bash]
+----
+QWS_KEYBINDINGS_MODIFIER=Super
+QWS_APPEARANCE_THUMBNAIL_WIDTH=192
+QWS_APPEARANCE_COLORS_THEME=dark
+QWS_LOG_LEVEL=debug
+----
+
+== Theme System
+
+QWS will support automatic theme switching based on system preferences.
+
+=== Theme Detection
+
+The application will detect the system theme using the following methods (in order):
+
+. **Environment variable**: `QWS_APPEARANCE_COLORS_THEME` or `GTK_THEME`
+. **GTK settings**: `~/.config/gtk-3.0/settings.ini` → `gtk-application-prefer-dark-theme`
+. **XSETTINGS**: X11 `Net/ThemeName` property via XSETTINGS daemon
+. **Fallback**: light theme
+
+=== Built-in Themes
+
+.Dark theme (default for dark mode)
+[cols="2,2"]
+|===
+| Element | Color
+
+| Background
+| `#1a1a2e` (dark blue-gray)
+
+| Selection frame
+| `#4a9eff` (bright blue)
+
+| Text
+| `#ffffff` (white)
+
+| Shadow
+| `rgba(0, 0, 0, 0.8)`
+
+| Inactive frame
+| `#404050` (medium gray)
+|===
+
+.Light theme (default for light mode)
+[cols="2,2"]
+|===
+| Element | Color
+
+| Background
+| `#f5f5f5` (light gray)
+
+| Selection frame
+| `#0078d4` (Microsoft blue)
+
+| Text
+| `#1a1a1a` (almost black)
+
+| Shadow
+| `rgba(0, 0, 0, 0.3)`
+
+| Inactive frame
+| `#cccccc` (light gray)
+|===
+
+=== Configuration
+
+.Config file
+[source,yaml]
+----
+appearance:
+  colors:
+    theme: auto  # auto (follow system), dark, light
+    # Customize dark theme colors
+    dark:
+      background: "#1a1a2e"
+      selection_frame: "#4a9eff"
+      text: "#ffffff"
+      shadow: "rgba(0, 0, 0, 0.8)"
+      inactive_frame: "#404050"
+    # Customize light theme colors
+    light:
+      background: "#f5f5f5"
+      selection_frame: "#0078d4"
+      text: "#1a1a1a"
+      shadow: "rgba(0, 0, 0, 0.3)"
+      inactive_frame: "#cccccc"
+----
+
+.CLI flags
+[source,bash]
+----
+qws --theme=dark
+qws --theme=light
+qws --theme=auto  # default
+----
+
+.Environment variable
+[source,bash]
+----
+QWS_APPEARANCE_COLORS_THEME=dark qws
+----
+
+=== Custom Colors
+
+Users can override individual colors for each theme while keeping automatic theme switching:
+
+[source,yaml]
+----
+appearance:
+  colors:
+    theme: auto  # Auto-switch between themes
+    dark:
+      selection_frame: "#ff6b6b"  # Custom selection color for dark theme
+    light:
+      selection_frame: "#4a9eff"  # Custom selection color for light theme
+----
+
+Partial overrides are supported — only specified colors will be customized, others will use defaults:
+
+[source,yaml]
+----
+appearance:
+  colors:
+    theme: auto
+    dark:
+      selection_frame: "#ff6b6b"  # Only override selection frame
+      # background, text, shadow, inactive_frame use defaults
+----
+
+== Design Decisions
+
+[cols="1,2"]
+|===
+| Decision | Rationale
+
+| No X resources support
+| Viper provides sufficient configuration layers (CLI, env, file). X resources is a legacy mechanism that doesn't work on Wayland and adds unnecessary complexity.
+
+| No profile support
+| Single config file only — either default (`~/.config/qws/config.yaml`) or specified via `--config` flag. Keeps implementation simple.
+
+| No explicit daemon mode
+| Application already runs as a background service. Use `systemctl --user` for proper daemon management (autostart, restart policies, logging).
+
+| Auto theme switching
+| Follow system theme by default (`theme: auto`). Users can override via config/CLI/env. Theme detection uses GTK settings as primary source for X11 compatibility.
+|===
+
+== Dependencies
+
+.Required Go packages
+[source]
+----
+github.com/spf13/cobra
+github.com/spf13/viper
+----
+
+.Installation
+[source,bash]
+----
+go get github.com/spf13/cobra
+go get github.com/spf13/viper
+----
