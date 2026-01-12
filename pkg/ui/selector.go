@@ -9,6 +9,7 @@ import (
 	"github.com/almaz-uno/qws/pkg/x11"
 	"github.com/jezek/xgb"
 	"github.com/jezek/xgb/xproto"
+	"github.com/rs/zerolog/log"
 )
 
 // Selector provides a graphical carousel interface for window selection
@@ -20,6 +21,7 @@ type Selector struct {
 	selectedIndex int
 	window        *carousel.Window
 	config        carousel.Config
+	monitorGeom   x11.MonitorGeometry // Current monitor geometry
 	animOffset    float64
 	animating     bool
 	resultChan    chan *x11.WindowInfo
@@ -28,13 +30,31 @@ type Selector struct {
 
 // NewSelector creates a new graphical window selector
 func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, windows []x11.WindowInfo) *Selector {
-	// Get screen dimensions
-	setup := xproto.Setup(conn)
-	screen := setup.DefaultScreen(conn)
+	// Try to get current monitor geometry, fallback to full screen on error
+	monitor, err := x11.GetCurrentMonitor(conn, root)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to get current monitor, falling back to full screen")
+		// Fallback to full screen
+		setup := xproto.Setup(conn)
+		screen := setup.DefaultScreen(conn)
+		monitor = x11.MonitorGeometry{
+			X:      0,
+			Y:      0,
+			Width:  int(screen.WidthInPixels),
+			Height: int(screen.HeightInPixels),
+		}
+	}
+
+	log.Info().
+		Int("x", monitor.X).
+		Int("y", monitor.Y).
+		Int("width", monitor.Width).
+		Int("height", monitor.Height).
+		Msg("Using monitor geometry for selector")
 
 	config := carousel.DefaultConfig()
-	config.Width = int(screen.WidthInPixels)
-	config.Height = int(screen.HeightInPixels)
+	config.Width = monitor.Width
+	config.Height = monitor.Height
 
 	return &Selector{
 		ctx:           ctx,
@@ -43,6 +63,7 @@ func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, window
 		windows:       windows,
 		selectedIndex: 0,
 		config:        config,
+		monitorGeom:   monitor,
 		resultChan:    make(chan *x11.WindowInfo, 1),
 	}
 }
@@ -71,10 +92,43 @@ func (s *Selector) Show() (*x11.WindowInfo, error) {
 		s.selectedIndex = 0
 	}
 
-	// Create window if it doesn't exist
-	if s.window == nil {
-		var err error
-		s.window, err = carousel.NewWindow(s.conn, s.root, s.config.Width, s.config.Height)
+	// Check current monitor before showing (may have changed since last invocation)
+	currentMonitor, err := x11.GetCurrentMonitor(s.conn, s.root)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to get current monitor")
+		// Use previously cached monitor geometry
+		currentMonitor = s.monitorGeom
+	}
+
+	// Check if monitor has changed or window needs recreation
+	needRecreate := s.window == nil ||
+		currentMonitor.X != s.monitorGeom.X ||
+		currentMonitor.Y != s.monitorGeom.Y ||
+		currentMonitor.Width != s.monitorGeom.Width ||
+		currentMonitor.Height != s.monitorGeom.Height
+
+	if needRecreate {
+		// Update monitor geometry and config
+		s.monitorGeom = currentMonitor
+		s.config.Width = currentMonitor.Width
+		s.config.Height = currentMonitor.Height
+
+		log.Debug().
+			Int("x", currentMonitor.X).
+			Int("y", currentMonitor.Y).
+			Int("width", currentMonitor.Width).
+			Int("height", currentMonitor.Height).
+			Msg("Monitor changed, recreating selector window")
+
+		// Destroy old window if exists
+		if s.window != nil {
+			s.window.Close()
+		}
+
+		// Create window at new monitor position with monitor size
+		s.window, err = carousel.NewWindowAt(s.conn, s.root,
+			s.monitorGeom.X, s.monitorGeom.Y,
+			s.config.Width, s.config.Height)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create window: %w", err)
 		}

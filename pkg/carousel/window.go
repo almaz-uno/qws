@@ -21,8 +21,13 @@ type Window struct {
 	depth  byte // Depth of the pixmap/window
 }
 
-// NewWindow creates a new X11 window for carousel display
+// NewWindow creates a new X11 window for carousel display at (0, 0)
 func NewWindow(conn *xgb.Conn, root xproto.Window, width, height int) (*Window, error) {
+	return NewWindowAt(conn, root, 0, 0, width, height)
+}
+
+// NewWindowAt creates a new X11 window for carousel display at specific coordinates
+func NewWindowAt(conn *xgb.Conn, root xproto.Window, x, y, width, height int) (*Window, error) {
 	w := &Window{
 		conn:   conn,
 		root:   root,
@@ -65,9 +70,9 @@ func NewWindow(conn *xgb.Conn, root xproto.Window, width, height int) (*Window, 
 		depth,
 		w.window,
 		root,
-		// Fullscreen position
-		0,
-		0,
+		// Position and size
+		int16(x),
+		int16(y),
 		w.width,
 		w.height,
 		0, // Border width

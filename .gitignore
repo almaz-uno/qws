@@ -32,3 +32,4 @@ go.work.sum
 Thumbs.db
 console/capture/capture
 console/snapshot/snapshot
+console/monitors/monitors
