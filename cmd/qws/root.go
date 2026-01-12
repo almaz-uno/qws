@@ -42,6 +42,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "", "config file (default is $HOME/.config/qws/config.yaml)")
 	rootCmd.PersistentFlags().StringP("log-level", "", "info", "log level (trace, debug, info, warn, error)")
 	rootCmd.PersistentFlags().CountP("verbose", "v", "verbose output (use -v for debug, -vv for trace)")
+	rootCmd.PersistentFlags().Bool("keysym-list", false, "print list of supported key names and exit")
 
 	// Keybindings
 	rootCmd.PersistentFlags().StringP("keybindings-modifier", "m", "", "main modifier key (Alt, Super, Ctrl)")
@@ -171,8 +172,64 @@ func setupLogging() {
 	}
 }
 
+// printKeysymList prints all supported key names and exits
+func printKeysymList() {
+	db := keygrab.GetKeysymDB()
+
+	fmt.Println("Supported key names (case-insensitive, as shown by xev):")
+	fmt.Println()
+
+	// Navigation
+	fmt.Println("Navigation:")
+	for key := range db.Navigation {
+		fmt.Printf("  %s\n", key)
+	}
+	fmt.Println()
+
+	// Editing
+	fmt.Println("Editing:")
+	for key := range db.Editing {
+		fmt.Printf("  %s\n", key)
+	}
+	fmt.Println()
+
+	// Special keys
+	fmt.Println("Special keys:")
+	for key := range db.Special {
+		fmt.Printf("  %s\n", key)
+	}
+	fmt.Println()
+
+	// Function keys
+	fmt.Println("Function keys:")
+	for key := range db.Function {
+		fmt.Printf("  %s\n", key)
+	}
+	fmt.Println()
+
+	// Letters
+	fmt.Println("Letters:")
+	fmt.Println("  a-z (any lowercase letter)")
+	fmt.Println()
+
+	// Numbers
+	fmt.Println()
+
+	fmt.Println("Examples:")
+	fmt.Println("  qws -k F10")
+	fmt.Println("  qws -k Page_Down")
+	fmt.Println("  qws -k home")
+	fmt.Println("  qws -k grave")
+}
+
 // run is the main execution function
 func run(cmd *cobra.Command, args []string) error {
+	// Check if user wants to list supported keysyms
+	if showList, _ := cmd.Flags().GetBool("keysym-list"); showList {
+		printKeysymList()
+		return nil
+	}
+
 	// Create root context
 	ctx := cmd.Context()
 
@@ -204,9 +261,21 @@ func run(cmd *cobra.Command, args []string) error {
 	// Create key grabber
 	grabber := keygrab.NewKeyGrabber(conn.Conn, conn.Root)
 
-	// Grab Alt+Tab (TODO: use configured keybindings)
-	if err := grabber.GrabAltTab(); err != nil {
-		return fmt.Errorf("failed to grab Alt+Tab: %w", err)
+	// Grab keys with configured keybindings
+	log.Info().
+		Str("modifier", cfg.Keybindings.Modifier).
+		Str("key", cfg.Keybindings.Key).
+		Str("backward", cfg.Keybindings.Backward).
+		Str("workspace_modifier", cfg.Keybindings.WorkspaceModifier).
+		Msg("Grabbing configured key combination")
+
+	if err := grabber.GrabKeys(
+		cfg.Keybindings.Modifier,
+		cfg.Keybindings.Key,
+		cfg.Keybindings.Backward,
+		cfg.Keybindings.WorkspaceModifier,
+	); err != nil {
+		return fmt.Errorf("failed to grab keys: %w", err)
 	}
 	defer grabber.UngrabAll()
 
@@ -219,6 +288,13 @@ func run(cmd *cobra.Command, args []string) error {
 	}()
 
 	log.Info().Msg("QWS started, waiting for events...")
+
+	// Monitor context cancellation and close connection when cancelled
+	go func() {
+		<-ctx.Done()
+		log.Info().Msg("Received termination signal, shutting down...")
+		conn.Close()
+	}()
 
 	// Main event loop
 	for {
@@ -278,7 +354,7 @@ func handleKeyPress(ctx context.Context, conn *x11.Connection, e xproto.KeyPress
 
 	// Create or reuse selector
 	if selector == nil {
-		selector = ui.NewSelector(ctx, conn.Conn, conn.Root, windows)
+		selector = ui.NewSelector(ctx, conn.Conn, conn.Root, windows, cfg.Keybindings)
 	} else {
 		// Update window list, preserving position
 		selector.UpdateWindows(windows)

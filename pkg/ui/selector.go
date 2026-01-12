@@ -7,12 +7,23 @@ import (
 	"math"
 	"time"
 
+	"github.com/almaz-uno/qws/internal/config"
 	"github.com/almaz-uno/qws/pkg/carousel"
+	"github.com/almaz-uno/qws/pkg/keygrab"
 	"github.com/almaz-uno/qws/pkg/x11"
 	"github.com/jezek/xgb"
 	"github.com/jezek/xgb/xproto"
 	"github.com/rs/zerolog/log"
 )
+
+// keyConfig holds runtime keycode information for configured keys
+type keyConfig struct {
+	modifierMask         uint16 // Primary modifier (Alt, Super, etc.)
+	backwardMask         uint16 // Backward modifier (Shift)
+	workspaceModifierMask uint16 // Workspace filter modifier (Ctrl)
+	mainKeysym           uint32 // Main trigger key keysym (Tab, F10, etc.)
+	cancelKeysym         uint32 // Cancel key keysym (Escape)
+}
 
 // Selector provides a graphical carousel interface for window selection
 type Selector struct {
@@ -29,13 +40,14 @@ type Selector struct {
 	animOffset      float64
 	animating       bool
 	resultChan      chan *x11.WindowInfo
-	altPressed      bool      // Track if Alt is currently pressed
-	ctrlPressed     bool      // Track if Ctrl is currently pressed
+	keyConfig       keyConfig // Configured keybindings
+	modifierPressed bool      // Track if primary modifier is currently pressed
+	workspacePressed bool     // Track if workspace modifier is currently pressed
 	lastMouseUpdate time.Time // Last time mouse hover was processed
 }
 
 // NewSelector creates a new graphical window selector
-func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, windows []x11.WindowInfo) *Selector {
+func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, windows []x11.WindowInfo, keybindings config.Keybindings) *Selector {
 	// Try to get current monitor geometry, fallback to full screen on error
 	monitor, err := x11.GetCurrentMonitor(conn, root)
 	if err != nil {
@@ -58,9 +70,47 @@ func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, window
 		Int("height", monitor.Height).
 		Msg("Using monitor geometry for selector")
 
-	config := carousel.DefaultConfig()
-	config.Width = monitor.Width
-	config.Height = monitor.Height
+	carouselConfig := carousel.DefaultConfig()
+	carouselConfig.Width = monitor.Width
+	carouselConfig.Height = monitor.Height
+
+	// Parse keybindings to runtime key configuration
+	keyConf := keyConfig{}
+
+	if mask, err := keygrab.GetModifierMask(keybindings.Modifier); err != nil {
+		log.Warn().Err(err).Str("modifier", keybindings.Modifier).Msg("Failed to parse modifier, using Alt")
+		keyConf.modifierMask = uint16(keygrab.ModAlt)
+	} else {
+		keyConf.modifierMask = mask
+	}
+
+	if mask, err := keygrab.GetModifierMask(keybindings.Backward); err != nil {
+		log.Warn().Err(err).Str("backward", keybindings.Backward).Msg("Failed to parse backward modifier, using Shift")
+		keyConf.backwardMask = uint16(keygrab.ModShift)
+	} else {
+		keyConf.backwardMask = mask
+	}
+
+	if mask, err := keygrab.GetModifierMask(keybindings.WorkspaceModifier); err != nil {
+		log.Warn().Err(err).Str("workspace_modifier", keybindings.WorkspaceModifier).Msg("Failed to parse workspace modifier, using Ctrl")
+		keyConf.workspaceModifierMask = uint16(keygrab.ModControl)
+	} else {
+		keyConf.workspaceModifierMask = mask
+	}
+
+	if keysym, err := keygrab.GetKeysym(keybindings.Key); err != nil {
+		log.Warn().Err(err).Str("key", keybindings.Key).Msg("Failed to parse main key, using Tab")
+		keyConf.mainKeysym = 0xFF09 // XK_Tab
+	} else {
+		keyConf.mainKeysym = keysym
+	}
+
+	if keysym, err := keygrab.GetKeysym(keybindings.Cancel); err != nil {
+		log.Warn().Err(err).Str("cancel", keybindings.Cancel).Msg("Failed to parse cancel key, using Escape")
+		keyConf.cancelKeysym = 0xFF1B // XK_Escape
+	} else {
+		keyConf.cancelKeysym = keysym
+	}
 
 	return &Selector{
 		ctx:           ctx,
@@ -70,9 +120,10 @@ func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, window
 		allWindows:    windows,
 		selectedIndex: 0,
 		hoverIndex:    -1,
-		config:        config,
+		config:        carouselConfig,
 		monitorGeom:   monitor,
 		resultChan:    make(chan *x11.WindowInfo, 1),
+		keyConfig:     keyConf,
 	}
 }
 
@@ -162,17 +213,15 @@ func (s *Selector) Show() (*x11.WindowInfo, error) {
 	).Reply()
 	defer xproto.UngrabKeyboard(s.conn, xproto.TimeCurrentTime)
 
-	// Check if Alt is currently pressed when showing the selector
-	// Mod1Mask is Alt modifier
-	s.altPressed = s.isModifierPressed(xproto.ModMask1) // Mod1 is Alt
+	// Check if primary modifier is currently pressed when showing the selector
+	s.modifierPressed = s.isModifierPressed(s.keyConfig.modifierMask)
 
-	// Check if Ctrl is currently pressed when showing the selector
-	// ControlMask is Ctrl modifier
-	s.ctrlPressed = s.isModifierPressed(xproto.ModMaskControl)
+	// Check if workspace modifier is currently pressed when showing the selector
+	s.workspacePressed = s.isModifierPressed(s.keyConfig.workspaceModifierMask)
 
-	// If Ctrl is pressed, apply workspace filter immediately
-	if s.ctrlPressed {
-		log.Debug().Msg("Ctrl pressed at startup, filtering by workspace")
+	// If workspace modifier is pressed, apply workspace filter immediately
+	if s.workspacePressed {
+		log.Debug().Msg("Workspace modifier pressed at startup, filtering by workspace")
 		s.applyWorkspaceFilter()
 		// Update selected index if it went out of bounds
 		if s.selectedIndex >= len(s.windows) {
@@ -186,8 +235,8 @@ func (s *Selector) Show() (*x11.WindowInfo, error) {
 		thumbnails = s.prepareThumbnails()
 	}
 
-	// If Alt is not pressed (quick Alt+Tab), close immediately after rendering
-	if !s.altPressed {
+	// If primary modifier is not pressed (quick key press), close immediately after rendering
+	if !s.modifierPressed {
 		// Initial render
 		s.render(thumbnails)
 		// Small delay to show the selection
@@ -215,6 +264,11 @@ func (s *Selector) Show() (*x11.WindowInfo, error) {
 
 // handleEventsSync processes keyboard events synchronously
 func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
+	// Get keycodes for modifiers
+	modifierKeycodes := s.getModifierKeycodes(s.keyConfig.modifierMask)
+	workspaceKeycodes := s.getModifierKeycodes(s.keyConfig.workspaceModifierMask)
+	enterKeycode := s.keysymToKeycode(0xFF0D) // XK_Return
+
 	for {
 		event, _ := s.conn.WaitForEvent()
 		if event == nil {
@@ -224,13 +278,13 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 
 		switch e := event.(type) {
 		case xproto.KeyPressEvent:
-			// Track Alt presses
-			if e.Detail == 64 || e.Detail == 108 {
-				s.altPressed = true
+			// Track primary modifier presses
+			if s.isModifierKeycode(e.Detail, modifierKeycodes) {
+				s.modifierPressed = true
 			}
 
 			// Handle Enter key - select current window
-			if e.Detail == 36 { // Return/Enter
+			if enterKeycode != 0 && e.Detail == enterKeycode {
 				if s.selectedIndex >= 0 && s.selectedIndex < len(s.windows) {
 					return &s.windows[s.selectedIndex]
 				}
@@ -238,15 +292,15 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 			}
 
 			if s.handleKeyPressSimple(e, thumbnails) {
-				// ESC pressed
+				// Cancel key pressed
 				return nil
 			}
 
 		case xproto.KeyReleaseEvent:
-			// Check if Ctrl was released (keycode 37 = left Ctrl, 105 = right Ctrl)
-			if e.Detail == 37 || e.Detail == 105 {
-				if s.ctrlPressed {
-					s.ctrlPressed = false
+			// Check if workspace modifier was released
+			if s.isModifierKeycode(e.Detail, workspaceKeycodes) {
+				if s.workspacePressed {
+					s.workspacePressed = false
 					s.removeWorkspaceFilter()
 					// Preserve selection if possible
 					if s.selectedIndex >= len(s.windows) {
@@ -256,12 +310,12 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 				}
 			}
 
-			// Check if Alt was released (keycode 64 = left Alt, 108 = right Alt)
-			if e.Detail == 64 || e.Detail == 108 {
-				// Only react to Alt release if Alt was pressed while selector was open
-				if s.altPressed {
-					s.altPressed = false
-					// Return selected window when Alt is released
+			// Check if primary modifier was released
+			if s.isModifierKeycode(e.Detail, modifierKeycodes) {
+				// Only react to modifier release if modifier was pressed while selector was open
+				if s.modifierPressed {
+					s.modifierPressed = false
+					// Return selected window when modifier is released
 					if s.selectedIndex >= 0 && s.selectedIndex < len(s.windows) {
 						return &s.windows[s.selectedIndex]
 					}
@@ -344,18 +398,19 @@ func (s *Selector) render(thumbnails []image.Image) {
 }
 
 // handleKeyPressSimple handles a key press event
-// Returns true if ESC was pressed (cancel)
+// Returns true if cancel key was pressed
 func (s *Selector) handleKeyPressSimple(e xproto.KeyPressEvent, thumbnails []image.Image) bool {
 	keycode := e.Detail
 	state := e.State
 
-	// Check for Shift modifier (Shift = 0x1)
-	shiftPressed := (state & xproto.ModMaskShift) != 0
+	// Check for backward modifier
+	backwardPressed := (state & s.keyConfig.backwardMask) != 0
 
-	// Track Ctrl key press (keycode 37 = left Ctrl, 105 = right Ctrl)
-	if keycode == 37 || keycode == 105 {
-		if !s.ctrlPressed {
-			s.ctrlPressed = true
+	// Track workspace modifier key press
+	workspaceKeycodes := s.getModifierKeycodes(s.keyConfig.workspaceModifierMask)
+	if s.isModifierKeycode(keycode, workspaceKeycodes) {
+		if !s.workspacePressed {
+			s.workspacePressed = true
 			s.applyWorkspaceFilter()
 			// Preserve selection if possible
 			if s.selectedIndex >= len(s.windows) {
@@ -366,24 +421,45 @@ func (s *Selector) handleKeyPressSimple(e xproto.KeyPressEvent, thumbnails []ima
 		return false
 	}
 
-	switch keycode {
-	case 9: // Escape
+	// Check for cancel key (Escape by default)
+	if s.isKeycode(keycode, s.keyConfig.cancelKeysym) {
 		return true // Cancel
+	}
 
-	case 23: // Tab
-		if shiftPressed {
-			// Alt+Shift+Tab - previous window
+	// Check for Ctrl+C (emergency exit)
+	ctrlPressed := (state & s.keyConfig.workspaceModifierMask) != 0
+	cKeysym := uint32(0x0063) // 'c'
+	if ctrlPressed && s.isKeycode(keycode, cKeysym) {
+		log.Debug().Msg("Ctrl+C pressed, cancelling")
+		return true // Cancel
+	}
+
+	// Get configured main key and arrow keys
+	mainKeysym := s.keyConfig.mainKeysym
+	leftKeysym := uint32(0xFF51)  // XK_Left
+	rightKeysym := uint32(0xFF53) // XK_Right
+
+	// Handle main key (configured trigger key)
+	if s.isKeycode(keycode, mainKeysym) {
+		if backwardPressed {
+			// Modifier+Backward+Key - previous window
 			s.selectPrevious(thumbnails)
 		} else {
-			// Alt+Tab - next window
+			// Modifier+Key - next window
 			s.selectNext(thumbnails)
 		}
+		return false
+	}
 
-	case 114: // Right Arrow - next window
+	// Handle arrow keys
+	if s.isKeycode(keycode, rightKeysym) {
 		s.selectNext(thumbnails)
+		return false
+	}
 
-	case 113: // Left Arrow - previous window
+	if s.isKeycode(keycode, leftKeysym) {
 		s.selectPrevious(thumbnails)
+		return false
 	}
 
 	return false
@@ -450,6 +526,86 @@ func (s *Selector) isModifierPressed(mask uint16) bool {
 		return false
 	}
 	return (reply.Mask & mask) != 0
+}
+
+// keysymToKeycode converts keysym to keycode for current keyboard layout
+func (s *Selector) keysymToKeycode(keysym uint32) xproto.Keycode {
+	setup := xproto.Setup(s.conn)
+	mapping, err := xproto.GetKeyboardMapping(s.conn,
+		setup.MinKeycode,
+		byte(setup.MaxKeycode-setup.MinKeycode+1)).Reply()
+	if err != nil {
+		return 0
+	}
+
+	for keycode := setup.MinKeycode; keycode <= setup.MaxKeycode; keycode++ {
+		for i := byte(0); i < mapping.KeysymsPerKeycode; i++ {
+			idx := int(keycode-setup.MinKeycode)*int(mapping.KeysymsPerKeycode) + int(i)
+			if idx < len(mapping.Keysyms) && uint32(mapping.Keysyms[idx]) == keysym {
+				return keycode
+			}
+		}
+	}
+	return 0
+}
+
+// isKeycode checks if the given detail matches any keycode for the keysym
+func (s *Selector) isKeycode(detail xproto.Keycode, keysym uint32) bool {
+	expectedKeycode := s.keysymToKeycode(keysym)
+	return expectedKeycode != 0 && detail == expectedKeycode
+}
+
+// getModifierKeycodes returns all keycodes that produce the given modifier mask
+func (s *Selector) getModifierKeycodes(mask uint16) []xproto.Keycode {
+	modmap, err := xproto.GetModifierMapping(s.conn).Reply()
+	if err != nil {
+		return nil
+	}
+
+	// Determine which modifier position corresponds to our mask
+	// Shift=0, Lock=1, Control=2, Mod1=3, Mod2=4, Mod3=5, Mod4=6, Mod5=7
+	modIndex := -1
+	switch mask {
+	case uint16(keygrab.ModShift):
+		modIndex = 0
+	case uint16(keygrab.ModCapsLock):
+		modIndex = 1
+	case uint16(keygrab.ModControl):
+		modIndex = 2
+	case uint16(keygrab.ModAlt): // Mod1
+		modIndex = 3
+	case uint16(keygrab.ModNumLock): // Mod2
+		modIndex = 4
+	case uint16(keygrab.Mod3):
+		modIndex = 5
+	case uint16(keygrab.ModSuper): // Mod4
+		modIndex = 6
+	case uint16(keygrab.Mod5):
+		modIndex = 7
+	}
+
+	if modIndex < 0 {
+		return nil
+	}
+
+	keycodes := []xproto.Keycode{}
+	for i := byte(0); i < modmap.KeycodesPerModifier; i++ {
+		idx := modIndex*int(modmap.KeycodesPerModifier) + int(i)
+		if idx < len(modmap.Keycodes) && modmap.Keycodes[idx] != 0 {
+			keycodes = append(keycodes, modmap.Keycodes[idx])
+		}
+	}
+	return keycodes
+}
+
+// isModifierKeycode checks if detail matches any of the given modifier keycodes
+func (s *Selector) isModifierKeycode(detail xproto.Keycode, keycodes []xproto.Keycode) bool {
+	for _, kc := range keycodes {
+		if detail == kc {
+			return true
+		}
+	}
+	return false
 }
 
 // getWindowIndexAtPosition calculates which window card is at the given mouse position

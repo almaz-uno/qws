@@ -348,7 +348,7 @@ log:
 | `QWS_KEYBINDINGS_KEY`
 | `string`
 | `Tab`
-| Main trigger key (Tab, grave, space, etc.)
+| Main trigger key: Tab, space, Return, Escape, F1-F12, Left/Right/Up/Down, Home/End, Page_Up/Page_Down, Insert/Delete, a-z, 0-9, grave (`). Names match xev output (case-insensitive)
 
 | `keybindings.backward`
 | `--keybindings-backward`
@@ -575,6 +575,13 @@ log:
 | Very verbose mode (equivalent to `--log-level=trace`)
 
 | _special_
+| `--keysym-list`
+| _n/a_
+| `flag`
+| _n/a_
+| Print list of supported key names and exit
+
+| _special_
 | `--help` / `-h`
 | _n/a_
 | `flag`
@@ -733,20 +740,88 @@ qws --log-level=debug
 qws -vv  # trace level
 ----
 
-=== Phase 2: Keybindings
+[[phase-2-status]]
+=== Phase 2: Keybindings ✅
 
-. Make modifier configurable (Alt/Super/Ctrl)
-. Make main key configurable
-. Add cancel key support
+[.green]
+*COMPLETED:* Phase 2 has been successfully implemented.
 
+. ✅ Make modifier configurable (Alt/Super/Ctrl)
+. ✅ Make main key configurable
+. ✅ Add cancel key support
+
+.Implementation details
+* Extended `pkg/keygrab/keygrab.go` with:
+  - `ParseModifier()` function to convert modifier names (Alt, Super, Ctrl, etc.) to X11 modifier masks
+  - `ParseKey()` function to convert key names (Tab, grave, space, Escape, etc.) to X11 keysyms
+  - `GrabKeys()` method that accepts configurable modifier, key, backward modifier, and workspace modifier
+  - Support for all modifier combinations: modifier+key, modifier+backward+key, modifier+workspace+key, modifier+workspace+backward+key
+* Updated `pkg/ui/selector.go` to:
+  - Accept `config.Keybindings` parameter in `NewSelector()`
+  - Parse keybindings to runtime configuration on initialization
+  - Dynamically detect modifier and key presses/releases based on configuration
+  - Support configurable cancel key (Escape by default)
+  - Handle both primary modifier and workspace modifier independently
+* Integrated keybindings configuration in `cmd/qws/root.go`:
+  - Pass `cfg.Keybindings` to both key grabber and selector
+  - Log configured key combination on startup
+  - Use configured keys for all window switching operations
+
+.Usage examples
+[source,bash]
+----
+# Use Super+grave (Win+backtick) instead of Alt+Tab
+qws -m Super -k grave
+
+# Use Ctrl+Space
+qws --keybindings-modifier=Ctrl --keybindings-key=space
+
+# Use Alt+F10 (xev format, case-insensitive)
+qws -m Alt -k F10
+
+# Use Super+Home
+qws -m Super -k Home
+
+# Use Alt+Page_Down
+qws -m Alt -k Page_Down
+
+# List all supported key names (as shown by xev)
+qws --keysym-list
+
+# Override backward modifier (default is Shift)
+qws --keybindings-backward=Control
+
+# Change cancel key (default is Escape)
+qws --keybindings-cancel=q
+----
+
+.Configuration file example
+[source,yaml]
+----
+keybindings:
+  modifier: Super          # Win/Super key
+  key: grave              # backtick key (`)
+  backward: Shift         # Reverse direction
+  workspace_modifier: Alt # Filter current workspace
+  cancel: Escape          # Cancel selection
+----
+
+[[phase-3-status]]
 === Phase 3: Appearance
+
+[.yellow]
+*TODO:* Phase 3 is planned for future implementation.
 
 . Extract carousel config to viper
 . Add font configuration
 . Implement theme system with auto-detection
 . Add color customization
 
+[[phase-4-status]]
 === Phase 4: Behavior
+
+[.yellow]
+*TODO:* Phase 4 is planned for future implementation.
 
 . Configurable snapshot interval
 . Window filtering options
