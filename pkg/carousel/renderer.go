@@ -4,8 +4,16 @@ import (
 	"image"
 	"image/color"
 	"math"
+	"strings"
 
 	"github.com/fogleman/gg"
+)
+
+const (
+	// fontSystem is the primary system font for rendering
+	fontSystem = "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"
+	// fontFallback is the fallback font if system font is unavailable
+	fontFallback = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 )
 
 // WindowData contains window information for rendering
@@ -285,13 +293,10 @@ func drawWindowWithData(dc *gg.Context, data *WindowData, index, selected, hover
 	// Draw title (if available)
 	if data.Title != "" {
 		fontSize := 16.0 * scale
-		if err := dc.LoadFontFace("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", fontSize); err == nil {
-			title := data.Title
+		if err := dc.LoadFontFace(fontSystem, fontSize); err == nil {
+			title := strings.TrimSpace(data.Title)
 			// Truncate long titles by runes (Unicode characters), not bytes
-			maxLen := int(30 / scale)
-			if maxLen < 10 {
-				maxLen = 10
-			}
+			maxLen := max(int(30/scale), 10)
 			runes := []rune(title)
 			if len(runes) > maxLen {
 				title = string(runes[:maxLen]) + "..."
@@ -322,7 +327,7 @@ func drawWindowWithData(dc *gg.Context, data *WindowData, index, selected, hover
 	// Draw workspace name (if available)
 	if data.Workspace != "" {
 		fontSize := 14.0 * scale
-		if err := dc.LoadFontFace("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", fontSize); err == nil {
+		if err := dc.LoadFontFace(fontSystem, fontSize); err == nil {
 			workspace := data.Workspace
 			// Truncate long workspace names
 			maxLen := int(20 / scale)
@@ -456,7 +461,7 @@ func DrawPlaceholder(width, height int, title string) image.Image {
 	// Text label
 	if title != "" {
 		dc.SetRGBA(1, 1, 1, 0.9)
-		if err := dc.LoadFontFace("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 14); err == nil {
+		if err := dc.LoadFontFace(fontFallback, 14); err == nil {
 			// Truncate long titles by runes (Unicode characters), not bytes
 			runes := []rune(title)
 			if len(runes) > 20 {
