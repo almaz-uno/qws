@@ -4,6 +4,7 @@ import (
 	"image"
 	"image/color"
 	"math"
+	"strconv"
 	"strings"
 
 	"github.com/fogleman/gg"
@@ -34,6 +35,14 @@ type Config struct {
 	PerspectiveFactor float64 // Perspective distortion factor (0.0-1.0)
 	ShadowOffset      float64 // Shadow offset
 	ShadowBlur        float64 // Shadow blur radius
+	FontPrimary       string  // Primary font path
+	FontFallback      string  // Fallback font path
+	FontSize          int     // Font size
+	BackgroundColor   string  // Background color (hex or rgba)
+	SelectionFrame    string  // Selection frame color
+	TextColor         string  // Text color
+	ShadowColor       string  // Shadow color
+	InactiveFrame     string  // Inactive frame color
 }
 
 // DefaultConfig returns default carousel configuration
@@ -47,7 +56,71 @@ func DefaultConfig() Config {
 		PerspectiveFactor: 0.6,
 		ShadowOffset:      10,
 		ShadowBlur:        15,
+		FontPrimary:       fontSystem,
+		FontFallback:      fontFallback,
+		FontSize:          14,
+		BackgroundColor:   "#1a1a2e",
+		SelectionFrame:    "#4a9eff",
+		TextColor:         "#ffffff",
+		ShadowColor:       "rgba(0, 0, 0, 0.8)",
+		InactiveFrame:     "#404050",
 	}
+}
+
+// parseColor parses color string in various formats: #RGB, #RRGGBB, rgba(r,g,b,a)
+// Returns r, g, b, a in range 0.0-1.0
+func parseColor(colorStr string) (float64, float64, float64, float64) {
+	colorStr = strings.TrimSpace(colorStr)
+
+	// Parse rgba(r, g, b, a) or rgb(r, g, b)
+	if strings.HasPrefix(colorStr, "rgba(") && strings.HasSuffix(colorStr, ")") {
+		inner := colorStr[5 : len(colorStr)-1]
+		parts := strings.Split(inner, ",")
+		if len(parts) == 4 {
+			r, _ := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+			g, _ := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+			b, _ := strconv.ParseFloat(strings.TrimSpace(parts[2]), 64)
+			a, _ := strconv.ParseFloat(strings.TrimSpace(parts[3]), 64)
+			return r / 255.0, g / 255.0, b / 255.0, a
+		}
+	}
+
+	if strings.HasPrefix(colorStr, "rgb(") && strings.HasSuffix(colorStr, ")") {
+		inner := colorStr[4 : len(colorStr)-1]
+		parts := strings.Split(inner, ",")
+		if len(parts) == 3 {
+			r, _ := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+			g, _ := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+			b, _ := strconv.ParseFloat(strings.TrimSpace(parts[2]), 64)
+			return r / 255.0, g / 255.0, b / 255.0, 1.0
+		}
+	}
+
+	// Parse hex color #RRGGBB or #RGB
+	if strings.HasPrefix(colorStr, "#") {
+		hex := colorStr[1:]
+
+		// #RGB format -> expand to #RRGGBB
+		if len(hex) == 3 {
+			hex = string([]byte{hex[0], hex[0], hex[1], hex[1], hex[2], hex[2]})
+		}
+
+		if len(hex) == 6 {
+			r, _ := strconv.ParseUint(hex[0:2], 16, 8)
+			g, _ := strconv.ParseUint(hex[2:4], 16, 8)
+			b, _ := strconv.ParseUint(hex[4:6], 16, 8)
+			return float64(r) / 255.0, float64(g) / 255.0, float64(b) / 255.0, 1.0
+		}
+	}
+
+	// Default: white
+	return 1.0, 1.0, 1.0, 1.0
+}
+
+// setColor sets drawing color from color string
+func setColor(dc *gg.Context, colorStr string, alphaMultiplier float64) {
+	r, g, b, a := parseColor(colorStr)
+	dc.SetRGBA(r, g, b, a*alphaMultiplier)
 }
 
 // Draw3DCarousel renders a 2.5D carousel with perspective effect
@@ -203,8 +276,7 @@ func drawShadow(dc *gg.Context, x, y, w, h, rotation, scale float64, cfg Config)
 	dc.Rotate(rotation)
 
 	// Shadow color with blur effect (approximated)
-	shadowAlpha := 0.3 * scale
-	dc.SetRGBA(0, 0, 0, shadowAlpha)
+	setColor(dc, cfg.ShadowColor, scale)
 	dc.DrawRectangle(-w/2, -h/2, w, h)
 	dc.Fill()
 
@@ -292,8 +364,15 @@ func drawWindowWithData(dc *gg.Context, data *WindowData, index, selected, hover
 
 	// Draw title (if available)
 	if data.Title != "" {
-		fontSize := 16.0 * scale
-		if err := dc.LoadFontFace(fontSystem, fontSize); err == nil {
+		fontSize := float64(cfg.FontSize) * scale * 1.15 // Slightly larger than configured size
+		// Try primary font first, fallback to secondary
+		if err := dc.LoadFontFace(cfg.FontPrimary, fontSize); err != nil {
+			if err := dc.LoadFontFace(cfg.FontFallback, fontSize); err != nil {
+				// Skip text rendering if no font available
+				goto skipTitle
+			}
+		}
+		{
 			title := strings.TrimSpace(data.Title)
 			// Truncate long titles by runes (Unicode characters), not bytes
 			maxLen := max(int(30/scale), 10)
@@ -307,8 +386,8 @@ func drawWindowWithData(dc *gg.Context, data *WindowData, index, selected, hover
 			padding := 8.0 * scale
 			borderRadius := 6.0 * scale
 
-			// Draw semi-transparent black rounded rectangle background
-			dc.SetRGBA(0, 0, 0, 0.7*alpha)
+			// Draw semi-transparent dark background
+			setColor(dc, cfg.BackgroundColor, 0.7*alpha)
 			dc.DrawRoundedRectangle(
 				x-textWidth/2-padding,
 				titleY-textHeight/2-padding,
@@ -319,15 +398,23 @@ func drawWindowWithData(dc *gg.Context, data *WindowData, index, selected, hover
 			dc.Fill()
 
 			// Draw title text
-			dc.SetRGBA(1, 1, 1, alpha)
+			setColor(dc, cfg.TextColor, alpha)
 			dc.DrawStringAnchored(title, x, titleY, 0.5, 0.5)
 		}
 	}
+skipTitle:
 
 	// Draw workspace name (if available)
 	if data.Workspace != "" {
-		fontSize := 14.0 * scale
-		if err := dc.LoadFontFace(fontSystem, fontSize); err == nil {
+		fontSize := float64(cfg.FontSize) * scale
+		// Try primary font first, fallback to secondary
+		if err := dc.LoadFontFace(cfg.FontPrimary, fontSize); err != nil {
+			if err := dc.LoadFontFace(cfg.FontFallback, fontSize); err != nil {
+				// Skip workspace rendering if no font available
+				goto skipWorkspace
+			}
+		}
+		{
 			workspace := data.Workspace
 			// Truncate long workspace names
 			maxLen := int(20 / scale)
@@ -344,8 +431,8 @@ func drawWindowWithData(dc *gg.Context, data *WindowData, index, selected, hover
 			padding := 6.0 * scale
 			borderRadius := 4.0 * scale
 
-			// Draw semi-transparent dark blue rounded rectangle background
-			dc.SetRGBA(0.1, 0.2, 0.4, 0.6*alpha)
+			// Draw semi-transparent background using inactive frame color
+			setColor(dc, cfg.InactiveFrame, 0.6*alpha)
 			dc.DrawRoundedRectangle(
 				x-textWidth/2-padding,
 				workspaceY-textHeight/2-padding,
@@ -356,10 +443,11 @@ func drawWindowWithData(dc *gg.Context, data *WindowData, index, selected, hover
 			dc.Fill()
 
 			// Draw workspace text
-			dc.SetRGBA(0.8, 0.9, 1.0, alpha)
+			setColor(dc, cfg.TextColor, alpha*0.9)
 			dc.DrawStringAnchored(workspace, x, workspaceY, 0.5, 0.5)
 		}
 	}
+skipWorkspace:
 
 	// Draw thumbnail
 	dc.Translate(x, y)
@@ -396,13 +484,13 @@ func drawSelectionIndicator(dc *gg.Context, x, y, w, h float64, cfg Config) {
 	dc.Translate(x, y)
 
 	// Outer glow effect
-	dc.SetRGBA(0.3, 0.6, 1.0, 0.5) // Blue glow
+	setColor(dc, cfg.SelectionFrame, 0.5)
 	dc.SetLineWidth(6)
 	dc.DrawRectangle(-w/2-10, -h/2-10, w+20, h+20)
 	dc.Stroke()
 
 	// Inner highlight
-	dc.SetRGBA(0.5, 0.8, 1.0, 0.8) // Lighter blue
+	setColor(dc, cfg.SelectionFrame, 0.8)
 	dc.SetLineWidth(3)
 	dc.DrawRectangle(-w/2-5, -h/2-5, w+10, h+10)
 	dc.Stroke()

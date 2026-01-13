@@ -807,15 +807,100 @@ keybindings:
 ----
 
 [[phase-3-status]]
-=== Phase 3: Appearance
+=== Phase 3: Appearance ✅
 
-[.yellow]
-*TODO:* Phase 3 is planned for future implementation.
+[.green]
+*COMPLETED:* Phase 3 has been successfully implemented.
 
-. Extract carousel config to viper
-. Add font configuration
-. Implement theme system with auto-detection
-. Add color customization
+. ✅ Extract carousel config to viper
+. ✅ Add font configuration
+. ✅ Implement theme system with auto-detection
+. ✅ Add color customization
+
+.Implementation details
+* Extended `carousel.Config` to include font and color settings:
+  - `FontPrimary` and `FontFallback` paths for configurable fonts
+  - `FontSize` for adjustable text rendering
+  - Color properties: `BackgroundColor`, `SelectionFrame`, `TextColor`, `ShadowColor`, `InactiveFrame`
+* Implemented theme detection in `internal/config/theme.go`:
+  - `DetectTheme()` function checks `GTK_THEME` environment variable and GTK 3.0 settings
+  - Reads `~/.config/gtk-3.0/settings.ini` to detect `gtk-application-prefer-dark-theme`
+  - Checks theme name for "dark" substring
+  - Falls back to light theme if no detection method succeeds
+  - `ResolveTheme()` resolves "auto" theme setting to actual theme (dark/light)
+  - `GetActiveTheme()` returns active theme colors based on configuration
+* Updated `pkg/carousel/renderer.go`:
+  - Added `parseColor()` function supporting hex (#RGB, #RRGGBB) and rgba() formats
+  - Added `setColor()` helper for applying colors from configuration
+  - Modified `drawSelectionIndicator()` to use `SelectionFrame` color
+  - Modified `drawShadow()` to use `ShadowColor`
+  - Modified `drawWindowWithData()` to use configurable fonts and colors for titles/workspace labels
+  - All hardcoded colors replaced with configuration-driven values
+* Updated `pkg/ui/selector.go`:
+  - Modified `NewSelector()` to accept `config.Appearance` parameter
+  - Automatically resolves theme (dark/light/auto) during selector creation
+  - Builds `carousel.Config` from appearance settings including all visual parameters
+  - Logs detected theme for debugging
+* Updated `cmd/qws/root.go`:
+  - Added CLI flags for all appearance parameters:
+    - Shadow: `--appearance-shadow-offset`, `--appearance-shadow-blur`
+    - Font: `--appearance-font-primary`, `--appearance-font-fallback`, `--appearance-font-size`
+    - Colors: All dark/light theme color parameters (background, selection frame, text, shadow, inactive frame)
+  - Updated `applyFlags()` to handle all new appearance flags
+  - Modified `handleKeyPress()` to pass `cfg.Appearance` to `NewSelector()`
+* All configuration properties from Phase 1 are now fully utilized
+* Theme switching works automatically based on system settings or can be forced via configuration
+
+.Usage examples
+[source,bash]
+----
+# Use dark theme with custom selection color
+qws -t dark --appearance-colors-dark-selection-frame="#ff6b6b"
+
+# Configure fonts
+qws --appearance-font-primary=/path/to/font.ttf --appearance-font-size=16
+
+# Adjust shadow and perspective
+qws --appearance-shadow-offset=15 --appearance-shadow-blur=20 --appearance-perspective=0.7
+
+# Auto-detect theme (default)
+qws -t auto
+
+# Force light theme
+qws -t light
+----
+
+.Configuration file example
+[source,yaml]
+----
+appearance:
+  thumbnail:
+    width: 256
+    height: 256
+  spacing: 300
+  perspective: 0.6
+  shadow:
+    offset: 10
+    blur: 15
+  font:
+    primary: /usr/share/fonts/truetype/noto/NotoSans-Regular.ttf
+    fallback: /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+    size: 14
+  colors:
+    theme: auto  # or dark, light
+    dark:
+      background: "#1a1a2e"
+      selection_frame: "#4a9eff"
+      text: "#ffffff"
+      shadow: "rgba(0, 0, 0, 0.8)"
+      inactive_frame: "#404050"
+    light:
+      background: "#f5f5f5"
+      selection_frame: "#0078d4"
+      text: "#1a1a1a"
+      shadow: "rgba(0, 0, 0, 0.3)"
+      inactive_frame: "#cccccc"
+----
 
 [[phase-4-status]]
 === Phase 4: Behavior

@@ -47,7 +47,7 @@ type Selector struct {
 }
 
 // NewSelector creates a new graphical window selector
-func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, windows []x11.WindowInfo, keybindings config.Keybindings) *Selector {
+func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, windows []x11.WindowInfo, appearance config.Appearance, keybindings config.Keybindings) *Selector {
 	// Try to get current monitor geometry, fallback to full screen on error
 	monitor, err := x11.GetCurrentMonitor(conn, root)
 	if err != nil {
@@ -70,9 +70,37 @@ func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, window
 		Int("height", monitor.Height).
 		Msg("Using monitor geometry for selector")
 
-	carouselConfig := carousel.DefaultConfig()
-	carouselConfig.Width = monitor.Width
-	carouselConfig.Height = monitor.Height
+	// Build carousel configuration from appearance settings
+	carouselConfig := carousel.Config{
+		Width:             monitor.Width,
+		Height:            monitor.Height,
+		ThumbWidth:        appearance.Thumbnail.Width,
+		ThumbHeight:       appearance.Thumbnail.Height,
+		Spacing:           appearance.Spacing,
+		PerspectiveFactor: appearance.Perspective,
+		ShadowOffset:      appearance.Shadow.Offset,
+		ShadowBlur:        appearance.Shadow.Blur,
+		FontPrimary:       appearance.Font.Primary,
+		FontFallback:      appearance.Font.Fallback,
+		FontSize:          appearance.Font.Size,
+	}
+
+	// Resolve theme and apply colors
+	activeTheme := config.ResolveTheme(appearance.Colors.Theme)
+	var themeColors config.ThemeColor
+	if activeTheme == "dark" {
+		themeColors = appearance.Colors.Dark
+		log.Debug().Str("theme", "dark").Msg("Using dark theme")
+	} else {
+		themeColors = appearance.Colors.Light
+		log.Debug().Str("theme", "light").Msg("Using light theme")
+	}
+
+	carouselConfig.BackgroundColor = themeColors.Background
+	carouselConfig.SelectionFrame = themeColors.SelectionFrame
+	carouselConfig.TextColor = themeColors.Text
+	carouselConfig.ShadowColor = themeColors.Shadow
+	carouselConfig.InactiveFrame = themeColors.InactiveFrame
 
 	// Parse keybindings to runtime key configuration
 	keyConf := keyConfig{}

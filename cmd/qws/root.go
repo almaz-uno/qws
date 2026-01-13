@@ -56,7 +56,22 @@ func init() {
 	rootCmd.PersistentFlags().Int("appearance-thumbnail-height", 0, "thumbnail height in pixels")
 	rootCmd.PersistentFlags().Float64("appearance-spacing", 0, "distance between carousel items")
 	rootCmd.PersistentFlags().Float64("appearance-perspective", 0, "perspective effect factor (0.0-1.0)")
+	rootCmd.PersistentFlags().Float64("appearance-shadow-offset", 0, "shadow offset in pixels")
+	rootCmd.PersistentFlags().Float64("appearance-shadow-blur", 0, "shadow blur radius")
+	rootCmd.PersistentFlags().String("appearance-font-primary", "", "primary font path")
+	rootCmd.PersistentFlags().String("appearance-font-fallback", "", "fallback font path")
+	rootCmd.PersistentFlags().Int("appearance-font-size", 0, "font size")
 	rootCmd.PersistentFlags().StringP("appearance-colors-theme", "t", "", "color theme (auto, dark, light)")
+	rootCmd.PersistentFlags().String("appearance-colors-dark-background", "", "dark theme background color")
+	rootCmd.PersistentFlags().String("appearance-colors-dark-selection-frame", "", "dark theme selection frame color")
+	rootCmd.PersistentFlags().String("appearance-colors-dark-text", "", "dark theme text color")
+	rootCmd.PersistentFlags().String("appearance-colors-dark-shadow", "", "dark theme shadow color")
+	rootCmd.PersistentFlags().String("appearance-colors-dark-inactive-frame", "", "dark theme inactive frame color")
+	rootCmd.PersistentFlags().String("appearance-colors-light-background", "", "light theme background color")
+	rootCmd.PersistentFlags().String("appearance-colors-light-selection-frame", "", "light theme selection frame color")
+	rootCmd.PersistentFlags().String("appearance-colors-light-text", "", "light theme text color")
+	rootCmd.PersistentFlags().String("appearance-colors-light-shadow", "", "light theme shadow color")
+	rootCmd.PersistentFlags().String("appearance-colors-light-inactive-frame", "", "light theme inactive frame color")
 
 	// Behavior
 	rootCmd.PersistentFlags().Duration("behavior-snapshot-interval", 0, "background thumbnail refresh interval")
@@ -130,8 +145,53 @@ func applyFlags() {
 	if rootCmd.PersistentFlags().Changed("appearance-perspective") {
 		cfg.Appearance.Perspective, _ = rootCmd.PersistentFlags().GetFloat64("appearance-perspective")
 	}
+	if rootCmd.PersistentFlags().Changed("appearance-shadow-offset") {
+		cfg.Appearance.Shadow.Offset, _ = rootCmd.PersistentFlags().GetFloat64("appearance-shadow-offset")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-shadow-blur") {
+		cfg.Appearance.Shadow.Blur, _ = rootCmd.PersistentFlags().GetFloat64("appearance-shadow-blur")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-font-primary") {
+		cfg.Appearance.Font.Primary, _ = rootCmd.PersistentFlags().GetString("appearance-font-primary")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-font-fallback") {
+		cfg.Appearance.Font.Fallback, _ = rootCmd.PersistentFlags().GetString("appearance-font-fallback")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-font-size") {
+		cfg.Appearance.Font.Size, _ = rootCmd.PersistentFlags().GetInt("appearance-font-size")
+	}
 	if rootCmd.PersistentFlags().Changed("appearance-colors-theme") {
 		cfg.Appearance.Colors.Theme, _ = rootCmd.PersistentFlags().GetString("appearance-colors-theme")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-colors-dark-background") {
+		cfg.Appearance.Colors.Dark.Background, _ = rootCmd.PersistentFlags().GetString("appearance-colors-dark-background")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-colors-dark-selection-frame") {
+		cfg.Appearance.Colors.Dark.SelectionFrame, _ = rootCmd.PersistentFlags().GetString("appearance-colors-dark-selection-frame")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-colors-dark-text") {
+		cfg.Appearance.Colors.Dark.Text, _ = rootCmd.PersistentFlags().GetString("appearance-colors-dark-text")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-colors-dark-shadow") {
+		cfg.Appearance.Colors.Dark.Shadow, _ = rootCmd.PersistentFlags().GetString("appearance-colors-dark-shadow")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-colors-dark-inactive-frame") {
+		cfg.Appearance.Colors.Dark.InactiveFrame, _ = rootCmd.PersistentFlags().GetString("appearance-colors-dark-inactive-frame")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-colors-light-background") {
+		cfg.Appearance.Colors.Light.Background, _ = rootCmd.PersistentFlags().GetString("appearance-colors-light-background")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-colors-light-selection-frame") {
+		cfg.Appearance.Colors.Light.SelectionFrame, _ = rootCmd.PersistentFlags().GetString("appearance-colors-light-selection-frame")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-colors-light-text") {
+		cfg.Appearance.Colors.Light.Text, _ = rootCmd.PersistentFlags().GetString("appearance-colors-light-text")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-colors-light-shadow") {
+		cfg.Appearance.Colors.Light.Shadow, _ = rootCmd.PersistentFlags().GetString("appearance-colors-light-shadow")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-colors-light-inactive-frame") {
+		cfg.Appearance.Colors.Light.InactiveFrame, _ = rootCmd.PersistentFlags().GetString("appearance-colors-light-inactive-frame")
 	}
 
 	// Behavior
@@ -354,7 +414,7 @@ func handleKeyPress(ctx context.Context, conn *x11.Connection, e xproto.KeyPress
 
 	// Create or reuse selector
 	if selector == nil {
-		selector = ui.NewSelector(ctx, conn.Conn, conn.Root, windows, cfg.Keybindings)
+		selector = ui.NewSelector(ctx, conn.Conn, conn.Root, windows, cfg.Appearance, cfg.Keybindings)
 	} else {
 		// Update window list, preserving position
 		selector.UpdateWindows(windows)
