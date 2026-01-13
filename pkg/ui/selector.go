@@ -80,8 +80,7 @@ func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, window
 		PerspectiveFactor: appearance.Perspective,
 		ShadowOffset:      appearance.Shadow.Offset,
 		ShadowBlur:        appearance.Shadow.Blur,
-		FontPrimary:       appearance.Font.Primary,
-		FontFallback:      appearance.Font.Fallback,
+		FontPaths:         appearance.Font.Paths,
 		FontSize:          appearance.Font.Size,
 	}
 

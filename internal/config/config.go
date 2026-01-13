@@ -51,9 +51,8 @@ type Shadow struct {
 
 // Font contains font configuration
 type Font struct {
-	Primary  string `mapstructure:"primary"`
-	Fallback string `mapstructure:"fallback"`
-	Size     int    `mapstructure:"size"`
+	Paths []string `mapstructure:"paths"` // Font paths (primary first, then fallbacks)
+	Size  int      `mapstructure:"size"`
 }
 
 // Colors contains theme and color configuration
@@ -113,9 +112,11 @@ func Default() *Config {
 				Blur:   15,
 			},
 			Font: Font{
-				Primary:  "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
-				Fallback: "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-				Size:     14,
+				Paths: []string{
+					"/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+					"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+				},
+				Size: 14,
 			},
 			Colors: Colors{
 				Theme: "auto",
@@ -193,6 +194,12 @@ func Load(cfgFile string) (*Config, error) {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
 
+	// Ensure we have at least the defaults if nothing was configured
+	if len(cfg.Appearance.Font.Paths) == 0 {
+		defCfg := Default()
+		cfg.Appearance.Font.Paths = defCfg.Appearance.Font.Paths
+	}
+
 	return cfg, nil
 }
 
@@ -210,8 +217,7 @@ func setDefaults(v *viper.Viper, cfg *Config) {
 	v.SetDefault("appearance.perspective", cfg.Appearance.Perspective)
 	v.SetDefault("appearance.shadow.offset", cfg.Appearance.Shadow.Offset)
 	v.SetDefault("appearance.shadow.blur", cfg.Appearance.Shadow.Blur)
-	v.SetDefault("appearance.font.primary", cfg.Appearance.Font.Primary)
-	v.SetDefault("appearance.font.fallback", cfg.Appearance.Font.Fallback)
+	v.SetDefault("appearance.font.paths", cfg.Appearance.Font.Paths)
 	v.SetDefault("appearance.font.size", cfg.Appearance.Font.Size)
 
 	v.SetDefault("appearance.colors.theme", cfg.Appearance.Colors.Theme)

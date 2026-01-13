@@ -59,8 +59,7 @@ func init() {
 	rootCmd.PersistentFlags().Float64("appearance-perspective", defaultCfg.Appearance.Perspective, "perspective effect factor (0.0-1.0)")
 	rootCmd.PersistentFlags().Float64("appearance-shadow-offset", defaultCfg.Appearance.Shadow.Offset, "shadow offset in pixels")
 	rootCmd.PersistentFlags().Float64("appearance-shadow-blur", defaultCfg.Appearance.Shadow.Blur, "shadow blur radius")
-	rootCmd.PersistentFlags().String("appearance-font-primary", defaultCfg.Appearance.Font.Primary, "primary font path")
-	rootCmd.PersistentFlags().String("appearance-font-fallback", defaultCfg.Appearance.Font.Fallback, "fallback font path")
+	rootCmd.PersistentFlags().StringSlice("appearance-font-paths", defaultCfg.Appearance.Font.Paths, "font paths (primary first, then fallbacks)")
 	rootCmd.PersistentFlags().Int("appearance-font-size", defaultCfg.Appearance.Font.Size, "font size")
 	rootCmd.PersistentFlags().StringP("appearance-colors-theme", "t", defaultCfg.Appearance.Colors.Theme, "color theme (auto, dark, light)")
 	rootCmd.PersistentFlags().String("appearance-colors-dark-background", defaultCfg.Appearance.Colors.Dark.Background, "dark theme background color")
@@ -152,11 +151,8 @@ func applyFlags() {
 	if rootCmd.PersistentFlags().Changed("appearance-shadow-blur") {
 		cfg.Appearance.Shadow.Blur, _ = rootCmd.PersistentFlags().GetFloat64("appearance-shadow-blur")
 	}
-	if rootCmd.PersistentFlags().Changed("appearance-font-primary") {
-		cfg.Appearance.Font.Primary, _ = rootCmd.PersistentFlags().GetString("appearance-font-primary")
-	}
-	if rootCmd.PersistentFlags().Changed("appearance-font-fallback") {
-		cfg.Appearance.Font.Fallback, _ = rootCmd.PersistentFlags().GetString("appearance-font-fallback")
+	if rootCmd.PersistentFlags().Changed("appearance-font-paths") {
+		cfg.Appearance.Font.Paths, _ = rootCmd.PersistentFlags().GetStringSlice("appearance-font-paths")
 	}
 	if rootCmd.PersistentFlags().Changed("appearance-font-size") {
 		cfg.Appearance.Font.Size, _ = rootCmd.PersistentFlags().GetInt("appearance-font-size")

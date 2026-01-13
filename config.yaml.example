@@ -17,8 +17,11 @@ appearance:
     offset: 10
     blur: 15
   font:
-    primary: "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"
-    fallback: "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+    # Font paths in order: primary first, then fallbacks
+    # Multiple fonts enable glyph-level fallback for missing characters
+    paths:
+      - "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"
+      - "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
     size: 14
   colors:
     theme: auto  # auto (follow system), dark, light

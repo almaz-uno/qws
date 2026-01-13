@@ -27,22 +27,21 @@ type WindowData struct {
 
 // Config holds configuration for carousel rendering
 type Config struct {
-	Width             int     // Window width
-	Height            int     // Window height
-	ThumbWidth        int     // Thumbnail width
-	ThumbHeight       int     // Thumbnail height
-	Spacing           float64 // Spacing between thumbnails
-	PerspectiveFactor float64 // Perspective distortion factor (0.0-1.0)
-	ShadowOffset      float64 // Shadow offset
-	ShadowBlur        float64 // Shadow blur radius
-	FontPrimary       string  // Primary font path
-	FontFallback      string  // Fallback font path
-	FontSize          int     // Font size
-	BackgroundColor   string  // Background color (hex or rgba)
-	SelectionFrame    string  // Selection frame color
-	TextColor         string  // Text color
-	ShadowColor       string  // Shadow color
-	InactiveFrame     string  // Inactive frame color
+	Width             int      // Window width
+	Height            int      // Window height
+	ThumbWidth        int      // Thumbnail width
+	ThumbHeight       int      // Thumbnail height
+	Spacing           float64  // Spacing between thumbnails
+	PerspectiveFactor float64  // Perspective distortion factor (0.0-1.0)
+	ShadowOffset      float64  // Shadow offset
+	ShadowBlur        float64  // Shadow blur radius
+	FontPaths         []string // Font paths (primary first, then fallbacks)
+	FontSize          int      // Font size
+	BackgroundColor   string   // Background color (hex or rgba)
+	SelectionFrame    string   // Selection frame color
+	TextColor         string   // Text color
+	ShadowColor       string   // Shadow color
+	InactiveFrame     string   // Inactive frame color
 }
 
 // DefaultConfig returns default carousel configuration
@@ -56,8 +55,7 @@ func DefaultConfig() Config {
 		PerspectiveFactor: 0.6,
 		ShadowOffset:      10,
 		ShadowBlur:        15,
-		FontPrimary:       fontSystem,
-		FontFallback:      fontFallback,
+		FontPaths:         []string{fontSystem, fontFallback},
 		FontSize:          14,
 		BackgroundColor:   "#1a1a2e",
 		SelectionFrame:    "#4a9eff",
@@ -365,13 +363,14 @@ func drawWindowWithData(dc *gg.Context, data *WindowData, index, selected, hover
 	// Draw title (if available)
 	if data.Title != "" {
 		fontSize := float64(cfg.FontSize) * scale * 1.15 // Slightly larger than configured size
-		// Try primary font first, fallback to secondary
-		if err := dc.LoadFontFace(cfg.FontPrimary, fontSize); err != nil {
-			if err := dc.LoadFontFace(cfg.FontFallback, fontSize); err != nil {
-				// Skip text rendering if no font available
-				goto skipTitle
-			}
+		// Load multi-fallback font face
+		fallbackFace := NewMultiFallbackFace(cfg.FontPaths, fontSize)
+		if fallbackFace == nil {
+			// Skip text rendering if no font available
+			goto skipTitle
 		}
+		defer fallbackFace.Close()
+		dc.SetFontFace(fallbackFace)
 		{
 			title := strings.TrimSpace(data.Title)
 			// Truncate long titles by runes (Unicode characters), not bytes
@@ -407,13 +406,14 @@ skipTitle:
 	// Draw workspace name (if available)
 	if data.Workspace != "" {
 		fontSize := float64(cfg.FontSize) * scale
-		// Try primary font first, fallback to secondary
-		if err := dc.LoadFontFace(cfg.FontPrimary, fontSize); err != nil {
-			if err := dc.LoadFontFace(cfg.FontFallback, fontSize); err != nil {
-				// Skip workspace rendering if no font available
-				goto skipWorkspace
-			}
+		// Load multi-fallback font face
+		fallbackFace := NewMultiFallbackFace(cfg.FontPaths, fontSize)
+		if fallbackFace == nil {
+			// Skip workspace rendering if no font available
+			goto skipWorkspace
 		}
+		defer fallbackFace.Close()
+		dc.SetFontFace(fallbackFace)
 		{
 			workspace := data.Workspace
 			// Truncate long workspace names

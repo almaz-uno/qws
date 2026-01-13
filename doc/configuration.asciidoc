@@ -187,14 +187,19 @@ keybindings:
 | Shadow blur radius
 |===
 
-.Fonts (hardcoded constants)
+.Fonts with fallback support
 [source,go]
 ----
-fontSystem   = "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"
-fontFallback = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+// Default font chain: primary font with DejaVu fallback
+fontPaths = []string{
+  "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+  "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+}
 ----
 
-.Proposed config
+Шрифты загружаются с поддержкой автоматического fallback на уровне глифов — если символ отсутствует в основном шрифте, используется следующий шрифт в цепочке.
+
+.Configuration example
 [source,yaml]
 ----
 appearance:
@@ -207,8 +212,11 @@ appearance:
     offset: 10
     blur: 15
   font:
-    primary: "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"
-    fallback: "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+    # Font paths in order: primary first, then fallbacks
+    paths:
+      - "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"
+      - "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+      - "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"  # Additional fallback
     size: 14
   colors:
     theme: auto  # auto (follow system), dark, light
@@ -424,19 +432,12 @@ log:
 | `15`
 | Shadow blur radius
 
-| `appearance.font.primary`
-| `--appearance-font-primary`
-| `QWS_APPEARANCE_FONT_PRIMARY`
-| `string`
-| `/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf`
-| Primary font path
-
-| `appearance.font.fallback`
-| `--appearance-font-fallback`
-| `QWS_APPEARANCE_FONT_FALLBACK`
-| `string`
-| `/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf`
-| Fallback font path
+| `appearance.font.paths`
+| `--appearance-font-paths`
+| `QWS_APPEARANCE_FONT_PATHS`
+| `[]string`
+| `["/usr/share/fonts/.../NotoSans-Regular.ttf", "/usr/share/fonts/.../DejaVuSans.ttf"]`
+| Font paths (primary first, then fallbacks). Supports multiple fonts for glyph-level fallback.
 
 | `appearance.font.size`
 | `--appearance-font-size`
