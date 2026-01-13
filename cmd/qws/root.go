@@ -28,9 +28,8 @@ var (
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:     "qws",
-	Short:   "Quick Window Switcher - A fast and beautiful window switcher for X11",
-	Version: version,
+	Use:   "qws",
+	Short: "Quick Window Switcher - A fast and beautiful window switcher for X11",
 	Long: `QWS (Quick Window Switcher) is a modern window switcher for X11 window managers.
 It provides a visually appealing carousel interface for switching between windows
 with thumbnails and MRU (Most Recently Used) ordering.`,
