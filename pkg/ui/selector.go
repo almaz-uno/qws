@@ -252,8 +252,9 @@ func (s *Selector) Show() (*x11.WindowInfo, error) {
 		log.Debug().Msg("Workspace modifier pressed at startup, filtering by workspace")
 		s.applyWorkspaceFilter()
 		// Update selected index if it went out of bounds
+		// Prefer index 1 (next window) over 0 (current window) for Alt+Tab logic
 		if s.selectedIndex >= len(s.windows) {
-			if len(s.windows) > 1 {
+			if len(s.windows) >= 2 {
 				s.selectedIndex = 1
 			} else {
 				s.selectedIndex = 0
@@ -441,8 +442,13 @@ func (s *Selector) handleKeyPressSimple(e xproto.KeyPressEvent, thumbnails []ima
 			s.workspacePressed = true
 			s.applyWorkspaceFilter()
 			// Preserve selection if possible
+			// Prefer index 1 (next window) over 0 (current window) for Alt+Tab logic
 			if s.selectedIndex >= len(s.windows) {
-				s.selectedIndex = 0
+				if len(s.windows) >= 2 {
+					s.selectedIndex = 1
+				} else {
+					s.selectedIndex = 0
+				}
 			}
 			s.render(s.prepareThumbnails())
 		}
@@ -718,7 +724,12 @@ func (s *Selector) applyWorkspaceFilter() {
 	s.windows = filteredWindows
 
 	// Try to preserve selection by finding the same window in filtered list
-	s.selectedIndex = 0
+	// Default to index 1 (next window) instead of 0 (current window) for Alt+Tab logic
+	if len(s.windows) >= 2 {
+		s.selectedIndex = 1
+	} else {
+		s.selectedIndex = 0
+	}
 	for i, win := range s.windows {
 		if win.ID == selectedID {
 			s.selectedIndex = i
