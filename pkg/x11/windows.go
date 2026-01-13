@@ -215,7 +215,7 @@ func findBestIcon(data []uint32) image.Image {
 // GetWindowList retrieves list of windows with names
 func (c *Connection) GetWindowList() ([]WindowInfo, error) {
 	return c.GetWindowListFiltered(WindowFilterOptions{
-		Desktop:           "current",
+		Desktop:           "all",
 		IgnoreSkipTaskbar: false,
 		SortMinimizedLast: false,
 	})

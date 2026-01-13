@@ -80,9 +80,9 @@ type Behavior struct {
 
 // Windows contains window filtering configuration
 type Windows struct {
-	Desktop             string `mapstructure:"desktop"`
-	IgnoreSkipTaskbar   bool   `mapstructure:"ignore_skip_taskbar"`
-	SortMinimizedLast   bool   `mapstructure:"sort_minimized_last"`
+	Desktop           string `mapstructure:"desktop"`
+	IgnoreSkipTaskbar bool   `mapstructure:"ignore_skip_taskbar"`
+	SortMinimizedLast bool   `mapstructure:"sort_minimized_last"`
 }
 
 // Log contains logging configuration
@@ -140,9 +140,9 @@ func Default() *Config {
 			ShowDelay:        0,
 		},
 		Windows: Windows{
-			Desktop:             "current",
-			IgnoreSkipTaskbar:   false,
-			SortMinimizedLast:   false,
+			Desktop:           "all",
+			IgnoreSkipTaskbar: false,
+			SortMinimizedLast: false,
 		},
 		Log: Log{
 			Level:  "info",

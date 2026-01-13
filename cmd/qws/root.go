@@ -20,9 +20,10 @@ import (
 )
 
 var (
-	cfgFile string
-	cfg     *config.Config
-	version = "dev" // Set by build flags
+	cfgFile    string
+	cfg        *config.Config
+	version    = "dev" // Set by build flags
+	defaultCfg = config.Default()
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -41,47 +42,47 @@ func init() {
 
 	// Define flags
 	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "", "config file (default is $HOME/.config/qws/config.yaml)")
-	rootCmd.PersistentFlags().StringP("log-level", "", "info", "log level (trace, debug, info, warn, error)")
+	rootCmd.PersistentFlags().StringP("log-level", "", defaultCfg.Log.Level, "log level (trace, debug, info, warn, error)")
 	rootCmd.PersistentFlags().CountP("verbose", "v", "verbose output (use -v for debug, -vv for trace)")
 	rootCmd.PersistentFlags().Bool("keysym-list", false, "print list of supported key names and exit")
 
 	// Keybindings
-	rootCmd.PersistentFlags().StringP("keybindings-modifier", "m", "", "main modifier key (Alt, Super, Ctrl)")
-	rootCmd.PersistentFlags().StringP("keybindings-key", "k", "", "main trigger key (Tab, grave, space, etc.)")
-	rootCmd.PersistentFlags().String("keybindings-backward", "", "modifier for reverse navigation")
-	rootCmd.PersistentFlags().String("keybindings-workspace-modifier", "", "modifier to filter current workspace")
-	rootCmd.PersistentFlags().String("keybindings-cancel", "", "key to cancel selection")
+	rootCmd.PersistentFlags().StringP("keybindings-modifier", "m", defaultCfg.Keybindings.Modifier, "main modifier key (Alt, Super, Ctrl)")
+	rootCmd.PersistentFlags().StringP("keybindings-key", "k", defaultCfg.Keybindings.Key, "main trigger key (Tab, grave, space, etc.)")
+	rootCmd.PersistentFlags().String("keybindings-backward", defaultCfg.Keybindings.Backward, "modifier for reverse navigation")
+	rootCmd.PersistentFlags().String("keybindings-workspace-modifier", defaultCfg.Keybindings.WorkspaceModifier, "modifier to filter current workspace")
+	rootCmd.PersistentFlags().String("keybindings-cancel", defaultCfg.Keybindings.Cancel, "key to cancel selection")
 
 	// Appearance
-	rootCmd.PersistentFlags().Int("appearance-thumbnail-width", 0, "thumbnail width in pixels")
-	rootCmd.PersistentFlags().Int("appearance-thumbnail-height", 0, "thumbnail height in pixels")
-	rootCmd.PersistentFlags().Float64("appearance-spacing", 0, "distance between carousel items")
-	rootCmd.PersistentFlags().Float64("appearance-perspective", 0, "perspective effect factor (0.0-1.0)")
-	rootCmd.PersistentFlags().Float64("appearance-shadow-offset", 0, "shadow offset in pixels")
-	rootCmd.PersistentFlags().Float64("appearance-shadow-blur", 0, "shadow blur radius")
-	rootCmd.PersistentFlags().String("appearance-font-primary", "", "primary font path")
-	rootCmd.PersistentFlags().String("appearance-font-fallback", "", "fallback font path")
-	rootCmd.PersistentFlags().Int("appearance-font-size", 0, "font size")
-	rootCmd.PersistentFlags().StringP("appearance-colors-theme", "t", "", "color theme (auto, dark, light)")
-	rootCmd.PersistentFlags().String("appearance-colors-dark-background", "", "dark theme background color")
-	rootCmd.PersistentFlags().String("appearance-colors-dark-selection-frame", "", "dark theme selection frame color")
-	rootCmd.PersistentFlags().String("appearance-colors-dark-text", "", "dark theme text color")
-	rootCmd.PersistentFlags().String("appearance-colors-dark-shadow", "", "dark theme shadow color")
-	rootCmd.PersistentFlags().String("appearance-colors-dark-inactive-frame", "", "dark theme inactive frame color")
-	rootCmd.PersistentFlags().String("appearance-colors-light-background", "", "light theme background color")
-	rootCmd.PersistentFlags().String("appearance-colors-light-selection-frame", "", "light theme selection frame color")
-	rootCmd.PersistentFlags().String("appearance-colors-light-text", "", "light theme text color")
-	rootCmd.PersistentFlags().String("appearance-colors-light-shadow", "", "light theme shadow color")
-	rootCmd.PersistentFlags().String("appearance-colors-light-inactive-frame", "", "light theme inactive frame color")
+	rootCmd.PersistentFlags().Int("appearance-thumbnail-width", defaultCfg.Appearance.Thumbnail.Width, "thumbnail width in pixels")
+	rootCmd.PersistentFlags().Int("appearance-thumbnail-height", defaultCfg.Appearance.Thumbnail.Height, "thumbnail height in pixels")
+	rootCmd.PersistentFlags().Float64("appearance-spacing", defaultCfg.Appearance.Spacing, "distance between carousel items")
+	rootCmd.PersistentFlags().Float64("appearance-perspective", defaultCfg.Appearance.Perspective, "perspective effect factor (0.0-1.0)")
+	rootCmd.PersistentFlags().Float64("appearance-shadow-offset", defaultCfg.Appearance.Shadow.Offset, "shadow offset in pixels")
+	rootCmd.PersistentFlags().Float64("appearance-shadow-blur", defaultCfg.Appearance.Shadow.Blur, "shadow blur radius")
+	rootCmd.PersistentFlags().String("appearance-font-primary", defaultCfg.Appearance.Font.Primary, "primary font path")
+	rootCmd.PersistentFlags().String("appearance-font-fallback", defaultCfg.Appearance.Font.Fallback, "fallback font path")
+	rootCmd.PersistentFlags().Int("appearance-font-size", defaultCfg.Appearance.Font.Size, "font size")
+	rootCmd.PersistentFlags().StringP("appearance-colors-theme", "t", defaultCfg.Appearance.Colors.Theme, "color theme (auto, dark, light)")
+	rootCmd.PersistentFlags().String("appearance-colors-dark-background", defaultCfg.Appearance.Colors.Dark.Background, "dark theme background color")
+	rootCmd.PersistentFlags().String("appearance-colors-dark-selection-frame", defaultCfg.Appearance.Colors.Dark.SelectionFrame, "dark theme selection frame color")
+	rootCmd.PersistentFlags().String("appearance-colors-dark-text", defaultCfg.Appearance.Colors.Dark.Text, "dark theme text color")
+	rootCmd.PersistentFlags().String("appearance-colors-dark-shadow", defaultCfg.Appearance.Colors.Dark.Shadow, "dark theme shadow color")
+	rootCmd.PersistentFlags().String("appearance-colors-dark-inactive-frame", defaultCfg.Appearance.Colors.Dark.InactiveFrame, "dark theme inactive frame color")
+	rootCmd.PersistentFlags().String("appearance-colors-light-background", defaultCfg.Appearance.Colors.Light.Background, "light theme background color")
+	rootCmd.PersistentFlags().String("appearance-colors-light-selection-frame", defaultCfg.Appearance.Colors.Light.SelectionFrame, "light theme selection frame color")
+	rootCmd.PersistentFlags().String("appearance-colors-light-text", defaultCfg.Appearance.Colors.Light.Text, "light theme text color")
+	rootCmd.PersistentFlags().String("appearance-colors-light-shadow", defaultCfg.Appearance.Colors.Light.Shadow, "light theme shadow color")
+	rootCmd.PersistentFlags().String("appearance-colors-light-inactive-frame", defaultCfg.Appearance.Colors.Light.InactiveFrame, "light theme inactive frame color")
 
 	// Behavior
-	rootCmd.PersistentFlags().Duration("behavior-snapshot-interval", 0, "background thumbnail refresh interval")
-	rootCmd.PersistentFlags().Duration("behavior-show-delay", 0, "delay before showing UI")
+	rootCmd.PersistentFlags().Duration("behavior-snapshot-interval", defaultCfg.Behavior.SnapshotInterval, "background thumbnail refresh interval")
+	rootCmd.PersistentFlags().Duration("behavior-show-delay", defaultCfg.Behavior.ShowDelay, "delay before showing UI")
 
 	// Windows
-	rootCmd.PersistentFlags().String("windows-desktop", "", "desktop filter (current, all, all-except-current)")
-	rootCmd.PersistentFlags().Bool("windows-ignore-skip-taskbar", false, "ignore _NET_WM_STATE_SKIP_TASKBAR hint")
-	rootCmd.PersistentFlags().Bool("windows-sort-minimized-last", false, "sort minimized windows last")
+	rootCmd.PersistentFlags().String("windows-desktop", defaultCfg.Windows.Desktop, "desktop filter (current, all, all-except-current)")
+	rootCmd.PersistentFlags().Bool("windows-ignore-skip-taskbar", defaultCfg.Windows.IgnoreSkipTaskbar, "ignore _NET_WM_STATE_SKIP_TASKBAR hint")
+	rootCmd.PersistentFlags().Bool("windows-sort-minimized-last", defaultCfg.Windows.SortMinimizedLast, "sort minimized windows last")
 }
 
 // initConfig reads in config file and ENV variables if set
