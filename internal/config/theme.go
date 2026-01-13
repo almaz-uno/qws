@@ -1,17 +1,61 @@
 package config
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/rs/zerolog/log"
 )
 
+// detectGSettingsTheme reads theme preference from gsettings (GNOME/GTK)
+func detectGSettingsTheme(ctx context.Context) string {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	// Try modern color-scheme setting (GNOME 42+)
+	cmd := exec.CommandContext(ctx, "gsettings", "get", "org.gnome.desktop.interface", "color-scheme")
+	if output, err := cmd.Output(); err == nil {
+		value := strings.TrimSpace(string(output))
+		// Remove quotes if present
+		value = strings.Trim(value, "'\"")
+
+		if strings.Contains(value, "prefer-dark") {
+			return "dark"
+		}
+		if strings.Contains(value, "prefer-light") {
+			return "light"
+		}
+	}
+
+	// Try gtk-theme setting (older systems)
+	cmd = exec.CommandContext(ctx, "gsettings", "get", "org.gnome.desktop.interface", "gtk-theme")
+	if output, err := cmd.Output(); err == nil {
+		value := strings.TrimSpace(string(output))
+		// Remove quotes if present
+		value = strings.Trim(value, "'\"")
+
+		if strings.Contains(strings.ToLower(value), "dark") {
+			return "dark"
+		}
+	}
+
+	return ""
+}
+
 // DetectTheme detects the current system theme (dark or light)
 // Returns "dark" or "light"
-func DetectTheme() string {
-	// Method 1: Check GTK_THEME environment variable
+func DetectTheme(ctx context.Context) string {
+	// Method 1: Check gsettings (modern GNOME/GTK systems)
+	if theme := detectGSettingsTheme(ctx); theme != "" {
+		log.Debug().Str("source", "gsettings").Str("theme", theme).Msg("Detected theme")
+		return theme
+	}
+
+	// Method 2: Check GTK_THEME environment variable
 	if gtkTheme := os.Getenv("GTK_THEME"); gtkTheme != "" {
 		if strings.Contains(strings.ToLower(gtkTheme), "dark") {
 			log.Debug().Str("source", "GTK_THEME").Str("theme", "dark").Msg("Detected dark theme")
@@ -21,7 +65,7 @@ func DetectTheme() string {
 		return "light"
 	}
 
-	// Method 2: Check GTK 3.0 settings file
+	// Method 3: Check GTK 3.0 settings file
 	if theme := detectGTK3Theme(); theme != "" {
 		log.Debug().Str("source", "GTK settings").Str("theme", theme).Msg("Detected theme")
 		return theme
@@ -84,7 +128,7 @@ func detectGTK3Theme() string {
 
 // ResolveTheme resolves the theme setting to actual theme name
 // If theme is "auto", detects system theme; otherwise returns the specified theme
-func ResolveTheme(theme string) string {
+func ResolveTheme(ctx context.Context, theme string) string {
 	theme = strings.ToLower(strings.TrimSpace(theme))
 
 	switch theme {
@@ -93,16 +137,16 @@ func ResolveTheme(theme string) string {
 	case "light":
 		return "light"
 	case "auto", "":
-		return DetectTheme()
+		return DetectTheme(ctx)
 	default:
 		log.Warn().Str("theme", theme).Msg("Unknown theme setting, using auto-detection")
-		return DetectTheme()
+		return DetectTheme(ctx)
 	}
 }
 
 // GetActiveTheme returns the active theme configuration based on the theme setting
-func (c *Config) GetActiveTheme() ThemeColor {
-	resolvedTheme := ResolveTheme(c.Appearance.Colors.Theme)
+func (c *Config) GetActiveTheme(ctx context.Context) ThemeColor {
+	resolvedTheme := ResolveTheme(ctx, c.Appearance.Colors.Theme)
 
 	if resolvedTheme == "dark" {
 		return c.Appearance.Colors.Dark

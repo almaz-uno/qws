@@ -18,32 +18,32 @@ import (
 
 // keyConfig holds runtime keycode information for configured keys
 type keyConfig struct {
-	modifierMask         uint16 // Primary modifier (Alt, Super, etc.)
-	backwardMask         uint16 // Backward modifier (Shift)
+	modifierMask          uint16 // Primary modifier (Alt, Super, etc.)
+	backwardMask          uint16 // Backward modifier (Shift)
 	workspaceModifierMask uint16 // Workspace filter modifier (Ctrl)
-	mainKeysym           uint32 // Main trigger key keysym (Tab, F10, etc.)
-	cancelKeysym         uint32 // Cancel key keysym (Escape)
+	mainKeysym            uint32 // Main trigger key keysym (Tab, F10, etc.)
+	cancelKeysym          uint32 // Cancel key keysym (Escape)
 }
 
 // Selector provides a graphical carousel interface for window selection
 type Selector struct {
-	ctx             context.Context
-	conn            *xgb.Conn
-	root            xproto.Window
-	windows         []x11.WindowInfo
-	allWindows      []x11.WindowInfo // All windows (unfiltered)
-	selectedIndex   int
-	hoverIndex      int // Index of window under mouse cursor (-1 if none)
-	window          *carousel.Window
-	config          carousel.Config
-	monitorGeom     x11.MonitorGeometry // Current monitor geometry
-	animOffset      float64
-	animating       bool
-	resultChan      chan *x11.WindowInfo
-	keyConfig       keyConfig // Configured keybindings
-	modifierPressed bool      // Track if primary modifier is currently pressed
-	workspacePressed bool     // Track if workspace modifier is currently pressed
-	lastMouseUpdate time.Time // Last time mouse hover was processed
+	ctx              context.Context
+	conn             *xgb.Conn
+	root             xproto.Window
+	windows          []x11.WindowInfo
+	allWindows       []x11.WindowInfo // All windows (unfiltered)
+	selectedIndex    int
+	hoverIndex       int // Index of window under mouse cursor (-1 if none)
+	window           *carousel.Window
+	config           carousel.Config
+	monitorGeom      x11.MonitorGeometry // Current monitor geometry
+	animOffset       float64
+	animating        bool
+	resultChan       chan *x11.WindowInfo
+	keyConfig        keyConfig // Configured keybindings
+	modifierPressed  bool      // Track if primary modifier is currently pressed
+	workspacePressed bool      // Track if workspace modifier is currently pressed
+	lastMouseUpdate  time.Time // Last time mouse hover was processed
 }
 
 // NewSelector creates a new graphical window selector
@@ -86,7 +86,7 @@ func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, window
 	}
 
 	// Resolve theme and apply colors
-	activeTheme := config.ResolveTheme(appearance.Colors.Theme)
+	activeTheme := config.ResolveTheme(ctx, appearance.Colors.Theme)
 	var themeColors config.ThemeColor
 	if activeTheme == "dark" {
 		themeColors = appearance.Colors.Dark
