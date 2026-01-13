@@ -51,6 +51,10 @@ The carousel displays window thumbnails in a 3D perspective view.
 - **Mouse Support**: Hover to highlight windows (orange glow), click to select
 - **Always On Top**: Overlay window with no WM decorations
 - **Configuration**: Flexible config via YAML file, environment variables, or CLI flags
+- **Window Filtering**: Filter by desktop, skip_taskbar state, or minimized state
+- **Behavior Control**: Configurable snapshot interval and show delay
+- **Logging**: Structured logging with zerolog (console or JSON format)
+- **Compositor Fallback**: Works without compositor using icon-based placeholders
 
 ## Configuration
 
@@ -76,9 +80,16 @@ appearance:
 
 behavior:
   snapshot_interval: 10s
+  show_delay: 0ms
+
+windows:
+  desktop: current                # current, all, all-except-current
+  ignore_skip_taskbar: false      # Show windows with SKIP_TASKBAR
+  sort_minimized_last: false      # Put minimized windows at end
 
 log:
-  level: info
+  level: info                     # trace, debug, info, warn, error
+  format: console                 # console or json
 ```
 
 See `config.yaml.example` for a complete configuration example and `doc/configuration.asciidoc` for detailed documentation.
@@ -134,9 +145,22 @@ qws/
 
 ## Next Phase
 
-- **Phase 2**: Implement configurable keybindings with key parsing
-- **Phase 3**: Implement appearance configuration with theme support
-- **Phase 4**: Implement behavior and window filtering configuration
+Phase 4 is **complete** ✅
+
+**Implemented in Phase 4:**
+- ✅ Configuration file support (YAML)
+- ✅ CLI flags for all configuration options
+- ✅ Environment variable support (`QWS_*` prefix)
+- ✅ Behavior configuration (snapshot_interval, show_delay)
+- ✅ Window filtering (desktop, ignore_skip_taskbar, sort_minimized_last)
+- ✅ Logging configuration (level, format) with zerolog integration
+- ✅ Fallback for systems without compositor (placeholders with icons)
+
+**Future Enhancements:**
+- Additional keybinding customization
+- Custom window exclusion patterns
+- Theme customization
+- Animation speed configuration
 
 ## Dependencies
 

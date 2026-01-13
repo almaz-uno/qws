@@ -21,6 +21,13 @@ type WindowInfo struct {
 	Workspace string      // Workspace name
 }
 
+// WindowFilterOptions contains options for filtering windows
+type WindowFilterOptions struct {
+	Desktop           string // "current", "all", "all-except-current"
+	IgnoreSkipTaskbar bool   // If true, show windows with _NET_WM_STATE_SKIP_TASKBAR
+	SortMinimizedLast bool   // If true, put minimized windows at the end
+}
+
 // GetClientList retrieves the list of client windows via EWMH _NET_CLIENT_LIST
 func (c *Connection) GetClientList() ([]xproto.Window, error) {
 	// Get _NET_CLIENT_LIST atom
@@ -207,9 +214,24 @@ func findBestIcon(data []uint32) image.Image {
 
 // GetWindowList retrieves list of windows with names
 func (c *Connection) GetWindowList() ([]WindowInfo, error) {
+	return c.GetWindowListFiltered(WindowFilterOptions{
+		Desktop:           "current",
+		IgnoreSkipTaskbar: false,
+		SortMinimizedLast: false,
+	})
+}
+
+// GetWindowListFiltered retrieves list of windows with filtering
+func (c *Connection) GetWindowListFiltered(opts WindowFilterOptions) ([]WindowInfo, error) {
 	windows, err := c.GetClientList()
 	if err != nil {
 		return nil, err
+	}
+
+	// Get current desktop if filtering is needed
+	var currentDesktop uint32
+	if opts.Desktop == "current" || opts.Desktop == "all-except-current" {
+		currentDesktop, _ = c.GetCurrentDesktop()
 	}
 
 	result := make([]WindowInfo, 0, len(windows))
@@ -218,6 +240,27 @@ func (c *Connection) GetWindowList() ([]WindowInfo, error) {
 		if err != nil {
 			// Skip windows for which we couldn't get the name
 			continue
+		}
+
+		// Filter by skip_taskbar
+		if !opts.IgnoreSkipTaskbar && c.ShouldSkipTaskbar(win) {
+			continue
+		}
+
+		// Filter by desktop
+		if opts.Desktop == "current" {
+			winDesktop, err := c.GetWindowDesktop(win)
+			if err == nil && winDesktop != currentDesktop {
+				// Special case: 0xFFFFFFFF means "all desktops"
+				if winDesktop != 0xFFFFFFFF {
+					continue
+				}
+			}
+		} else if opts.Desktop == "all-except-current" {
+			winDesktop, err := c.GetWindowDesktop(win)
+			if err == nil && winDesktop == currentDesktop {
+				continue
+			}
 		}
 
 		// Try to get window icon (ignore errors)
@@ -241,7 +284,27 @@ func (c *Connection) GetWindowList() ([]WindowInfo, error) {
 		})
 	}
 
+	// Sort minimized windows last if requested
+	if opts.SortMinimizedLast {
+		result = c.sortMinimizedLast(result)
+	}
+
 	return result, nil
+}
+
+// sortMinimizedLast sorts windows so minimized windows are at the end
+func (c *Connection) sortMinimizedLast(windows []WindowInfo) []WindowInfo {
+	var normal, minimized []WindowInfo
+
+	for _, win := range windows {
+		if c.IsWindowMinimized(win.ID) {
+			minimized = append(minimized, win)
+		} else {
+			normal = append(normal, win)
+		}
+	}
+
+	return append(normal, minimized...)
 }
 
 // SortWindowsByMRU sorts a list of WindowInfo by MRU order.
@@ -617,4 +680,66 @@ func loadImageFile(path string) (image.Image, error) {
 
 	img, _, err := image.Decode(file)
 	return img, err
+}
+
+// GetWindowState retrieves _NET_WM_STATE property for a window
+func (c *Connection) GetWindowState(window xproto.Window) ([]xproto.Atom, error) {
+	netWmState, err := c.InternAtom("_NET_WM_STATE", true)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get _NET_WM_STATE atom: %w", err)
+	}
+
+	prop, err := xproto.GetProperty(c.Conn, false, window,
+		netWmState,
+		xproto.AtomAtom,
+		0,
+		^uint32(0),
+	).Reply()
+	if err != nil || prop.ValueLen == 0 {
+		return []xproto.Atom{}, nil
+	}
+
+	// Convert bytes to []Atom
+	states := make([]xproto.Atom, prop.ValueLen)
+	for i := uint32(0); i < prop.ValueLen; i++ {
+		states[i] = xproto.Atom(
+			uint32(prop.Value[i*4]) |
+				uint32(prop.Value[i*4+1])<<8 |
+				uint32(prop.Value[i*4+2])<<16 |
+				uint32(prop.Value[i*4+3])<<24,
+		)
+	}
+
+	return states, nil
+}
+
+// HasWindowState checks if window has a specific state
+func (c *Connection) HasWindowState(window xproto.Window, stateName string) bool {
+	states, err := c.GetWindowState(window)
+	if err != nil {
+		return false
+	}
+
+	targetAtom, err := c.InternAtom(stateName, true)
+	if err != nil {
+		return false
+	}
+
+	for _, state := range states {
+		if state == targetAtom {
+			return true
+		}
+	}
+
+	return false
+}
+
+// IsWindowMinimized checks if window is minimized (iconified)
+func (c *Connection) IsWindowMinimized(window xproto.Window) bool {
+	return c.HasWindowState(window, "_NET_WM_STATE_HIDDEN")
+}
+
+// ShouldSkipTaskbar checks if window has _NET_WM_STATE_SKIP_TASKBAR
+func (c *Connection) ShouldSkipTaskbar(window xproto.Window) bool {
+	return c.HasWindowState(window, "_NET_WM_STATE_SKIP_TASKBAR")
 }

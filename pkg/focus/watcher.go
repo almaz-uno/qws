@@ -33,7 +33,7 @@ type Watcher struct {
 
 // NewWatcher creates a new focus watcher.
 // It subscribes to PropertyNotify events on the root window to track _NET_ACTIVE_WINDOW changes.
-func NewWatcher(ctx context.Context, conn *xgb.Conn, root xproto.Window, mru *mru.MRUList, capturer *composite.Capturer) (*Watcher, error) {
+func NewWatcher(ctx context.Context, conn *xgb.Conn, root xproto.Window, mru *mru.MRUList, capturer *composite.Capturer, snapshotInterval time.Duration) (*Watcher, error) {
 	// Get _NET_ACTIVE_WINDOW atom
 	atomReply, err := xproto.InternAtom(conn, false,
 		uint16(len("_NET_ACTIVE_WINDOW")),
@@ -51,7 +51,7 @@ func NewWatcher(ctx context.Context, conn *xgb.Conn, root xproto.Window, mru *mr
 		mru:              mru,
 		capturer:         capturer,
 		thumbnails:       make(map[xproto.Window]image.Image),
-		snapshotInterval: 10 * time.Second,
+		snapshotInterval: snapshotInterval,
 		snapshotCtx:      ctx,
 		snapshotCancel:   cancel,
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/almaz-uno/qws/internal/config"
 	"github.com/almaz-uno/qws/pkg/composite"
@@ -310,7 +311,7 @@ func run(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create Focus Watcher to track active windows
-	watcher, err := focus.NewWatcher(ctx, conn.Conn, conn.Root, mruList, capturer)
+	watcher, err := focus.NewWatcher(ctx, conn.Conn, conn.Root, mruList, capturer, cfg.Behavior.SnapshotInterval)
 	if err != nil {
 		log.Warn().Err(err).Msg("Focus watcher unavailable, MRU order will be disabled")
 	}
@@ -382,12 +383,22 @@ func run(cmd *cobra.Command, args []string) error {
 	}
 }
 
-// handleKeyPress handles Alt+Tab key press
+// handleKeyPress handles configured key press events for window switching
 // Returns updated selector to preserve state
 func handleKeyPress(ctx context.Context, conn *x11.Connection, e xproto.KeyPressEvent, selector *ui.Selector,
 	mruList *mru.MRUList, watcher *focus.Watcher) *ui.Selector {
-	// Get window list
-	windows, err := conn.GetWindowList()
+	// Apply show delay if configured
+	if cfg.Behavior.ShowDelay > 0 {
+		time.Sleep(cfg.Behavior.ShowDelay)
+	}
+
+	// Get window list with filtering
+	filterOpts := x11.WindowFilterOptions{
+		Desktop:           cfg.Windows.Desktop,
+		IgnoreSkipTaskbar: cfg.Windows.IgnoreSkipTaskbar,
+		SortMinimizedLast: cfg.Windows.SortMinimizedLast,
+	}
+	windows, err := conn.GetWindowListFiltered(filterOpts)
 	if err != nil {
 		return selector
 	}

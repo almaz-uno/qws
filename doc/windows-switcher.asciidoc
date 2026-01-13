@@ -233,10 +233,14 @@ Launch:            From ~/.xinitrc or autostart
    - ✅ Switching animations
    - ✅ Styling (transparency, shadows, borders)
 
-. **Phase 4: Polish (1 week)**
-   - Configuration file
-   - Fallback for systems without compositor
-   - Testing on different WMs (i3, bspwm, openbox, xfce)
+. **Phase 4: Polish (1 week)** ✅ *IMPLEMENTED*
+   - ✅ Configuration file (YAML with Viper)
+   - ✅ Configuration via CLI flags and environment variables
+   - ✅ Window filtering (desktop, skip_taskbar, minimized)
+   - ✅ Behavior configuration (snapshot interval, show delay)
+   - ✅ Logging configuration (level, format)
+   - ✅ Fallback for systems without compositor (placeholders with icons)
+   - Testing on different WMs (i3, bspwm, openbox, xfce) — *in progress*
 
 == Phase 1 (MVP) Implementation
 
@@ -2464,6 +2468,190 @@ func GetWMState(conn *xgb.Conn, win xproto.Window) (uint32, error) {
     return state, nil
 }
 ----
+
+== Phase 4 (Polish) Implementation
+
+=== Configuration System
+
+**Framework:** Cobra + Viper for comprehensive configuration management
+
+**Configuration Sources (in order of precedence):**
+
+. Command-line flags (highest priority)
+. Environment variables (with `QWS_` prefix)
+. Configuration file (`~/.config/qws/config.yaml`)
+. Built-in defaults
+
+**Key Features:**
+
+* **YAML-based configuration** with nested structure
+* **Environment variable support** with automatic conversion
+* **CLI flags** for all configuration options
+* **Type-safe configuration** with struct validation
+* **Hot-reload capable** (can be added in future)
+
+=== Implemented Configuration Categories
+
+==== Behavior Configuration
+
+**Purpose:** Control application behavior and timing
+
+**Parameters:**
+
+* `snapshot_interval` — Background thumbnail refresh interval (default: 10s)
+* `show_delay` — Delay before showing UI (default: 0ms)
+
+**Implementation:**
+
+* `snapshot_interval` passed to `focus.NewWatcher()` for background thumbnail capture
+* Configurable via `--behavior-snapshot-interval` or `QWS_BEHAVIOR_SNAPSHOT_INTERVAL`
+
+==== Window Filtering Configuration
+
+**Purpose:** Control which windows are displayed in the switcher
+
+**Parameters:**
+
+* `desktop` — Desktop filter: `current` (default), `all`, `all-except-current`
+* `ignore_skip_taskbar` — Show windows with `_NET_WM_STATE_SKIP_TASKBAR` (default: false)
+* `sort_minimized_last` — Put minimized/iconified windows at the end (default: false)
+
+**Implementation:**
+
+Added `WindowFilterOptions` struct in [pkg/x11/windows.go](pkg/x11/windows.go):
+
+[source,go]
+----
+type WindowFilterOptions struct {
+    Desktop           string // "current", "all", "all-except-current"
+    IgnoreSkipTaskbar bool   // Show windows with SKIP_TASKBAR
+    SortMinimizedLast bool   // Put minimized windows at end
+}
+----
+
+**New Window State Detection Functions:**
+
+* `GetWindowState()` — Retrieve `_NET_WM_STATE` property
+* `HasWindowState()` — Check for specific state
+* `IsWindowMinimized()` — Check if window is iconified
+* `ShouldSkipTaskbar()` — Check `_NET_WM_STATE_SKIP_TASKBAR`
+
+**Desktop Filtering:**
+
+* Uses `_NET_WM_DESKTOP` to get window's desktop
+* Uses `_NET_CURRENT_DESKTOP` to get active desktop
+* Special handling for windows on all desktops (desktop = 0xFFFFFFFF)
+
+==== Logging Configuration
+
+**Framework:** zerolog for structured logging
+
+**Parameters:**
+
+* `level` — Log level: trace, debug, info (default), warn, error
+* `format` — Output format: console (default), json
+
+**Implementation:**
+
+* Console format with colored output for development
+* JSON format for production/parsing
+* Verbose flags: `-v` (debug), `-vv` (trace)
+
+**Example:**
+
+[source,bash]
+----
+# Debug logging with console format
+qws --log-level=debug
+
+# JSON format for log aggregation
+qws --log-format=json --log-level=info
+
+# Shorthand verbose flags
+qws -v    # Same as --log-level=debug
+qws -vv   # Same as --log-level=trace
+----
+
+=== Configuration File Example
+
+[source,yaml]
+----
+# ~/.config/qws/config.yaml
+
+behavior:
+  snapshot_interval: 5s
+  show_delay: 0ms
+
+windows:
+  desktop: current              # current, all, all-except-current
+  ignore_skip_taskbar: false    # Show windows with SKIP_TASKBAR
+  sort_minimized_last: true     # Minimized windows at end
+
+log:
+  level: info                   # trace, debug, info, warn, error
+  format: console               # console, json
+----
+
+=== Fallback for Systems Without Compositor
+
+**Detection:** Checks if compositor is running via XComposite extension
+
+**Fallback Strategy:**
+
+. Try XComposite thumbnail capture first
+. On failure, use placeholder with window icon
+. Load icon from `_NET_WM_ICON` property
+. If no icon available, find by WM_CLASS in desktop files
+. Ultimate fallback: generic placeholder
+
+**Implementation Status:**
+
+* ✅ Automatic fallback to placeholders
+* ✅ Icon loading from `_NET_WM_ICON`
+* ✅ Icon search in desktop files by WM_CLASS
+* ✅ Icon search in standard directories (`/usr/share/icons`, etc.)
+* ✅ Graceful degradation without warnings
+
+**Desktop File Parsing:**
+
+Searches for `.desktop` files in:
+
+* `/usr/share/applications`
+* `/usr/local/share/applications`
+* `~/.local/share/applications`
+* `$XDG_DATA_DIRS/applications`
+
+Matches by:
+
+. `StartupWMClass` field (exact match)
+. `Name` field (case-insensitive)
+. Desktop filename (fuzzy match)
+
+=== Testing on Different Window Managers
+
+**Tested WMs:**
+
+* ✅ i3wm — Full support with EWMH
+* ⏳ bspwm — To be tested
+* ⏳ openbox — To be tested
+* ⏳ xfce — To be tested
+
+**Known Compatibility:**
+
+* Works with any EWMH-compatible WM
+* Requires `_NET_CLIENT_LIST` support
+* Requires `_NET_ACTIVE_WINDOW` support
+* Optional: `_NET_WM_DESKTOP`, `_NET_CURRENT_DESKTOP` for workspace filtering
+
+=== Configuration Reference
+
+See [doc/configuration.asciidoc](doc/configuration.asciidoc) for complete configuration reference including:
+
+* All configuration options with descriptions
+* CLI flag names and formats
+* Environment variable names
+* YAML configuration examples
+* Type specifications and defaults
 
 == Conclusion
 
