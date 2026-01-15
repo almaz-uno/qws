@@ -79,7 +79,7 @@ type Behavior struct {
 
 // Windows contains window filtering configuration
 type Windows struct {
-	Desktop           string `mapstructure:"desktop"`
+	Workspace         string `mapstructure:"workspace"`
 	IgnoreSkipTaskbar bool   `mapstructure:"ignore_skip_taskbar"`
 	SortMinimizedLast bool   `mapstructure:"sort_minimized_last"`
 }
@@ -141,7 +141,7 @@ func Default() *Config {
 			ShowDelay:        0,
 		},
 		Windows: Windows{
-			Desktop:           "all",
+			Workspace:         "all",
 			IgnoreSkipTaskbar: false,
 			SortMinimizedLast: false,
 		},
@@ -235,7 +235,7 @@ func setDefaults(v *viper.Viper, cfg *Config) {
 	v.SetDefault("behavior.snapshot_interval", cfg.Behavior.SnapshotInterval)
 	v.SetDefault("behavior.show_delay", cfg.Behavior.ShowDelay)
 
-	v.SetDefault("windows.desktop", cfg.Windows.Desktop)
+	v.SetDefault("windows.workspace", cfg.Windows.Workspace)
 	v.SetDefault("windows.ignore_skip_taskbar", cfg.Windows.IgnoreSkipTaskbar)
 	v.SetDefault("windows.sort_minimized_last", cfg.Windows.SortMinimizedLast)
 

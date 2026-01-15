@@ -27,27 +27,28 @@ type keyConfig struct {
 
 // Selector provides a graphical carousel interface for window selection
 type Selector struct {
-	ctx              context.Context
-	conn             *xgb.Conn
-	root             xproto.Window
-	windows          []x11.WindowInfo
-	allWindows       []x11.WindowInfo // All windows (unfiltered)
-	selectedIndex    int
-	hoverIndex       int // Index of window under mouse cursor (-1 if none)
-	window           *carousel.Window
-	config           carousel.Config
-	monitorGeom      x11.MonitorGeometry // Current monitor geometry
-	animOffset       float64
-	animating        bool
-	resultChan       chan *x11.WindowInfo
-	keyConfig        keyConfig // Configured keybindings
-	modifierPressed  bool      // Track if primary modifier is currently pressed
-	workspacePressed bool      // Track if workspace modifier is currently pressed
-	lastMouseUpdate  time.Time // Last time mouse hover was processed
+	ctx                 context.Context
+	conn                *xgb.Conn
+	root                xproto.Window
+	windows             []x11.WindowInfo
+	allWindows          []x11.WindowInfo // All windows (unfiltered)
+	selectedIndex       int
+	hoverIndex          int // Index of window under mouse cursor (-1 if none)
+	window              *carousel.Window
+	config              carousel.Config
+	monitorGeom         x11.MonitorGeometry // Current monitor geometry
+	animOffset          float64
+	animating           bool
+	resultChan          chan *x11.WindowInfo
+	keyConfig           keyConfig // Configured keybindings
+	modifierPressed     bool      // Track if primary modifier is currently pressed
+	workspacePressed    bool      // Track if workspace modifier is currently pressed
+	initialWorkspaceOpt string    // Initial workspace configuration ("all", "current", "all-except-current")
+	lastMouseUpdate     time.Time // Last time mouse hover was processed
 }
 
 // NewSelector creates a new graphical window selector
-func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, windows []x11.WindowInfo, appearance config.Appearance, keybindings config.Keybindings) *Selector {
+func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, windows []x11.WindowInfo, appearance config.Appearance, keybindings config.Keybindings, initialWorkspaceOpt string) *Selector {
 	// Try to get current monitor geometry, fallback to full screen on error
 	monitor, err := x11.GetCurrentMonitor(conn, root)
 	if err != nil {
@@ -139,27 +140,47 @@ func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, window
 		keyConf.cancelKeysym = keysym
 	}
 
-	return &Selector{
-		ctx:           ctx,
-		conn:          conn,
-		root:          root,
-		windows:       windows,
-		allWindows:    windows,
-		selectedIndex: 0,
-		hoverIndex:    -1,
-		config:        carouselConfig,
-		monitorGeom:   monitor,
-		resultChan:    make(chan *x11.WindowInfo, 1),
-		keyConfig:     keyConf,
+	s := &Selector{
+		ctx:                 ctx,
+		conn:                conn,
+		root:                root,
+		windows:             windows,
+		allWindows:          windows,
+		selectedIndex:       0,
+		hoverIndex:          -1,
+		config:              carouselConfig,
+		monitorGeom:         monitor,
+		resultChan:          make(chan *x11.WindowInfo, 1),
+		keyConfig:           keyConf,
+		initialWorkspaceOpt: initialWorkspaceOpt,
 	}
+
+	// Apply initial workspace filtering based on configuration
+	if initialWorkspaceOpt == "current" {
+		s.applyWorkspaceFilter()
+	} else if initialWorkspaceOpt == "all-except-current" {
+		s.applyAllExceptCurrentWorkspaceFilter()
+	}
+	// If "all", windows are already unfiltered
+
+	return s
 }
 
 // UpdateWindows updates the window list, preserving the index
 func (s *Selector) UpdateWindows(windows []x11.WindowInfo) {
 	s.allWindows = windows
-	s.windows = windows
+
+	// Re-apply initial workspace filtering
+	if s.initialWorkspaceOpt == "current" {
+		s.applyWorkspaceFilter()
+	} else if s.initialWorkspaceOpt == "all-except-current" {
+		s.applyAllExceptCurrentWorkspaceFilter()
+	} else {
+		s.windows = windows
+	}
+
 	// Reset index if it's out of bounds of the new list
-	if s.selectedIndex >= len(windows) {
+	if s.selectedIndex >= len(s.windows) {
 		s.selectedIndex = 0
 	}
 }
@@ -246,10 +267,18 @@ func (s *Selector) Show() (*x11.WindowInfo, error) {
 	// Check if workspace modifier is currently pressed when showing the selector
 	s.workspacePressed = s.isModifierPressed(s.keyConfig.workspaceModifierMask)
 
-	// If workspace modifier is pressed, apply workspace filter immediately
+	// If workspace modifier is pressed, invert workspace filter based on initial configuration
 	if s.workspacePressed {
-		log.Debug().Msg("Workspace modifier pressed at startup, filtering by workspace")
-		s.applyWorkspaceFilter()
+		switch s.initialWorkspaceOpt {
+		case "all", "all-except-current":
+			// If showing all or all-except-current, Ctrl filters to current workspace
+			log.Debug().Msg("Workspace modifier pressed at startup, filtering to current workspace")
+			s.applyWorkspaceFilter()
+		case "current":
+			// If showing current, Ctrl shows all workspaces
+			log.Debug().Msg("Workspace modifier pressed at startup, showing all workspaces")
+			s.removeWorkspaceFilter()
+		}
 		// Update selected index if it went out of bounds
 		// Prefer index 1 (next window) over 0 (current window) for Alt+Tab logic
 		if s.selectedIndex >= len(s.windows) {
@@ -329,7 +358,17 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 			if s.isModifierKeycode(e.Detail, workspaceKeycodes) {
 				if s.workspacePressed {
 					s.workspacePressed = false
-					s.removeWorkspaceFilter()
+					// Restore original workspace filter when releasing Ctrl
+					if s.initialWorkspaceOpt == "all" {
+						// Was showing current (filtered), now restore to all
+						s.removeWorkspaceFilter()
+					} else if s.initialWorkspaceOpt == "current" {
+						// Was showing all, now restore to current (filtered)
+						s.applyWorkspaceFilter()
+					} else if s.initialWorkspaceOpt == "all-except-current" {
+						// Was showing current (filtered), now restore to all-except-current
+						s.applyAllExceptCurrentWorkspaceFilter()
+					}
 					// Preserve selection if possible
 					if s.selectedIndex >= len(s.windows) {
 						s.selectedIndex = 0
@@ -439,7 +478,15 @@ func (s *Selector) handleKeyPressSimple(e xproto.KeyPressEvent, thumbnails []ima
 	if s.isModifierKeycode(keycode, workspaceKeycodes) {
 		if !s.workspacePressed {
 			s.workspacePressed = true
-			s.applyWorkspaceFilter()
+			// Invert workspace filter based on initial configuration
+			switch s.initialWorkspaceOpt {
+			case "all", "all-except-current":
+				// If showing all or all-except-current, Ctrl filters to current workspace
+				s.applyWorkspaceFilter()
+			case "current":
+				// If showing current, Ctrl shows all workspaces
+				s.removeWorkspaceFilter()
+			}
 			// Preserve selection if possible
 			// Prefer index 1 (next window) over 0 (current window) for Alt+Tab logic
 			if s.selectedIndex >= len(s.windows) {
@@ -707,13 +754,8 @@ func (s *Selector) applyWorkspaceFilter() {
 		selectedID = s.windows[s.selectedIndex].ID
 	}
 
-	// Filter windows by workspace
-	filteredWindows := make([]x11.WindowInfo, 0)
-	for _, win := range s.allWindows {
-		if win.Workspace == currentWorkspace {
-			filteredWindows = append(filteredWindows, win)
-		}
-	}
+	// Use common filtering function
+	filteredWindows := x11.FilterWindowsByWorkspace(s.allWindows, currentWorkspace, "current")
 
 	if len(filteredWindows) == 0 {
 		log.Warn().Msg("No windows in current workspace")
@@ -747,9 +789,48 @@ func (s *Selector) removeWorkspaceFilter() {
 		selectedID = s.windows[s.selectedIndex].ID
 	}
 
-	s.windows = s.allWindows
+	// Use common filtering function with "all" option
+	s.windows = x11.FilterWindowsByWorkspace(s.allWindows, "", "all")
 
 	// Try to preserve selection by finding the same window in full list
+	s.selectedIndex = 0
+	for i, win := range s.windows {
+		if win.ID == selectedID {
+			s.selectedIndex = i
+			break
+		}
+	}
+}
+
+// applyAllExceptCurrentWorkspaceFilter filters windows to show all except those in the current workspace
+func (s *Selector) applyAllExceptCurrentWorkspaceFilter() {
+	// Get current workspace
+	currentWorkspace := s.getCurrentWorkspace()
+	if currentWorkspace == "" {
+		log.Warn().Msg("Cannot determine current workspace")
+		return
+	}
+
+	log.Debug().Str("workspace", currentWorkspace).Msg("Filtering windows to all except current workspace")
+
+	// Find currently selected window ID to preserve selection
+	var selectedID xproto.Window
+	if s.selectedIndex >= 0 && s.selectedIndex < len(s.windows) {
+		selectedID = s.windows[s.selectedIndex].ID
+	}
+
+	// Use common filtering function
+	filteredWindows := x11.FilterWindowsByWorkspace(s.allWindows, currentWorkspace, "all-except-current")
+
+	if len(filteredWindows) == 0 {
+		log.Warn().Msg("No windows outside current workspace")
+		return
+	}
+
+	s.windows = filteredWindows
+
+	// Try to preserve selection by finding the same window in filtered list
+	// Default to index 0 for this case
 	s.selectedIndex = 0
 	for i, win := range s.windows {
 		if win.ID == selectedID {

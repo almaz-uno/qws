@@ -129,7 +129,7 @@ viper.BindPFlag("keybindings.workspace_modifier",
 
 | `workspace_modifier`
 | `Ctrl`
-| When NOT pressed, shows windows from all workspaces; when pressed together with main modifier, filters to current workspace only
+| Inverts the workspace filter behavior: if windows.workspace is "all", pressing this modifier filters to current workspace; if windows.workspace is "current", pressing this modifier shows all workspaces
 
 | `cancel_key`
 | `Escape`
@@ -268,7 +268,7 @@ behavior:
 [source,yaml]
 ----
 windows:
-  desktop: current           # current, all, all-except-current
+  workspace: current         # current, all, all-except-current
   ignore_skip_taskbar: false # Respect _NET_WM_STATE_SKIP_TASKBAR hint
   sort_minimized_last: false
   # exclude_classes:
@@ -330,7 +330,7 @@ behavior:
   show_delay: 0ms
 
 windows:
-  desktop: current
+  workspace: current
   ignore_skip_taskbar: false
   sort_minimized_last: false
 
@@ -381,7 +381,7 @@ log:
 | `QWS_KEYBINDINGS_WORKSPACE_MODIFIER`
 | `string`
 | `Ctrl`
-| Modifier to filter current workspace
+| Modifier to invert workspace filter (e.g., if showing all workspaces, pressing this shows only current; if showing current, pressing this shows all)
 
 | `keybindings.cancel`
 | `--keybindings-cancel`
@@ -537,12 +537,12 @@ log:
 | `0ms`
 | Delay before showing UI
 
-| `windows.desktop`
-| `--windows-desktop`
-| `QWS_WINDOWS_DESKTOP`
+| `windows.workspace`
+| `--windows-workspace`
+| `QWS_WINDOWS_WORKSPACE`
 | `string`
 | `current`
-| Desktop filter: current, all, all-except-current
+| Workspace filter: current, all, all-except-current. The workspace_modifier key (Ctrl) inverts this: "all" becomes "current", "current" becomes "all", "all-except-current" becomes "current"
 
 | `windows.ignore_skip_taskbar`
 | `--windows-ignore-skip-taskbar`
@@ -632,7 +632,7 @@ behavior:
   snapshot_interval: 5s
 
 windows:
-  desktop: all
+  workspace: all
 ----
 
 ==== Command-Line Interface
@@ -657,7 +657,7 @@ qws --appearance-thumbnail-width=192 --appearance-thumbnail-height=192
 qws -t dark --appearance-colors-dark-selection-frame="#ff6b6b"
 
 # Configure behavior
-qws --behavior-snapshot-interval=5s --windows-desktop=all
+qws --behavior-snapshot-interval=5s --windows-workspace=all
 
 # Debug mode
 qws -v   # debug level

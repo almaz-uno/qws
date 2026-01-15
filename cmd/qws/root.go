@@ -78,7 +78,7 @@ func init() {
 	rootCmd.PersistentFlags().Duration("behavior-show-delay", defaultCfg.Behavior.ShowDelay, "delay before showing UI")
 
 	// Windows
-	rootCmd.PersistentFlags().String("windows-desktop", defaultCfg.Windows.Desktop, "desktop filter (current, all, all-except-current)")
+	rootCmd.PersistentFlags().String("windows-workspace", defaultCfg.Windows.Workspace, "workspace filter (current, all, all-except-current)")
 	rootCmd.PersistentFlags().Bool("windows-ignore-skip-taskbar", defaultCfg.Windows.IgnoreSkipTaskbar, "ignore _NET_WM_STATE_SKIP_TASKBAR hint")
 	rootCmd.PersistentFlags().Bool("windows-sort-minimized-last", defaultCfg.Windows.SortMinimizedLast, "sort minimized windows last")
 }
@@ -200,8 +200,8 @@ func applyFlags() {
 	}
 
 	// Windows
-	if rootCmd.PersistentFlags().Changed("windows-desktop") {
-		cfg.Windows.Desktop, _ = rootCmd.PersistentFlags().GetString("windows-desktop")
+	if rootCmd.PersistentFlags().Changed("windows-workspace") {
+		cfg.Windows.Workspace, _ = rootCmd.PersistentFlags().GetString("windows-workspace")
 	}
 	if rootCmd.PersistentFlags().Changed("windows-ignore-skip-taskbar") {
 		cfg.Windows.IgnoreSkipTaskbar, _ = rootCmd.PersistentFlags().GetBool("windows-ignore-skip-taskbar")
@@ -388,9 +388,10 @@ func handleKeyPress(ctx context.Context, conn *x11.Connection, e xproto.KeyPress
 		time.Sleep(cfg.Behavior.ShowDelay)
 	}
 
-	// Get window list with filtering
+	// Get full window list without workspace filtering (selector will handle it)
+	// Only apply skip_taskbar and minimized sorting here
 	filterOpts := x11.WindowFilterOptions{
-		Desktop:           cfg.Windows.Desktop,
+		Workspace:         "all", // Always get all windows, selector will filter by workspace
 		IgnoreSkipTaskbar: cfg.Windows.IgnoreSkipTaskbar,
 		SortMinimizedLast: cfg.Windows.SortMinimizedLast,
 	}
@@ -421,7 +422,7 @@ func handleKeyPress(ctx context.Context, conn *x11.Connection, e xproto.KeyPress
 
 	// Create or reuse selector
 	if selector == nil {
-		selector = ui.NewSelector(ctx, conn.Conn, conn.Root, windows, cfg.Appearance, cfg.Keybindings)
+		selector = ui.NewSelector(ctx, conn.Conn, conn.Root, windows, cfg.Appearance, cfg.Keybindings, cfg.Windows.Workspace)
 	} else {
 		// Update window list, preserving position
 		selector.UpdateWindows(windows)

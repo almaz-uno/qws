@@ -23,7 +23,7 @@ type WindowInfo struct {
 
 // WindowFilterOptions contains options for filtering windows
 type WindowFilterOptions struct {
-	Desktop           string // "current", "all", "all-except-current"
+	Workspace         string // "current", "all", "all-except-current"
 	IgnoreSkipTaskbar bool   // If true, show windows with _NET_WM_STATE_SKIP_TASKBAR
 	SortMinimizedLast bool   // If true, put minimized windows at the end
 }
@@ -212,10 +212,34 @@ func findBestIcon(data []uint32) image.Image {
 	return bestImg
 }
 
+// FilterWindowsByWorkspace filters windows by workspace option
+// This is a pure function that can be used both during initial window retrieval
+// and for dynamic filtering in the UI
+func FilterWindowsByWorkspace(windows []WindowInfo, currentWorkspace string, option string) []WindowInfo {
+	if option == "all" {
+		return windows
+	}
+
+	filteredWindows := make([]WindowInfo, 0)
+	for _, win := range windows {
+		switch option {
+		case "current":
+			if win.Workspace == currentWorkspace || win.Workspace == "" {
+				filteredWindows = append(filteredWindows, win)
+			}
+		case "all-except-current":
+			if win.Workspace != currentWorkspace || currentWorkspace == "" {
+				filteredWindows = append(filteredWindows, win)
+			}
+		}
+	}
+	return filteredWindows
+}
+
 // GetWindowList retrieves list of windows with names
 func (c *Connection) GetWindowList() ([]WindowInfo, error) {
 	return c.GetWindowListFiltered(WindowFilterOptions{
-		Desktop:           "all",
+		Workspace:         "all",
 		IgnoreSkipTaskbar: false,
 		SortMinimizedLast: false,
 	})
@@ -228,12 +252,7 @@ func (c *Connection) GetWindowListFiltered(opts WindowFilterOptions) ([]WindowIn
 		return nil, err
 	}
 
-	// Get current desktop if filtering is needed
-	var currentDesktop uint32
-	if opts.Desktop == "current" || opts.Desktop == "all-except-current" {
-		currentDesktop, _ = c.GetCurrentDesktop()
-	}
-
+	// Build list of all windows with metadata
 	result := make([]WindowInfo, 0, len(windows))
 	for _, win := range windows {
 		name, err := c.GetWindowName(win)
@@ -247,21 +266,8 @@ func (c *Connection) GetWindowListFiltered(opts WindowFilterOptions) ([]WindowIn
 			continue
 		}
 
-		// Filter by desktop
-		if opts.Desktop == "current" {
-			winDesktop, err := c.GetWindowDesktop(win)
-			if err == nil && winDesktop != currentDesktop {
-				// Special case: 0xFFFFFFFF means "all desktops"
-				if winDesktop != 0xFFFFFFFF {
-					continue
-				}
-			}
-		} else if opts.Desktop == "all-except-current" {
-			winDesktop, err := c.GetWindowDesktop(win)
-			if err == nil && winDesktop == currentDesktop {
-				continue
-			}
-		}
+		// Get workspace name for this window
+		workspace := c.GetWindowWorkspaceName(win)
 
 		// Try to get window icon (ignore errors)
 		icon, _ := c.GetWindowIcon(win)
@@ -273,15 +279,27 @@ func (c *Connection) GetWindowListFiltered(opts WindowFilterOptions) ([]WindowIn
 			}
 		}
 
-		// Get workspace name
-		workspace := c.GetWindowWorkspaceName(win)
-
 		result = append(result, WindowInfo{
 			ID:        win,
 			Name:      name,
 			Icon:      icon,
 			Workspace: workspace,
 		})
+	}
+
+	// Apply workspace filtering using common function
+	if opts.Workspace != "all" {
+		var currentWorkspace string
+		desktop, err := c.GetCurrentDesktop()
+		if err == nil {
+			names, err := c.GetDesktopNames()
+			if err == nil && int(desktop) < len(names) {
+				currentWorkspace = names[desktop]
+			} else {
+				currentWorkspace = fmt.Sprintf("%d", desktop+1)
+			}
+		}
+		result = FilterWindowsByWorkspace(result, currentWorkspace, opts.Workspace)
 	}
 
 	// Sort minimized windows last if requested

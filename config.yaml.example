@@ -43,7 +43,7 @@ behavior:
   show_delay: 0ms
 
 windows:
-  desktop: current  # current, all, all-except-current
+  workspace: current  # current, all, all-except-current
   ignore_skip_taskbar: false
   sort_minimized_last: false
 
