@@ -19,6 +19,7 @@ type WindowInfo struct {
 	Icon      image.Image // Window icon from _NET_WM_ICON
 	Preview   image.Image // Window thumbnail (to be implemented)
 	Workspace string      // Workspace name
+	Urgent    bool        // Urgency hint (window demands attention)
 }
 
 // WindowFilterOptions contains options for filtering windows
@@ -279,11 +280,15 @@ func (c *Connection) GetWindowListFiltered(opts WindowFilterOptions) ([]WindowIn
 			}
 		}
 
+		// Check urgency hint
+		urgent := c.GetWindowUrgent(win)
+
 		result = append(result, WindowInfo{
 			ID:        win,
 			Name:      name,
 			Icon:      icon,
 			Workspace: workspace,
+			Urgent:    urgent,
 		})
 	}
 
@@ -792,4 +797,35 @@ func (c *Connection) GetActiveWindow() (xproto.Window, error) {
 	)
 
 	return activeWin, nil
+}
+
+// GetWindowUrgent checks if window has the urgency hint set via WM_HINTS
+func (c *Connection) GetWindowUrgent(window xproto.Window) bool {
+	// Read WM_HINTS property
+	prop, err := xproto.GetProperty(c.Conn, false, window,
+		xproto.AtomWmHints,
+		xproto.AtomWmHints,
+		0,
+		9, // WM_HINTS is 9 32-bit values
+	).Reply()
+	if err != nil || prop.ValueLen == 0 {
+		return false
+	}
+
+	// WM_HINTS structure:
+	// flags (32-bit), input, initial_state, icon_pixmap, icon_window,
+	// icon_x, icon_y, icon_mask, window_group
+	// We only need the flags field
+	if len(prop.Value) < 4 {
+		return false
+	}
+
+	flags := uint32(prop.Value[0]) |
+		uint32(prop.Value[1])<<8 |
+		uint32(prop.Value[2])<<16 |
+		uint32(prop.Value[3])<<24
+
+	// XUrgencyHint flag is bit 8 (256 in decimal)
+	const urgencyHint = 1 << 8
+	return (flags & urgencyHint) != 0
 }

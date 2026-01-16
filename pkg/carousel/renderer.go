@@ -23,6 +23,7 @@ type WindowData struct {
 	Icon      image.Image
 	Title     string
 	Workspace string
+	Urgent    bool // Urgency hint set (window demands attention)
 }
 
 // Config holds configuration for carousel rendering
@@ -42,6 +43,7 @@ type Config struct {
 	TextColor                 string   // Text color
 	ShadowColor               string   // Shadow color
 	InactiveFrame             string   // Inactive frame color
+	UrgentTitleBackground     string   // Urgent window title background color
 	WindowBackgroundEnabled   bool     // Enable semi-transparent background for entire window
 	WindowBackgroundOpacity   float64  // Background opacity (0.0-1.0)
 	WindowBackgroundRadius    float64  // Corner radius in pixels
@@ -401,8 +403,14 @@ func drawWindowWithData(dc *gg.Context, data *WindowData, index, selected, hover
 			padding := 8.0 * scale
 			borderRadius := 6.0 * scale
 
-			// Draw semi-transparent dark background
-			setColor(dc, cfg.BackgroundColor, 0.7*alpha)
+			// Choose background color based on urgency
+			bgColor := cfg.BackgroundColor
+			if data.Urgent {
+				bgColor = cfg.UrgentTitleBackground
+			}
+
+			// Draw semi-transparent background
+			setColor(dc, bgColor, 0.7*alpha)
 			dc.DrawRoundedRectangle(
 				x-textWidth/2-padding,
 				titleY-textHeight/2-padding,

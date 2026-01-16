@@ -68,11 +68,12 @@ type Colors struct {
 
 // ThemeColor contains colors for a specific theme
 type ThemeColor struct {
-	Background     string `mapstructure:"background"`
-	SelectionFrame string `mapstructure:"selection_frame"`
-	Text           string `mapstructure:"text"`
-	Shadow         string `mapstructure:"shadow"`
-	InactiveFrame  string `mapstructure:"inactive_frame"`
+	Background            string `mapstructure:"background"`
+	SelectionFrame        string `mapstructure:"selection_frame"`
+	Text                  string `mapstructure:"text"`
+	Shadow                string `mapstructure:"shadow"`
+	InactiveFrame         string `mapstructure:"inactive_frame"`
+	UrgentTitleBackground string `mapstructure:"urgent_title_background"`
 }
 
 // WindowBackground contains window background configuration
@@ -172,18 +173,20 @@ func Default() *Config {
 			Colors: Colors{
 				Theme: "auto",
 				Dark: ThemeColor{
-					Background:     "#1a1a2e",
-					SelectionFrame: "#4a9eff",
-					Text:           "#ffffff",
-					Shadow:         "rgba(0, 0, 0, 0.8)",
-					InactiveFrame:  "#404050",
+					Background:            "#1a1a2e",
+					SelectionFrame:        "#4a9eff",
+					Text:                  "#ffffff",
+					Shadow:                "rgba(0, 0, 0, 0.8)",
+					InactiveFrame:         "#404050",
+					UrgentTitleBackground: "#d32f2f",
 				},
 				Light: ThemeColor{
-					Background:     "#f5f5f5",
-					SelectionFrame: "#0078d4",
-					Text:           "#1a1a1a",
-					Shadow:         "rgba(0, 0, 0, 0.3)",
-					InactiveFrame:  "#cccccc",
+					Background:            "#f5f5f5",
+					SelectionFrame:        "#0078d4",
+					Text:                  "#1a1a1a",
+					Shadow:                "rgba(0, 0, 0, 0.3)",
+					InactiveFrame:         "#cccccc",
+					UrgentTitleBackground: "#e53935",
 				},
 			},
 			WindowBackground: WindowBackground{

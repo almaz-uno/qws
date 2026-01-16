@@ -31,12 +31,14 @@ appearance:
       text: "#ffffff"
       shadow: "rgba(0, 0, 0, 0.8)"
       inactive_frame: "#404050"
+      urgent_title_background: "#d32f2f"
     light:
       background: "#f5f5f5"
       selection_frame: "#0078d4"
       text: "#1a1a1a"
       shadow: "rgba(0, 0, 0, 0.3)"
       inactive_frame: "#cccccc"
+      urgent_title_background: "#e53935"
   window_background:
     enabled: true       # Enable semi-transparent background for entire selector window
     opacity: 0.85       # Background opacity (0.0-1.0, where 1.0 is fully opaque)

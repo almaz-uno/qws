@@ -126,6 +126,7 @@ func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, window
 	carouselConfig.TextColor = themeColors.Text
 	carouselConfig.ShadowColor = themeColors.Shadow
 	carouselConfig.InactiveFrame = themeColors.InactiveFrame
+	carouselConfig.UrgentTitleBackground = themeColors.UrgentTitleBackground
 
 	// Parse keybindings to runtime key configuration
 	keyConf := keyConfig{}
@@ -519,6 +520,7 @@ func (s *Selector) prepareWindowData() []carousel.WindowData {
 			Icon:      win.Icon,
 			Title:     win.Name,
 			Workspace: win.Workspace,
+			Urgent:    win.Urgent,
 		}
 	}
 	return data
