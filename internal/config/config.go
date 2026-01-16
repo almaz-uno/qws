@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/viper"
@@ -29,12 +31,14 @@ type Keybindings struct {
 
 // Appearance contains visual configuration
 type Appearance struct {
-	Thumbnail   Thumbnail `mapstructure:"thumbnail"`
-	Spacing     float64   `mapstructure:"spacing"`
-	Perspective float64   `mapstructure:"perspective"`
-	Shadow      Shadow    `mapstructure:"shadow"`
-	Font        Font      `mapstructure:"font"`
-	Colors      Colors    `mapstructure:"colors"`
+	Thumbnail        Thumbnail        `mapstructure:"thumbnail"`
+	Spacing          float64          `mapstructure:"spacing"`
+	Perspective      float64          `mapstructure:"perspective"`
+	Shadow           Shadow           `mapstructure:"shadow"`
+	Font             Font             `mapstructure:"font"`
+	Colors           Colors           `mapstructure:"colors"`
+	WindowBackground WindowBackground `mapstructure:"window_background"`
+	WindowPadding    WindowPadding    `mapstructure:"window_padding"`
 }
 
 // Thumbnail contains thumbnail size configuration
@@ -69,6 +73,53 @@ type ThemeColor struct {
 	Text           string `mapstructure:"text"`
 	Shadow         string `mapstructure:"shadow"`
 	InactiveFrame  string `mapstructure:"inactive_frame"`
+}
+
+// WindowBackground contains window background configuration
+type WindowBackground struct {
+	Enabled      bool    `mapstructure:"enabled"`       // Enable semi-transparent background for entire window
+	Opacity      float64 `mapstructure:"opacity"`       // Background opacity (0.0-1.0)
+	BorderRadius float64 `mapstructure:"border_radius"` // Corner radius in pixels
+}
+
+// WindowPadding contains window padding configuration
+type WindowPadding struct {
+	Horizontal string `mapstructure:"horizontal"` // Horizontal padding from screen edges (e.g., "5%" or "50px")
+	Vertical   string `mapstructure:"vertical"`   // Vertical padding from screen edges (e.g., "5%" or "50px")
+}
+
+// ParsePadding parses padding string and returns value in pixels
+// Supports formats: "5%" (percentage of dimension) or "50px" (absolute pixels)
+// Returns 0 on parse error
+func ParsePadding(paddingStr string, dimension int) int {
+	paddingStr = strings.TrimSpace(paddingStr)
+
+	// Check for percentage
+	if strings.HasSuffix(paddingStr, "%") {
+		percentStr := strings.TrimSuffix(paddingStr, "%")
+		percent, err := strconv.ParseFloat(percentStr, 64)
+		if err != nil {
+			return 0
+		}
+		return int(float64(dimension) * percent / 100.0)
+	}
+
+	// Check for pixels
+	if strings.HasSuffix(paddingStr, "px") {
+		pxStr := strings.TrimSuffix(paddingStr, "px")
+		pixels, err := strconv.Atoi(pxStr)
+		if err != nil {
+			return 0
+		}
+		return pixels
+	}
+
+	// Try to parse as plain number (assume pixels)
+	pixels, err := strconv.Atoi(paddingStr)
+	if err != nil {
+		return 0
+	}
+	return pixels
 }
 
 // Behavior contains application behavior configuration
@@ -134,6 +185,15 @@ func Default() *Config {
 					Shadow:         "rgba(0, 0, 0, 0.3)",
 					InactiveFrame:  "#cccccc",
 				},
+			},
+			WindowBackground: WindowBackground{
+				Enabled:      true,
+				Opacity:      0.85,
+				BorderRadius: 20,
+			},
+			WindowPadding: WindowPadding{
+				Horizontal: "20px",
+				Vertical:   "20px",
 			},
 		},
 		Behavior: Behavior{
@@ -231,6 +291,12 @@ func setDefaults(v *viper.Viper, cfg *Config) {
 	v.SetDefault("appearance.colors.light.text", cfg.Appearance.Colors.Light.Text)
 	v.SetDefault("appearance.colors.light.shadow", cfg.Appearance.Colors.Light.Shadow)
 	v.SetDefault("appearance.colors.light.inactive_frame", cfg.Appearance.Colors.Light.InactiveFrame)
+
+	v.SetDefault("appearance.window_background.enabled", cfg.Appearance.WindowBackground.Enabled)
+	v.SetDefault("appearance.window_background.opacity", cfg.Appearance.WindowBackground.Opacity)
+	v.SetDefault("appearance.window_background.border_radius", cfg.Appearance.WindowBackground.BorderRadius)
+	v.SetDefault("appearance.window_padding.horizontal", cfg.Appearance.WindowPadding.Horizontal)
+	v.SetDefault("appearance.window_padding.vertical", cfg.Appearance.WindowPadding.Vertical)
 
 	v.SetDefault("behavior.snapshot_interval", cfg.Behavior.SnapshotInterval)
 	v.SetDefault("behavior.show_delay", cfg.Behavior.ShowDelay)

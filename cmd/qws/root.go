@@ -72,6 +72,11 @@ func init() {
 	rootCmd.PersistentFlags().String("appearance-colors-light-text", defaultCfg.Appearance.Colors.Light.Text, "light theme text color")
 	rootCmd.PersistentFlags().String("appearance-colors-light-shadow", defaultCfg.Appearance.Colors.Light.Shadow, "light theme shadow color")
 	rootCmd.PersistentFlags().String("appearance-colors-light-inactive-frame", defaultCfg.Appearance.Colors.Light.InactiveFrame, "light theme inactive frame color")
+	rootCmd.PersistentFlags().Bool("appearance-window-background-enabled", defaultCfg.Appearance.WindowBackground.Enabled, "enable semi-transparent background for entire window")
+	rootCmd.PersistentFlags().Float64("appearance-window-background-opacity", defaultCfg.Appearance.WindowBackground.Opacity, "window background opacity (0.0-1.0)")
+	rootCmd.PersistentFlags().Float64("appearance-window-background-border-radius", defaultCfg.Appearance.WindowBackground.BorderRadius, "window background corner radius in pixels")
+	rootCmd.PersistentFlags().String("appearance-window-padding-horizontal", defaultCfg.Appearance.WindowPadding.Horizontal, "horizontal padding from screen edges (e.g., \"5%\" or \"50px\")")
+	rootCmd.PersistentFlags().String("appearance-window-padding-vertical", defaultCfg.Appearance.WindowPadding.Vertical, "vertical padding from screen edges (e.g., \"5%\" or \"50px\")")
 
 	// Behavior
 	rootCmd.PersistentFlags().Duration("behavior-snapshot-interval", defaultCfg.Behavior.SnapshotInterval, "background thumbnail refresh interval")
@@ -189,6 +194,21 @@ func applyFlags() {
 	}
 	if rootCmd.PersistentFlags().Changed("appearance-colors-light-inactive-frame") {
 		cfg.Appearance.Colors.Light.InactiveFrame, _ = rootCmd.PersistentFlags().GetString("appearance-colors-light-inactive-frame")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-window-background-enabled") {
+		cfg.Appearance.WindowBackground.Enabled, _ = rootCmd.PersistentFlags().GetBool("appearance-window-background-enabled")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-window-background-opacity") {
+		cfg.Appearance.WindowBackground.Opacity, _ = rootCmd.PersistentFlags().GetFloat64("appearance-window-background-opacity")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-window-background-border-radius") {
+		cfg.Appearance.WindowBackground.BorderRadius, _ = rootCmd.PersistentFlags().GetFloat64("appearance-window-background-border-radius")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-window-padding-horizontal") {
+		cfg.Appearance.WindowPadding.Horizontal, _ = rootCmd.PersistentFlags().GetString("appearance-window-padding-horizontal")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-window-padding-vertical") {
+		cfg.Appearance.WindowPadding.Vertical, _ = rootCmd.PersistentFlags().GetString("appearance-window-padding-vertical")
 	}
 
 	// Behavior

@@ -37,7 +37,10 @@ type Selector struct {
 	hoverIndex          int // Index of window under mouse cursor (-1 if none)
 	window              *carousel.Window
 	config              carousel.Config
+	appearance          config.Appearance   // Appearance configuration for recalculating on monitor change
 	monitorGeom         x11.MonitorGeometry // Current monitor geometry
+	paddingX            int                 // Horizontal padding from screen edges
+	paddingY            int                 // Vertical padding from screen edges
 	animOffset          float64
 	animating           bool
 	resultChan          chan *x11.WindowInfo
@@ -73,18 +76,38 @@ func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, window
 		Int("height", monitor.Height).
 		Msg("Using monitor geometry for selector")
 
+	// Calculate padding from screen edges (supports % and px)
+	paddingX := config.ParsePadding(appearance.WindowPadding.Horizontal, monitor.Width)
+	paddingY := config.ParsePadding(appearance.WindowPadding.Vertical, monitor.Height)
+
+	// Calculate window dimensions with padding
+	windowWidth := monitor.Width - 2*paddingX
+	windowHeight := monitor.Height - 2*paddingY
+
+	log.Debug().
+		Str("padding_x_config", appearance.WindowPadding.Horizontal).
+		Str("padding_y_config", appearance.WindowPadding.Vertical).
+		Int("padding_x", paddingX).
+		Int("padding_y", paddingY).
+		Int("window_width", windowWidth).
+		Int("window_height", windowHeight).
+		Msg("Calculated window dimensions with padding")
+
 	// Build carousel configuration from appearance settings
 	carouselConfig := carousel.Config{
-		Width:             monitor.Width,
-		Height:            monitor.Height,
-		ThumbWidth:        appearance.Thumbnail.Width,
-		ThumbHeight:       appearance.Thumbnail.Height,
-		Spacing:           appearance.Spacing,
-		PerspectiveFactor: appearance.Perspective,
-		ShadowOffset:      appearance.Shadow.Offset,
-		ShadowBlur:        appearance.Shadow.Blur,
-		FontPaths:         appearance.Font.Paths,
-		FontSize:          appearance.Font.Size,
+		Width:                   windowWidth,
+		Height:                  windowHeight,
+		ThumbWidth:              appearance.Thumbnail.Width,
+		ThumbHeight:             appearance.Thumbnail.Height,
+		Spacing:                 appearance.Spacing,
+		PerspectiveFactor:       appearance.Perspective,
+		ShadowOffset:            appearance.Shadow.Offset,
+		ShadowBlur:              appearance.Shadow.Blur,
+		FontPaths:               appearance.Font.Paths,
+		FontSize:                appearance.Font.Size,
+		WindowBackgroundEnabled: appearance.WindowBackground.Enabled,
+		WindowBackgroundOpacity: appearance.WindowBackground.Opacity,
+		WindowBackgroundRadius:  appearance.WindowBackground.BorderRadius,
 	}
 
 	// Resolve theme and apply colors
@@ -151,7 +174,12 @@ func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, window
 		selectedIndex:       0,
 		hoverIndex:          -1,
 		config:              carouselConfig,
+		appearance:          appearance,
 		monitorGeom:         monitor,
+		paddingX:            paddingX,
+		paddingY:            paddingY,
+		animOffset:          0,
+		animating:           false,
 		resultChan:          make(chan *x11.WindowInfo, 1),
 		keyConfig:           keyConf,
 		initialWorkspaceOpt: initialWorkspaceOpt,
@@ -250,14 +278,22 @@ func (s *Selector) Show() (*x11.WindowInfo, error) {
 	if needRecreate {
 		// Update monitor geometry and config
 		s.monitorGeom = currentMonitor
-		s.config.Width = currentMonitor.Width
-		s.config.Height = currentMonitor.Height
+
+		// Recalculate padding and window dimensions (supports % and px)
+		s.paddingX = config.ParsePadding(s.appearance.WindowPadding.Horizontal, currentMonitor.Width)
+		s.paddingY = config.ParsePadding(s.appearance.WindowPadding.Vertical, currentMonitor.Height)
+		s.config.Width = currentMonitor.Width - 2*s.paddingX
+		s.config.Height = currentMonitor.Height - 2*s.paddingY
 
 		log.Debug().
 			Int("x", currentMonitor.X).
 			Int("y", currentMonitor.Y).
 			Int("width", currentMonitor.Width).
 			Int("height", currentMonitor.Height).
+			Int("padding_x", s.paddingX).
+			Int("padding_y", s.paddingY).
+			Int("window_width", s.config.Width).
+			Int("window_height", s.config.Height).
 			Msg("Monitor changed, recreating selector window")
 
 		// Destroy old window if exists
@@ -265,9 +301,9 @@ func (s *Selector) Show() (*x11.WindowInfo, error) {
 			s.window.Close()
 		}
 
-		// Create window at new monitor position with monitor size
+		// Create window at monitor position with padding
 		s.window, err = carousel.NewWindowAt(s.conn, s.root,
-			s.monitorGeom.X, s.monitorGeom.Y,
+			s.monitorGeom.X+s.paddingX, s.monitorGeom.Y+s.paddingY,
 			s.config.Width, s.config.Height)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create window: %w", err)

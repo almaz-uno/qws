@@ -37,6 +37,13 @@ appearance:
       text: "#1a1a1a"
       shadow: "rgba(0, 0, 0, 0.3)"
       inactive_frame: "#cccccc"
+  window_background:
+    enabled: true       # Enable semi-transparent background for entire selector window
+    opacity: 0.85       # Background opacity (0.0-1.0, where 1.0 is fully opaque)
+    border_radius: 20   # Corner radius in pixels for rounded edges
+  window_padding:
+    horizontal: 20px    # Horizontal padding from screen edges (e.g., "5%" or "50px")
+    vertical: 20px      # Vertical padding from screen edges (e.g., "5%" or "50px")
 
 behavior:
   snapshot_interval: 10s

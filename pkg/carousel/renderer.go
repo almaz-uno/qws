@@ -27,21 +27,24 @@ type WindowData struct {
 
 // Config holds configuration for carousel rendering
 type Config struct {
-	Width             int      // Window width
-	Height            int      // Window height
-	ThumbWidth        int      // Thumbnail width
-	ThumbHeight       int      // Thumbnail height
-	Spacing           float64  // Spacing between thumbnails
-	PerspectiveFactor float64  // Perspective distortion factor (0.0-1.0)
-	ShadowOffset      float64  // Shadow offset
-	ShadowBlur        float64  // Shadow blur radius
-	FontPaths         []string // Font paths (primary first, then fallbacks)
-	FontSize          int      // Font size
-	BackgroundColor   string   // Background color (hex or rgba)
-	SelectionFrame    string   // Selection frame color
-	TextColor         string   // Text color
-	ShadowColor       string   // Shadow color
-	InactiveFrame     string   // Inactive frame color
+	Width                     int      // Window width
+	Height                    int      // Window height
+	ThumbWidth                int      // Thumbnail width
+	ThumbHeight               int      // Thumbnail height
+	Spacing                   float64  // Spacing between thumbnails
+	PerspectiveFactor         float64  // Perspective distortion factor (0.0-1.0)
+	ShadowOffset              float64  // Shadow offset
+	ShadowBlur                float64  // Shadow blur radius
+	FontPaths                 []string // Font paths (primary first, then fallbacks)
+	FontSize                  int      // Font size
+	BackgroundColor           string   // Background color (hex or rgba)
+	SelectionFrame            string   // Selection frame color
+	TextColor                 string   // Text color
+	ShadowColor               string   // Shadow color
+	InactiveFrame             string   // Inactive frame color
+	WindowBackgroundEnabled   bool     // Enable semi-transparent background for entire window
+	WindowBackgroundOpacity   float64  // Background opacity (0.0-1.0)
+	WindowBackgroundRadius    float64  // Corner radius in pixels
 }
 
 // DefaultConfig returns default carousel configuration
@@ -147,9 +150,22 @@ func Draw3DCarousel(thumbnails []image.Image, selected int, animOffset float64, 
 func Draw3DCarouselWithData(windowData []WindowData, selected int, hoverIndex int, animOffset float64, cfg Config) *image.RGBA {
 	dc := gg.NewContext(cfg.Width, cfg.Height)
 
-	// Background - fully transparent
-	dc.SetRGBA(0, 0, 0, 0)
-	dc.Clear()
+	// Background - semi-transparent if enabled, fully transparent otherwise
+	if cfg.WindowBackgroundEnabled {
+		setColor(dc, cfg.BackgroundColor, cfg.WindowBackgroundOpacity)
+		if cfg.WindowBackgroundRadius > 0 {
+			// Draw rounded rectangle
+			dc.DrawRoundedRectangle(0, 0, float64(cfg.Width), float64(cfg.Height), cfg.WindowBackgroundRadius)
+			dc.Fill()
+		} else {
+			// Draw regular rectangle
+			dc.Clear()
+		}
+	} else {
+		// Fully transparent
+		dc.SetRGBA(0, 0, 0, 0)
+		dc.Clear()
+	}
 
 	centerX := float64(cfg.Width) / 2
 	centerY := float64(cfg.Height) / 2
