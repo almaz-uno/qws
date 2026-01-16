@@ -761,3 +761,35 @@ func (c *Connection) IsWindowMinimized(window xproto.Window) bool {
 func (c *Connection) ShouldSkipTaskbar(window xproto.Window) bool {
 	return c.HasWindowState(window, "_NET_WM_STATE_SKIP_TASKBAR")
 }
+
+// GetActiveWindow returns the currently active window via _NET_ACTIVE_WINDOW
+func (c *Connection) GetActiveWindow() (xproto.Window, error) {
+	netActiveWindow, err := c.InternAtom("_NET_ACTIVE_WINDOW", true)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get _NET_ACTIVE_WINDOW atom: %w", err)
+	}
+
+	prop, err := xproto.GetProperty(c.Conn, false, c.Root,
+		netActiveWindow,
+		xproto.AtomWindow,
+		0,
+		1, // only need first window
+	).Reply()
+	if err != nil {
+		return 0, fmt.Errorf("failed to read _NET_ACTIVE_WINDOW: %w", err)
+	}
+
+	if prop.ValueLen == 0 {
+		return 0, nil
+	}
+
+	// Parse window ID from property value
+	activeWin := xproto.Window(
+		uint32(prop.Value[0]) |
+			uint32(prop.Value[1])<<8 |
+			uint32(prop.Value[2])<<16 |
+			uint32(prop.Value[3])<<24,
+	)
+
+	return activeWin, nil
+}

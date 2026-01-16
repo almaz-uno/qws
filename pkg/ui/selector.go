@@ -9,6 +9,7 @@ import (
 
 	"github.com/almaz-uno/qws/internal/config"
 	"github.com/almaz-uno/qws/pkg/carousel"
+	"github.com/almaz-uno/qws/pkg/focus"
 	"github.com/almaz-uno/qws/pkg/keygrab"
 	"github.com/almaz-uno/qws/pkg/x11"
 	"github.com/jezek/xgb"
@@ -40,15 +41,16 @@ type Selector struct {
 	animOffset          float64
 	animating           bool
 	resultChan          chan *x11.WindowInfo
-	keyConfig           keyConfig // Configured keybindings
-	modifierPressed     bool      // Track if primary modifier is currently pressed
-	workspacePressed    bool      // Track if workspace modifier is currently pressed
-	initialWorkspaceOpt string    // Initial workspace configuration ("all", "current", "all-except-current")
-	lastMouseUpdate     time.Time // Last time mouse hover was processed
+	keyConfig           keyConfig      // Configured keybindings
+	modifierPressed     bool           // Track if primary modifier is currently pressed
+	workspacePressed    bool           // Track if workspace modifier is currently pressed
+	initialWorkspaceOpt string         // Initial workspace configuration ("all", "current", "all-except-current")
+	lastMouseUpdate     time.Time      // Last time mouse hover was processed
+	watcher             *focus.Watcher // Focus watcher for getting active window
 }
 
 // NewSelector creates a new graphical window selector
-func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, windows []x11.WindowInfo, appearance config.Appearance, keybindings config.Keybindings, initialWorkspaceOpt string) *Selector {
+func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, windows []x11.WindowInfo, appearance config.Appearance, keybindings config.Keybindings, initialWorkspaceOpt string, watcher *focus.Watcher) *Selector {
 	// Try to get current monitor geometry, fallback to full screen on error
 	monitor, err := x11.GetCurrentMonitor(conn, root)
 	if err != nil {
@@ -153,6 +155,7 @@ func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, window
 		resultChan:          make(chan *x11.WindowInfo, 1),
 		keyConfig:           keyConf,
 		initialWorkspaceOpt: initialWorkspaceOpt,
+		watcher:             watcher,
 	}
 
 	// Apply initial workspace filtering based on configuration
@@ -198,6 +201,35 @@ func (s *Selector) Show() (*x11.WindowInfo, error) {
 		s.selectedIndex = 1
 	} else {
 		s.selectedIndex = 0
+	}
+
+	// Check that the first window in the list is actually the active window
+	// If not (e.g., when focus is on an ignored window), reset selectedIndex to 0
+	// We check this by verifying that GetActiveWindow() matches s.windows[0].ID
+	// If GetActiveWindow() returns 0 or doesn't match, it means the current focus
+	// is on an ignored/unlisted window, so we should start from index 0
+	if s.watcher != nil && len(s.windows) > 0 {
+		activeWindow, err := s.watcher.GetActiveWindow()
+		if err != nil {
+			log.Warn().Err(err).Msg("Failed to get active window")
+		} else {
+			log.Debug().
+				Uint32("active_window", uint32(activeWindow)).
+				Uint32("first_in_list", uint32(s.windows[0].ID)).
+				Bool("match", activeWindow == s.windows[0].ID).
+				Int("initial_index", s.selectedIndex).
+				Msg("Checking active window vs first in MRU list")
+
+			// If active window is 0 (unknown) or doesn't match the first window in list,
+			// it means current focus is on an ignored window - start from beginning
+			if activeWindow == 0 || s.windows[0].ID != activeWindow {
+				log.Info().
+					Uint32("active", uint32(activeWindow)).
+					Uint32("first_in_list", uint32(s.windows[0].ID)).
+					Msg("Active window doesn't match first in list (focus on ignored window?), resetting to index 0")
+				s.selectedIndex = 0
+			}
+		}
 	}
 
 	// Check current monitor before showing (may have changed since last invocation)
