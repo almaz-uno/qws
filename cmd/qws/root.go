@@ -3,7 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
+	"runtime"
+	"runtime/pprof"
 	"time"
 
 	"github.com/almaz-uno/qws/internal/config"
@@ -44,6 +48,11 @@ func init() {
 	rootCmd.PersistentFlags().StringP("log-level", "", defaultCfg.Log.Level, "log level (trace, debug, info, warn, error)")
 	rootCmd.PersistentFlags().CountP("verbose", "v", "verbose output (use -v for debug, -vv for trace)")
 	rootCmd.PersistentFlags().Bool("keysym-list", false, "print list of supported key names and exit")
+
+	// Profiling flags
+	rootCmd.PersistentFlags().String("cpuprofile", "", "write cpu profile to file")
+	rootCmd.PersistentFlags().String("memprofile", "", "write memory profile to file")
+	rootCmd.PersistentFlags().String("pprof", "", "start pprof HTTP server on address (e.g. localhost:6060)")
 
 	// Keybindings
 	rootCmd.PersistentFlags().StringP("keybindings-modifier", "m", defaultCfg.Keybindings.Modifier, "main modifier key (Alt, Super, Ctrl)")
@@ -326,6 +335,12 @@ func run(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// Setup profiling if requested
+	if err := setupProfiling(cmd); err != nil {
+		log.Error().Err(err).Msg("Failed to setup profiling")
+	}
+	defer cleanupProfiling(cmd)
+
 	// Create root context
 	ctx := cmd.Context()
 
@@ -493,4 +508,68 @@ func handleKeyPress(ctx context.Context, conn *x11.Connection, e xproto.KeyPress
 	conn.Conn.Sync()
 
 	return selector
+}
+
+// setupProfiling initializes CPU profiling and/or starts pprof HTTP server
+func setupProfiling(cmd *cobra.Command) error {
+	// Start CPU profiling if requested
+	cpuprofile, _ := cmd.Flags().GetString("cpuprofile")
+	if cpuprofile != "" {
+		f, err := os.Create(cpuprofile)
+		if err != nil {
+			return fmt.Errorf("could not create CPU profile: %w", err)
+		}
+		if err := pprof.StartCPUProfile(f); err != nil {
+			f.Close()
+			return fmt.Errorf("could not start CPU profile: %w", err)
+		}
+		log.Info().Str("file", cpuprofile).Msg("Started CPU profiling")
+	}
+
+	// Start pprof HTTP server if requested
+	pprofAddr, _ := cmd.Flags().GetString("pprof")
+	if pprofAddr != "" {
+		go func() {
+			log.Info().
+				Str("addr", pprofAddr).
+				Str("url", fmt.Sprintf("http://%s/debug/pprof/", pprofAddr)).
+				Msg("Starting pprof HTTP server")
+
+			if err := http.ListenAndServe(pprofAddr, nil); err != nil {
+				log.Error().Err(err).Msg("pprof HTTP server failed")
+			}
+		}()
+	}
+
+	return nil
+}
+
+// cleanupProfiling writes memory profile if requested and stops CPU profiling
+func cleanupProfiling(cmd *cobra.Command) {
+	// Stop CPU profiling
+	cpuprofile, _ := cmd.Flags().GetString("cpuprofile")
+	if cpuprofile != "" {
+		pprof.StopCPUProfile()
+		log.Info().Str("file", cpuprofile).Msg("Stopped CPU profiling")
+	}
+
+	// Write memory profile if requested
+	memprofile, _ := cmd.Flags().GetString("memprofile")
+	if memprofile != "" {
+		f, err := os.Create(memprofile)
+		if err != nil {
+			log.Error().Err(err).Str("file", memprofile).Msg("Could not create memory profile")
+			return
+		}
+		defer f.Close()
+
+		// Force GC before capturing heap profile for accurate results
+		runtime.GC()
+
+		if err := pprof.WriteHeapProfile(f); err != nil {
+			log.Error().Err(err).Msg("Could not write memory profile")
+			return
+		}
+		log.Info().Str("file", memprofile).Msg("Wrote memory profile")
+	}
 }
