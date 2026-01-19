@@ -800,32 +800,63 @@ func (c *Connection) GetActiveWindow() (xproto.Window, error) {
 }
 
 // GetWindowUrgent checks if window has the urgency hint set via WM_HINTS
+// or _NET_WM_STATE_DEMANDS_ATTENTION
 func (c *Connection) GetWindowUrgent(window xproto.Window) bool {
-	// Read WM_HINTS property
+	// Method 1: Check WM_HINTS (traditional X11)
 	prop, err := xproto.GetProperty(c.Conn, false, window,
 		xproto.AtomWmHints,
 		xproto.AtomWmHints,
 		0,
 		9, // WM_HINTS is 9 32-bit values
 	).Reply()
-	if err != nil || prop.ValueLen == 0 {
+	if err == nil && prop.ValueLen > 0 && len(prop.Value) >= 4 {
+		// WM_HINTS structure:
+		// flags (32-bit), input, initial_state, icon_pixmap, icon_window,
+		// icon_x, icon_y, icon_mask, window_group
+		// We only need the flags field
+		flags := uint32(prop.Value[0]) |
+			uint32(prop.Value[1])<<8 |
+			uint32(prop.Value[2])<<16 |
+			uint32(prop.Value[3])<<24
+
+		// XUrgencyHint flag is bit 8 (256 in decimal)
+		const urgencyHint = 1 << 8
+		if (flags & urgencyHint) != 0 {
+			return true
+		}
+	}
+
+	// Method 2: Check _NET_WM_STATE_DEMANDS_ATTENTION (modern applications like Telegram)
+	stateAtom, err := xproto.InternAtom(c.Conn, true,
+		uint16(len("_NET_WM_STATE")), "_NET_WM_STATE").Reply()
+	if err != nil {
 		return false
 	}
 
-	// WM_HINTS structure:
-	// flags (32-bit), input, initial_state, icon_pixmap, icon_window,
-	// icon_x, icon_y, icon_mask, window_group
-	// We only need the flags field
-	if len(prop.Value) < 4 {
+	demandsAttentionAtom, err := xproto.InternAtom(c.Conn, true,
+		uint16(len("_NET_WM_STATE_DEMANDS_ATTENTION")),
+		"_NET_WM_STATE_DEMANDS_ATTENTION").Reply()
+	if err != nil {
 		return false
 	}
 
-	flags := uint32(prop.Value[0]) |
-		uint32(prop.Value[1])<<8 |
-		uint32(prop.Value[2])<<16 |
-		uint32(prop.Value[3])<<24
+	stateProp, err := xproto.GetProperty(c.Conn, false, window,
+		stateAtom.Atom, xproto.AtomAtom, 0, 1024).Reply()
+	if err != nil || stateProp.ValueLen == 0 {
+		return false
+	}
 
-	// XUrgencyHint flag is bit 8 (256 in decimal)
-	const urgencyHint = 1 << 8
-	return (flags & urgencyHint) != 0
+	// Check if DEMANDS_ATTENTION is in the state list
+	for i := uint32(0); i < stateProp.ValueLen; i++ {
+		atom := xproto.Atom(uint32(stateProp.Value[i*4]) |
+			uint32(stateProp.Value[i*4+1])<<8 |
+			uint32(stateProp.Value[i*4+2])<<16 |
+			uint32(stateProp.Value[i*4+3])<<24)
+
+		if atom == demandsAttentionAtom.Atom {
+			return true
+		}
+	}
+
+	return false
 }
