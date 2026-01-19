@@ -28,25 +28,28 @@ type WindowData struct {
 
 // Config holds configuration for carousel rendering
 type Config struct {
-	Width                     int      // Window width
-	Height                    int      // Window height
-	ThumbWidth                int      // Thumbnail width
-	ThumbHeight               int      // Thumbnail height
-	Spacing                   float64  // Spacing between thumbnails
-	PerspectiveFactor         float64  // Perspective distortion factor (0.0-1.0)
-	ShadowOffset              float64  // Shadow offset
-	ShadowBlur                float64  // Shadow blur radius
-	FontPaths                 []string // Font paths (primary first, then fallbacks)
-	FontSize                  int      // Font size
-	BackgroundColor           string   // Background color (hex or rgba)
-	SelectionFrame            string   // Selection frame color
-	TextColor                 string   // Text color
-	ShadowColor               string   // Shadow color
-	InactiveFrame             string   // Inactive frame color
-	UrgentTitleBackground     string   // Urgent window title background color
-	WindowBackgroundEnabled   bool     // Enable semi-transparent background for entire window
-	WindowBackgroundOpacity   float64  // Background opacity (0.0-1.0)
-	WindowBackgroundRadius    float64  // Corner radius in pixels
+	Width                   int      // Window width
+	Height                  int      // Window height
+	ThumbWidth              int      // Thumbnail width
+	ThumbHeight             int      // Thumbnail height
+	Spacing                 float64  // Spacing between thumbnails
+	PerspectiveFactor       float64  // Perspective distortion factor (0.0-1.0)
+	ShadowOffset            float64  // Shadow offset
+	ShadowBlur              float64  // Shadow blur radius
+	FontPaths               []string // Font paths (primary first, then fallbacks)
+	FontSize                int      // Font size
+	BackgroundColor         string   // Background color (hex or rgba)
+	SelectionFrame          string   // Selection frame color
+	TextColor               string   // Text color
+	ShadowColor             string   // Shadow color
+	InactiveFrame           string   // Inactive frame color
+	UrgentTitleBackground   string   // Urgent window title background color
+	WindowBackgroundEnabled bool     // Enable semi-transparent background for entire window
+	WindowBackgroundOpacity float64  // Background opacity (0.0-1.0)
+	WindowBackgroundRadius  float64  // Corner radius in pixels
+	LayoutMode              string   // Layout mode: "carousel" or "grid"
+	GridColumns             int      // Number of columns for grid layout (0 = auto)
+	GridSpacing             float64  // Spacing between tiles in grid mode
 }
 
 // DefaultConfig returns default carousel configuration
@@ -606,4 +609,252 @@ func CreateGradientBackground(width, height int, c1, c2 color.Color) image.Image
 	}
 
 	return dc.Image()
+}
+
+// DrawGridLayout renders windows in a grid layout (like Windows task switcher)
+func DrawGridLayout(windowData []WindowData, selected int, hoverIndex int, cfg Config) *image.RGBA {
+	dc := gg.NewContext(cfg.Width, cfg.Height)
+
+	// Background - semi-transparent if enabled, fully transparent otherwise
+	if cfg.WindowBackgroundEnabled {
+		setColor(dc, cfg.BackgroundColor, cfg.WindowBackgroundOpacity)
+		if cfg.WindowBackgroundRadius > 0 {
+			dc.DrawRoundedRectangle(0, 0, float64(cfg.Width), float64(cfg.Height), cfg.WindowBackgroundRadius)
+			dc.Fill()
+		} else {
+			dc.Clear()
+		}
+	} else {
+		dc.SetRGBA(0, 0, 0, 0)
+		dc.Clear()
+	}
+
+	if len(windowData) == 0 {
+		return getImageRGBA(dc)
+	}
+
+	// Calculate grid dimensions
+	cols := cfg.GridColumns
+	if cols <= 0 {
+		// Auto-calculate columns based on window count and aspect ratio
+		cols = int(math.Ceil(math.Sqrt(float64(len(windowData)) * 1.5)))
+		if cols < 2 {
+			cols = 2
+		}
+		if cols > 6 {
+			cols = 6
+		}
+	}
+
+	rows := (len(windowData) + cols - 1) / cols
+
+	spacing := cfg.GridSpacing
+	if spacing == 0 {
+		spacing = 20 // Default spacing
+	}
+
+	// Calculate tile size to fit all tiles in the window
+	availableWidth := float64(cfg.Width) - spacing*(float64(cols)+1)
+	availableHeight := float64(cfg.Height) - spacing*(float64(rows)+1)
+
+	tileW := availableWidth / float64(cols)
+	tileH := availableHeight / float64(rows)
+
+	// Respect max thumbnail size
+	maxTileW := float64(cfg.ThumbWidth) + 40  // Add padding for borders
+	maxTileH := float64(cfg.ThumbHeight) + 60 // Add padding for title
+	if tileW > maxTileW {
+		tileW = maxTileW
+	}
+	if tileH > maxTileH {
+		tileH = maxTileH
+	}
+
+	// Center the grid in the window
+	totalGridW := float64(cols)*tileW + (float64(cols)+1)*spacing
+	totalGridH := float64(rows)*tileH + (float64(rows)+1)*spacing
+	offsetX := (float64(cfg.Width) - totalGridW) / 2
+	offsetY := (float64(cfg.Height) - totalGridH) / 2
+
+	// Draw each window in its grid cell
+	for i, win := range windowData {
+		row := i / cols
+		col := i % cols
+
+		x := offsetX + spacing + float64(col)*(tileW+spacing)
+		y := offsetY + spacing + float64(row)*(tileH+spacing)
+
+		drawGridTile(dc, &win, x, y, tileW, tileH, i == selected, i == hoverIndex, cfg)
+	}
+
+	return getImageRGBA(dc)
+}
+
+// drawGridTile draws a single tile in grid layout
+func drawGridTile(dc *gg.Context, win *WindowData, x, y, w, h float64, isSelected bool, isHovered bool, cfg Config) {
+	if win == nil {
+		return
+	}
+
+	dc.Push()
+
+	// Draw shadow
+	if isSelected || isHovered {
+		dc.Push()
+		shadowOffset := cfg.ShadowOffset
+		if !isSelected {
+			shadowOffset = shadowOffset * 0.5 // Smaller shadow for hover
+		}
+		dc.Translate(x+shadowOffset, y+shadowOffset)
+		setColor(dc, cfg.ShadowColor, 0.6)
+		dc.DrawRoundedRectangle(0, 0, w, h, 8)
+		dc.Fill()
+		dc.Pop()
+	}
+
+	// Draw tile background
+	dc.Translate(x, y)
+
+	// Background with slight gradient
+	setColor(dc, cfg.BackgroundColor, 0.3)
+	dc.DrawRoundedRectangle(0, 0, w, h, 8)
+	dc.Fill()
+
+	// Draw thumbnail
+	thumbPadding := 10.0
+	thumbW := w - 2*thumbPadding
+	thumbH := h - 60 // Reserve space for title at bottom (increased from 50 to 60)
+
+	if win.Thumbnail != nil {
+		// Scale thumbnail to fit
+		bounds := win.Thumbnail.Bounds()
+		imgW := float64(bounds.Dx())
+		imgH := float64(bounds.Dy())
+
+		scale := math.Min(thumbW/imgW, thumbH/imgH)
+		scaledW := imgW * scale
+		scaledH := imgH * scale
+
+		// Center thumbnail in tile
+		thumbX := thumbPadding + (thumbW-scaledW)/2
+		thumbY := thumbPadding + (thumbH-scaledH)/2
+
+		dc.Push()
+		dc.Translate(thumbX, thumbY)
+		dc.Scale(scale, scale)
+		dc.DrawImage(win.Thumbnail, 0, 0)
+		dc.Pop()
+
+		// Draw border around thumbnail
+		setColor(dc, cfg.InactiveFrame, 0.5)
+		dc.SetLineWidth(1)
+		dc.DrawRectangle(thumbX, thumbY, scaledW, scaledH)
+		dc.Stroke()
+	}
+
+	// Draw icon (if available) in top-left corner
+	if win.Icon != nil {
+		iconSize := 24.0
+		iconPadding := 8.0
+		bounds := win.Icon.Bounds()
+		imgW := float64(bounds.Dx())
+		imgH := float64(bounds.Dy())
+
+		if imgW > 0 && imgH > 0 {
+			iconScale := math.Min(iconSize/imgW, iconSize/imgH)
+
+			dc.Push()
+			dc.Translate(iconPadding, iconPadding)
+			dc.Scale(iconScale, iconScale)
+			dc.DrawImage(win.Icon, 0, 0)
+			dc.Pop()
+		}
+	}
+
+	// Draw title at bottom
+	titleY := h - 40 // Moved down from h-35 to h-40 for better spacing
+	titleMaxWidth := w - 20
+
+	if win.Title != "" {
+		// Draw title background if urgent
+		if win.Urgent {
+			setColor(dc, cfg.UrgentTitleBackground, 0.9)
+			dc.DrawRoundedRectangle(5, titleY-5, w-10, 30, 4)
+			dc.Fill()
+		}
+
+		// Load font with fallback support
+		fontFace := NewMultiFallbackFace(cfg.FontPaths, float64(cfg.FontSize))
+		if fontFace != nil {
+			dc.SetFontFace(fontFace)
+			setColor(dc, cfg.TextColor, 1.0)
+
+			// Truncate title if too long
+			title := truncateTitle(win.Title, titleMaxWidth, dc, cfg.FontSize)
+			dc.DrawStringAnchored(title, w/2, titleY+8, 0.5, 0)
+		}
+	}
+
+	// Draw workspace indicator (if present)
+	if win.Workspace != "" {
+		fontFace := NewMultiFallbackFace(cfg.FontPaths, float64(cfg.FontSize-2))
+		if fontFace != nil {
+			dc.SetFontFace(fontFace)
+			setColor(dc, cfg.TextColor, 0.6)
+			dc.DrawStringAnchored(win.Workspace, w/2, titleY+26, 0.5, 0) // Moved from +22 to +26
+		}
+	}
+
+	// Draw selection/hover frame
+	if isSelected {
+		setColor(dc, cfg.SelectionFrame, 0.9)
+		dc.SetLineWidth(4)
+		dc.DrawRoundedRectangle(-2, -2, w+4, h+4, 10)
+		dc.Stroke()
+
+		// Inner glow
+		setColor(dc, cfg.SelectionFrame, 0.4)
+		dc.SetLineWidth(2)
+		dc.DrawRoundedRectangle(0, 0, w, h, 8)
+		dc.Stroke()
+	} else if isHovered {
+		// Hover effect - orange/yellow tint
+		dc.SetRGBA(1.0, 0.7, 0.2, 0.6)
+		dc.SetLineWidth(3)
+		dc.DrawRoundedRectangle(-1, -1, w+2, h+2, 9)
+		dc.Stroke()
+	} else {
+		// Normal frame
+		setColor(dc, cfg.InactiveFrame, 0.3)
+		dc.SetLineWidth(1)
+		dc.DrawRoundedRectangle(0, 0, w, h, 8)
+		dc.Stroke()
+	}
+
+	dc.Pop()
+}
+
+// truncateTitle truncates title to fit within maxWidth
+func truncateTitle(title string, maxWidth float64, dc *gg.Context, fontSize int) string {
+	runes := []rune(title)
+	if len(runes) == 0 {
+		return title
+	}
+
+	// Measure full title
+	w, _ := dc.MeasureString(title)
+	if w <= maxWidth {
+		return title
+	}
+
+	// Binary search for optimal length
+	for length := len(runes) - 1; length > 0; length-- {
+		truncated := string(runes[:length]) + "..."
+		w, _ := dc.MeasureString(truncated)
+		if w <= maxWidth {
+			return truncated
+		}
+	}
+
+	return "..."
 }

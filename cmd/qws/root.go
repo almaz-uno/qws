@@ -53,10 +53,14 @@ func init() {
 	rootCmd.PersistentFlags().String("keybindings-cancel", defaultCfg.Keybindings.Cancel, "key to cancel selection")
 
 	// Appearance
+	rootCmd.PersistentFlags().StringP("appearance-layout", "l", defaultCfg.Appearance.Layout, "layout mode (carousel, grid)")
+	rootCmd.PersistentFlags().Bool("grid", false, "use grid layout (shortcut for --appearance-layout=grid)")
 	rootCmd.PersistentFlags().Int("appearance-thumbnail-width", defaultCfg.Appearance.Thumbnail.Width, "thumbnail width in pixels")
 	rootCmd.PersistentFlags().Int("appearance-thumbnail-height", defaultCfg.Appearance.Thumbnail.Height, "thumbnail height in pixels")
 	rootCmd.PersistentFlags().Float64("appearance-spacing", defaultCfg.Appearance.Spacing, "distance between carousel items")
 	rootCmd.PersistentFlags().Float64("appearance-perspective", defaultCfg.Appearance.Perspective, "perspective effect factor (0.0-1.0)")
+	rootCmd.PersistentFlags().Int("appearance-grid-columns", defaultCfg.Appearance.Grid.Columns, "number of columns in grid layout (0 = auto)")
+	rootCmd.PersistentFlags().Float64("appearance-grid-spacing", defaultCfg.Appearance.Grid.Spacing, "spacing between tiles in grid layout")
 	rootCmd.PersistentFlags().Float64("appearance-shadow-offset", defaultCfg.Appearance.Shadow.Offset, "shadow offset in pixels")
 	rootCmd.PersistentFlags().Float64("appearance-shadow-blur", defaultCfg.Appearance.Shadow.Blur, "shadow blur radius")
 	rootCmd.PersistentFlags().StringSlice("appearance-font-paths", defaultCfg.Appearance.Font.Paths, "font paths (primary first, then fallbacks)")
@@ -138,6 +142,15 @@ func applyFlags() {
 	}
 
 	// Appearance
+	if rootCmd.PersistentFlags().Changed("grid") {
+		gridMode, _ := rootCmd.PersistentFlags().GetBool("grid")
+		if gridMode {
+			cfg.Appearance.Layout = "grid"
+		}
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-layout") {
+		cfg.Appearance.Layout, _ = rootCmd.PersistentFlags().GetString("appearance-layout")
+	}
 	if rootCmd.PersistentFlags().Changed("appearance-thumbnail-width") {
 		cfg.Appearance.Thumbnail.Width, _ = rootCmd.PersistentFlags().GetInt("appearance-thumbnail-width")
 	}
@@ -149,6 +162,12 @@ func applyFlags() {
 	}
 	if rootCmd.PersistentFlags().Changed("appearance-perspective") {
 		cfg.Appearance.Perspective, _ = rootCmd.PersistentFlags().GetFloat64("appearance-perspective")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-grid-columns") {
+		cfg.Appearance.Grid.Columns, _ = rootCmd.PersistentFlags().GetInt("appearance-grid-columns")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-grid-spacing") {
+		cfg.Appearance.Grid.Spacing, _ = rootCmd.PersistentFlags().GetFloat64("appearance-grid-spacing")
 	}
 	if rootCmd.PersistentFlags().Changed("appearance-shadow-offset") {
 		cfg.Appearance.Shadow.Offset, _ = rootCmd.PersistentFlags().GetFloat64("appearance-shadow-offset")

@@ -108,6 +108,9 @@ func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, window
 		WindowBackgroundEnabled: appearance.WindowBackground.Enabled,
 		WindowBackgroundOpacity: appearance.WindowBackground.Opacity,
 		WindowBackgroundRadius:  appearance.WindowBackground.BorderRadius,
+		LayoutMode:              appearance.Layout,
+		GridColumns:             appearance.Grid.Columns,
+		GridSpacing:             appearance.Grid.Spacing,
 	}
 
 	// Resolve theme and apply colors
@@ -528,9 +531,18 @@ func (s *Selector) prepareWindowData() []carousel.WindowData {
 
 // render renders the carousel with current state
 func (s *Selector) render(thumbnails []image.Image) {
-	// Use new rendering with icons and titles
+	// Prepare window data with icons and titles
 	windowData := s.prepareWindowData()
-	img := carousel.Draw3DCarouselWithData(windowData, s.selectedIndex, s.hoverIndex, s.animOffset, s.config)
+
+	var img *image.RGBA
+	// Choose rendering mode based on configuration
+	if s.config.LayoutMode == "grid" {
+		img = carousel.DrawGridLayout(windowData, s.selectedIndex, s.hoverIndex, s.config)
+	} else {
+		// Default to carousel
+		img = carousel.Draw3DCarouselWithData(windowData, s.selectedIndex, s.hoverIndex, s.animOffset, s.config)
+	}
+
 	s.window.DrawImage(img)
 }
 
@@ -576,9 +588,32 @@ func (s *Selector) handleKeyPressSimple(e xproto.KeyPressEvent, thumbnails []ima
 		return true // Cancel
 	}
 
-	// Check for Ctrl+C (emergency exit)
-	ctrlPressed := (state & s.keyConfig.workspaceModifierMask) != 0
+	// Check for layout switching keys (c = carousel, g = grid)
 	cKeysym := uint32(0x0063) // 'c'
+	gKeysym := uint32(0x0067) // 'g'
+
+	// Only allow layout switching without Ctrl modifier
+	ctrlPressed := (state & s.keyConfig.workspaceModifierMask) != 0
+
+	if !ctrlPressed && s.isKeycode(keycode, cKeysym) {
+		if s.config.LayoutMode != "carousel" {
+			log.Debug().Msg("Switching to carousel layout")
+			s.config.LayoutMode = "carousel"
+			s.render(thumbnails)
+		}
+		return false
+	}
+
+	if !ctrlPressed && s.isKeycode(keycode, gKeysym) {
+		if s.config.LayoutMode != "grid" {
+			log.Debug().Msg("Switching to grid layout")
+			s.config.LayoutMode = "grid"
+			s.render(thumbnails)
+		}
+		return false
+	}
+
+	// Check for Ctrl+C (emergency exit)
 	if ctrlPressed && s.isKeycode(keycode, cKeysym) {
 		log.Debug().Msg("Ctrl+C pressed, cancelling")
 		return true // Cancel
@@ -765,6 +800,15 @@ func (s *Selector) getWindowIndexAtPosition(mouseX, mouseY int) int {
 		return -1
 	}
 
+	// Use different hit detection for grid vs carousel
+	if s.config.LayoutMode == "grid" {
+		return s.getWindowIndexAtPositionGrid(mouseX, mouseY)
+	}
+	return s.getWindowIndexAtPositionCarousel(mouseX, mouseY)
+}
+
+// getWindowIndexAtPositionCarousel calculates position for carousel layout
+func (s *Selector) getWindowIndexAtPositionCarousel(mouseX, mouseY int) int {
 	centerX := float64(s.config.Width) / 2
 	centerY := float64(s.config.Height) / 2
 
@@ -800,6 +844,69 @@ func (s *Selector) getWindowIndexAtPosition(mouseX, mouseY int) int {
 		// Check if mouse is within card bounds
 		if float64(mouseX) >= x-finalW/2 && float64(mouseX) <= x+finalW/2 &&
 			float64(mouseY) >= y-finalH/2 && float64(mouseY) <= y+finalH/2 {
+			return i
+		}
+	}
+
+	return -1
+}
+
+// getWindowIndexAtPositionGrid calculates position for grid layout
+func (s *Selector) getWindowIndexAtPositionGrid(mouseX, mouseY int) int {
+	// Calculate grid dimensions (same logic as in DrawGridLayout)
+	cols := s.config.GridColumns
+	if cols <= 0 {
+		// Auto-calculate columns
+		cols = int(math.Ceil(math.Sqrt(float64(len(s.windows)) * 1.5)))
+		if cols < 2 {
+			cols = 2
+		}
+		if cols > 6 {
+			cols = 6
+		}
+	}
+
+	rows := (len(s.windows) + cols - 1) / cols
+
+	spacing := s.config.GridSpacing
+	if spacing == 0 {
+		spacing = 20
+	}
+
+	// Calculate tile size
+	availableWidth := float64(s.config.Width) - spacing*(float64(cols)+1)
+	availableHeight := float64(s.config.Height) - spacing*(float64(rows)+1)
+
+	tileW := availableWidth / float64(cols)
+	tileH := availableHeight / float64(rows)
+
+	// Respect max thumbnail size
+	maxTileW := float64(s.config.ThumbWidth) + 40
+	maxTileH := float64(s.config.ThumbHeight) + 60
+	if tileW > maxTileW {
+		tileW = maxTileW
+	}
+	if tileH > maxTileH {
+		tileH = maxTileH
+	}
+
+	// Center the grid
+	totalGridW := float64(cols)*tileW + (float64(cols)+1)*spacing
+	totalGridH := float64(rows)*tileH + (float64(rows)+1)*spacing
+	offsetX := (float64(s.config.Width) - totalGridW) / 2
+	offsetY := (float64(s.config.Height) - totalGridH) / 2
+
+	// Check each tile
+	for i := range s.windows {
+		row := i / cols
+		col := i % cols
+
+		x := offsetX + spacing + float64(col)*(tileW+spacing)
+		y := offsetY + spacing + float64(row)*(tileH+spacing)
+
+		// Check if mouse is within tile bounds
+		if float64(mouseX) >= x && float64(mouseX) <= x+tileW &&
+			float64(mouseY) >= y && float64(mouseY) <= y+tileH {
 			return i
 		}
 	}

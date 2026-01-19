@@ -8,11 +8,23 @@ keybindings:
   cancel: Escape
 
 appearance:
+  # Layout mode: "carousel" (default, 3D perspective) or "grid" (Windows-style tile view)
+  # You can also switch on-the-fly when selector is open:
+  #   - Press 'c' to switch to carousel
+  #   - Press 'g' to switch to grid
+  layout: carousel
+
   thumbnail:
     width: 256
     height: 256
   spacing: 300
   perspective: 0.6
+
+  # Grid layout configuration (used when layout: grid)
+  grid:
+    columns: 4    # Number of columns (0 = auto-calculate based on window count)
+    spacing: 20   # Spacing between tiles in pixels
+
   shadow:
     offset: 10
     blur: 15

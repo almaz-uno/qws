@@ -31,9 +31,11 @@ type Keybindings struct {
 
 // Appearance contains visual configuration
 type Appearance struct {
+	Layout           string           `mapstructure:"layout"` // Layout mode: "carousel" or "grid"
 	Thumbnail        Thumbnail        `mapstructure:"thumbnail"`
 	Spacing          float64          `mapstructure:"spacing"`
 	Perspective      float64          `mapstructure:"perspective"`
+	Grid             Grid             `mapstructure:"grid"` // Grid-specific configuration
 	Shadow           Shadow           `mapstructure:"shadow"`
 	Font             Font             `mapstructure:"font"`
 	Colors           Colors           `mapstructure:"colors"`
@@ -45,6 +47,12 @@ type Appearance struct {
 type Thumbnail struct {
 	Width  int `mapstructure:"width"`
 	Height int `mapstructure:"height"`
+}
+
+// Grid contains grid layout configuration
+type Grid struct {
+	Columns int     `mapstructure:"columns"` // Number of columns (0 = auto)
+	Spacing float64 `mapstructure:"spacing"` // Spacing between tiles in grid mode
 }
 
 // Shadow contains shadow effect configuration
@@ -153,12 +161,17 @@ func Default() *Config {
 			Cancel:            "Escape",
 		},
 		Appearance: Appearance{
+			Layout: "carousel", // Default to carousel mode
 			Thumbnail: Thumbnail{
 				Width:  256,
 				Height: 256,
 			},
 			Spacing:     300,
 			Perspective: 0.6,
+			Grid: Grid{
+				Columns: 0,  // Auto-calculate
+				Spacing: 20, // Default grid spacing
+			},
 			Shadow: Shadow{
 				Offset: 10,
 				Blur:   15,
