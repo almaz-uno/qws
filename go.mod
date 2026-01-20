@@ -4,10 +4,14 @@ go 1.25
 
 require (
 	github.com/fogleman/gg v1.3.0
+	github.com/go-gl/gl v0.0.0-20231021071112-07e5d0ea2e71
+	github.com/go-gl/glfw/v3.3/glfw v0.0.0-20250301202403-da16c1255728
+	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0
 	github.com/jezek/xgb v1.2.0
 	github.com/rs/zerolog v1.34.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
+	golang.org/x/image v0.34.0
 	golang.org/x/sys v0.29.0
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -15,7 +19,6 @@ require (
 require (
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
-	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.19 // indirect
@@ -27,6 +30,5 @@ require (
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
-	golang.org/x/image v0.34.0 // indirect
 	golang.org/x/text v0.32.0 // indirect
 )

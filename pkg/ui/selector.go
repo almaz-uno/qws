@@ -36,6 +36,7 @@ type Selector struct {
 	selectedIndex       int
 	hoverIndex          int // Index of window under mouse cursor (-1 if none)
 	window              *carousel.Window
+	renderer            carousel.Renderer // Rendering backend
 	config              carousel.Config
 	appearance          config.Appearance   // Appearance configuration for recalculating on monitor change
 	monitorGeom         x11.MonitorGeometry // Current monitor geometry
@@ -189,6 +190,14 @@ func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, window
 		initialWorkspaceOpt: initialWorkspaceOpt,
 		watcher:             watcher,
 	}
+
+	// Initialize renderer
+	renderer, err := carousel.NewRenderer(appearance.Renderer, windowWidth, windowHeight)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to create renderer")
+		return nil
+	}
+	s.renderer = renderer
 
 	// Apply initial workspace filtering based on configuration
 	if initialWorkspaceOpt == "current" {
@@ -503,7 +512,7 @@ func (s *Selector) prepareThumbnails() []image.Image {
 			thumbnails[i] = win.Preview
 		} else {
 			// Use placeholder if no thumbnail available
-			thumbnails[i] = carousel.DrawPlaceholder(256, 256, win.Name)
+			thumbnails[i] = s.renderer.DrawPlaceholder(256, 256, win.Name)
 		}
 	}
 	return thumbnails
@@ -516,7 +525,7 @@ func (s *Selector) prepareWindowData() []carousel.WindowData {
 		thumbnail := win.Preview
 		if thumbnail == nil {
 			// Use placeholder if no thumbnail available
-			thumbnail = carousel.DrawPlaceholder(256, 256, win.Name)
+			thumbnail = s.renderer.DrawPlaceholder(256, 256, win.Name)
 		}
 		data[i] = carousel.WindowData{
 			Thumbnail: thumbnail,
@@ -537,10 +546,10 @@ func (s *Selector) render(thumbnails []image.Image) {
 	var img *image.RGBA
 	// Choose rendering mode based on configuration
 	if s.config.LayoutMode == "grid" {
-		img = carousel.DrawGridLayout(windowData, s.selectedIndex, s.hoverIndex, s.config)
+		img = s.renderer.DrawGridLayout(windowData, s.selectedIndex, s.hoverIndex, s.config)
 	} else {
 		// Default to carousel
-		img = carousel.Draw3DCarouselWithData(windowData, s.selectedIndex, s.hoverIndex, s.animOffset, s.config)
+		img = s.renderer.Draw3DCarouselWithData(windowData, s.selectedIndex, s.hoverIndex, s.animOffset, s.config)
 	}
 
 	s.window.DrawImage(img)
