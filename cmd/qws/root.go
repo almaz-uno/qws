@@ -64,6 +64,7 @@ func init() {
 	// Appearance
 	rootCmd.PersistentFlags().StringP("appearance-layout", "l", defaultCfg.Appearance.Layout, "layout mode (carousel, grid)")
 	rootCmd.PersistentFlags().Bool("grid", false, "use grid layout (shortcut for --appearance-layout=grid)")
+	rootCmd.PersistentFlags().StringP("appearance-renderer", "r", defaultCfg.Appearance.Renderer, "renderer backend (cpu, glx)")
 	rootCmd.PersistentFlags().Int("appearance-thumbnail-width", defaultCfg.Appearance.Thumbnail.Width, "thumbnail width in pixels")
 	rootCmd.PersistentFlags().Int("appearance-thumbnail-height", defaultCfg.Appearance.Thumbnail.Height, "thumbnail height in pixels")
 	rootCmd.PersistentFlags().Float64("appearance-spacing", defaultCfg.Appearance.Spacing, "distance between carousel items")
@@ -159,6 +160,9 @@ func applyFlags() {
 	}
 	if rootCmd.PersistentFlags().Changed("appearance-layout") {
 		cfg.Appearance.Layout, _ = rootCmd.PersistentFlags().GetString("appearance-layout")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-renderer") {
+		cfg.Appearance.Renderer, _ = rootCmd.PersistentFlags().GetString("appearance-renderer")
 	}
 	if rootCmd.PersistentFlags().Changed("appearance-thumbnail-width") {
 		cfg.Appearance.Thumbnail.Width, _ = rootCmd.PersistentFlags().GetInt("appearance-thumbnail-width")

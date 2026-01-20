@@ -31,7 +31,8 @@ type Keybindings struct {
 
 // Appearance contains visual configuration
 type Appearance struct {
-	Layout           string           `mapstructure:"layout"` // Layout mode: "carousel" or "grid"
+	Layout           string           `mapstructure:"layout"`   // Layout mode: "carousel" or "grid"
+	Renderer         string           `mapstructure:"renderer"` // Renderer backend: "cpu" or "glx"
 	Thumbnail        Thumbnail        `mapstructure:"thumbnail"`
 	Spacing          float64          `mapstructure:"spacing"`
 	Perspective      float64          `mapstructure:"perspective"`
@@ -161,7 +162,8 @@ func Default() *Config {
 			Cancel:            "Escape",
 		},
 		Appearance: Appearance{
-			Layout: "carousel", // Default to carousel mode
+			Layout:   "carousel", // Default to carousel mode
+			Renderer: "cpu",      // Default to CPU renderer
 			Thumbnail: Thumbnail{
 				Width:  256,
 				Height: 256,
@@ -287,6 +289,8 @@ func setDefaults(v *viper.Viper, cfg *Config) {
 	v.SetDefault("keybindings.workspace_modifier", cfg.Keybindings.WorkspaceModifier)
 	v.SetDefault("keybindings.cancel", cfg.Keybindings.Cancel)
 
+	v.SetDefault("appearance.layout", cfg.Appearance.Layout)
+	v.SetDefault("appearance.renderer", cfg.Appearance.Renderer)
 	v.SetDefault("appearance.thumbnail.width", cfg.Appearance.Thumbnail.Width)
 	v.SetDefault("appearance.thumbnail.height", cfg.Appearance.Thumbnail.Height)
 	v.SetDefault("appearance.spacing", cfg.Appearance.Spacing)
