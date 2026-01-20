@@ -3,6 +3,7 @@ package carousel
 import (
 	"image"
 	"image/color"
+	"image/draw"
 	"math"
 	"strconv"
 	"strings"
@@ -186,17 +187,12 @@ func Draw3DCarouselWithData(windowData []WindowData, selected int, hoverIndex in
 // getImageRGBA converts gg.Context image to RGBA
 func getImageRGBA(dc *gg.Context) *image.RGBA {
 	img := dc.Image()
-	rgba, ok := img.(*image.RGBA)
-	if !ok {
-		// Fallback: convert to RGBA
-		bounds := img.Bounds()
-		rgba = image.NewRGBA(bounds)
-		for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-			for x := bounds.Min.X; x < bounds.Max.X; x++ {
-				rgba.Set(x, y, img.At(x, y))
-			}
-		}
+	if rgba, ok := img.(*image.RGBA); ok {
+		return rgba
 	}
+	bounds := img.Bounds()
+	rgba := image.NewRGBA(bounds)
+	draw.Draw(rgba, bounds, img, bounds.Min, draw.Src)
 	return rgba
 }
 
@@ -550,13 +546,13 @@ func drawHoverIndicator(dc *gg.Context, x, y, w, h float64, cfg Config) {
 func DrawPlaceholder(width, height int, title string) image.Image {
 	dc := gg.NewContext(width, height)
 
-	// Gradient background
-	for y := 0; y < height; y++ {
-		alpha := float64(y) / float64(height)
-		dc.SetRGBA(0.2+alpha*0.3, 0.2+alpha*0.3, 0.3+alpha*0.3, 1.0)
-		dc.DrawRectangle(0, float64(y), float64(width), 1)
-		dc.Fill()
-	}
+	// Gradient background - optimized with LinearGradient
+	gradient := gg.NewLinearGradient(0, 0, 0, float64(height))
+	gradient.AddColorStop(0, color.RGBA{51, 51, 77, 255})    // RGB(0.2, 0.2, 0.3)
+	gradient.AddColorStop(1, color.RGBA{128, 128, 153, 255}) // RGB(0.5, 0.5, 0.6)
+	dc.SetFillStyle(gradient)
+	dc.DrawRectangle(0, 0, float64(width), float64(height))
+	dc.Fill()
 
 	// Icon placeholder (window icon)
 	centerX := float64(width) / 2
@@ -593,20 +589,13 @@ func DrawPlaceholder(width, height int, title string) image.Image {
 func CreateGradientBackground(width, height int, c1, c2 color.Color) image.Image {
 	dc := gg.NewContext(width, height)
 
-	r1, g1, b1, a1 := c1.RGBA()
-	r2, g2, b2, a2 := c2.RGBA()
-
-	for y := 0; y < height; y++ {
-		t := float64(y) / float64(height)
-		r := float64(r1)*(1-t) + float64(r2)*t
-		g := float64(g1)*(1-t) + float64(g2)*t
-		b := float64(b1)*(1-t) + float64(b2)*t
-		a := float64(a1)*(1-t) + float64(a2)*t
-
-		dc.SetRGBA(r/65535, g/65535, b/65535, a/65535)
-		dc.DrawLine(0, float64(y), float64(width), float64(y))
-		dc.Stroke()
-	}
+	// Optimized gradient using LinearGradient
+	gradient := gg.NewLinearGradient(0, 0, 0, float64(height))
+	gradient.AddColorStop(0, c1)
+	gradient.AddColorStop(1, c2)
+	dc.SetFillStyle(gradient)
+	dc.DrawRectangle(0, 0, float64(width), float64(height))
+	dc.Fill()
 
 	return dc.Image()
 }
