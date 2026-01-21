@@ -28,7 +28,7 @@ func main() {
 	defer conn.Close()
 
 	// Initialize composite capturer
-	capturer, err := composite.NewCapturer(conn.Conn, conn.Root)
+	capturer, err := composite.NewCapturer(conn.Conn, conn.Root, "bilinear")
 	if err != nil {
 		log.Fatalf("Failed to initialize composite capturer: %v", err)
 	}

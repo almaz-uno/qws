@@ -21,6 +21,11 @@ appearance:
   thumbnail:
     width: 256
     height: 256
+    # Scaling algorithm for thumbnails:
+    #   - "nearest"      - Fastest, lowest quality (pixelated)
+    #   - "bilinear"     - Balanced speed and quality (default, recommended)
+    #   - "catmull-rom"  - Highest quality, slowest (smooth, professional look)
+    scaling_algorithm: bilinear
   spacing: 300
   perspective: 0.6
 

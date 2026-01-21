@@ -46,8 +46,9 @@ type Appearance struct {
 
 // Thumbnail contains thumbnail size configuration
 type Thumbnail struct {
-	Width  int `mapstructure:"width"`
-	Height int `mapstructure:"height"`
+	Width            int    `mapstructure:"width"`
+	Height           int    `mapstructure:"height"`
+	ScalingAlgorithm string `mapstructure:"scaling_algorithm"` // Scaling algorithm: "nearest", "bilinear", "catmull-rom"
 }
 
 // Grid contains grid layout configuration
@@ -165,8 +166,9 @@ func Default() *Config {
 			Layout:   "carousel", // Default to carousel mode
 			Renderer: "cpu",      // Default to CPU renderer
 			Thumbnail: Thumbnail{
-				Width:  256,
-				Height: 256,
+				Width:            256,
+				Height:           256,
+				ScalingAlgorithm: "bilinear", // Balance between speed and quality
 			},
 			Spacing:     300,
 			Perspective: 0.6,

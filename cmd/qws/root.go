@@ -67,6 +67,7 @@ func init() {
 	rootCmd.PersistentFlags().StringP("appearance-renderer", "r", defaultCfg.Appearance.Renderer, "renderer backend (cpu, glx)")
 	rootCmd.PersistentFlags().Int("appearance-thumbnail-width", defaultCfg.Appearance.Thumbnail.Width, "thumbnail width in pixels")
 	rootCmd.PersistentFlags().Int("appearance-thumbnail-height", defaultCfg.Appearance.Thumbnail.Height, "thumbnail height in pixels")
+	rootCmd.PersistentFlags().String("appearance-thumbnail-scaling-algorithm", defaultCfg.Appearance.Thumbnail.ScalingAlgorithm, "thumbnail scaling algorithm (nearest, bilinear, catmull-rom)")
 	rootCmd.PersistentFlags().Float64("appearance-spacing", defaultCfg.Appearance.Spacing, "distance between carousel items")
 	rootCmd.PersistentFlags().Float64("appearance-perspective", defaultCfg.Appearance.Perspective, "perspective effect factor (0.0-1.0)")
 	rootCmd.PersistentFlags().Int("appearance-grid-columns", defaultCfg.Appearance.Grid.Columns, "number of columns in grid layout (0 = auto)")
@@ -169,6 +170,9 @@ func applyFlags() {
 	}
 	if rootCmd.PersistentFlags().Changed("appearance-thumbnail-height") {
 		cfg.Appearance.Thumbnail.Height, _ = rootCmd.PersistentFlags().GetInt("appearance-thumbnail-height")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-thumbnail-scaling-algorithm") {
+		cfg.Appearance.Thumbnail.ScalingAlgorithm, _ = rootCmd.PersistentFlags().GetString("appearance-thumbnail-scaling-algorithm")
 	}
 	if rootCmd.PersistentFlags().Changed("appearance-spacing") {
 		cfg.Appearance.Spacing, _ = rootCmd.PersistentFlags().GetFloat64("appearance-spacing")
@@ -359,7 +363,7 @@ func run(cmd *cobra.Command, args []string) error {
 	mruList := mru.NewMRUList()
 
 	// Initialize Composite for thumbnail capture
-	capturer, err := composite.NewCapturer(conn.Conn, conn.Root)
+	capturer, err := composite.NewCapturer(conn.Conn, conn.Root, cfg.Appearance.Thumbnail.ScalingAlgorithm)
 	if err != nil {
 		log.Warn().Err(err).Msg("Composite unavailable, thumbnails will be disabled")
 	}

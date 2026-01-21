@@ -9,19 +9,31 @@ import (
 	"github.com/jezek/xgb/shm"
 	"github.com/jezek/xgb/xproto"
 	"github.com/rs/zerolog/log"
+	xdraw "golang.org/x/image/draw"
 	"golang.org/x/sys/unix"
+)
+
+// ScalingAlgorithm defines the image scaling algorithm
+type ScalingAlgorithm string
+
+const (
+	ScalingNearest     ScalingAlgorithm = "nearest"      // Fast, low quality
+	ScalingBiLinear    ScalingAlgorithm = "bilinear"     // Balanced (default)
+	ScalingCatmullRom  ScalingAlgorithm = "catmull-rom"  // Slow, high quality
 )
 
 // Capturer captures window thumbnails using XComposite extension.
 type Capturer struct {
-	conn         *xgb.Conn
-	root         xproto.Window
-	shmAvailable bool
+	conn             *xgb.Conn
+	root             xproto.Window
+	shmAvailable     bool
+	scalingAlgorithm ScalingAlgorithm
 }
 
 // NewCapturer creates a new thumbnail capturer.
 // It initializes the XComposite extension.
-func NewCapturer(conn *xgb.Conn, root xproto.Window) (*Capturer, error) {
+// scalingAlgorithm: "nearest" (fast), "bilinear" (balanced), "catmull-rom" (quality)
+func NewCapturer(conn *xgb.Conn, root xproto.Window, scalingAlgorithm string) (*Capturer, error) {
 	// Initialize composite extension
 	if err := composite.Init(conn); err != nil {
 		return nil, fmt.Errorf("failed to initialize Composite extension: %w", err)
@@ -53,10 +65,23 @@ func NewCapturer(conn *xgb.Conn, root xproto.Window) (*Capturer, error) {
 		log.Debug().Err(err).Msg("XSHM extension unavailable")
 	}
 
+	// Validate and normalize scaling algorithm
+	algo := ScalingAlgorithm(scalingAlgorithm)
+	switch algo {
+	case ScalingNearest, ScalingBiLinear, ScalingCatmullRom:
+		// Valid algorithm
+	default:
+		log.Warn().Str("algorithm", scalingAlgorithm).Msg("Unknown scaling algorithm, defaulting to bilinear")
+		algo = ScalingBiLinear
+	}
+
+	log.Debug().Str("scaling_algorithm", string(algo)).Msg("Thumbnail scaling algorithm configured")
+
 	return &Capturer{
-		conn:         conn,
-		root:         root,
-		shmAvailable: shmAvailable,
+		conn:             conn,
+		root:             root,
+		shmAvailable:     shmAvailable,
+		scalingAlgorithm: algo,
 	}, nil
 }
 
@@ -274,16 +299,28 @@ func (c *Capturer) CaptureWindow(window xproto.Window, maxWidth, maxHeight int) 
 	// Scale down if necessary
 	if scale < 1.0 {
 		scaled := image.NewRGBA(image.Rect(0, 0, scaledWidth, scaledHeight))
-		// Simple nearest-neighbor scaling
-		for y := 0; y < scaledHeight; y++ {
-			for x := 0; x < scaledWidth; x++ {
-				srcX := int(float64(x) / scale)
-				srcY := int(float64(y) / scale)
-				if srcX < width && srcY < height {
-					scaled.Set(x, y, rgba.At(srcX, srcY))
+
+		// Apply configured scaling algorithm
+		switch c.scalingAlgorithm {
+		case ScalingNearest:
+			// Simple nearest-neighbor scaling (fastest)
+			for y := 0; y < scaledHeight; y++ {
+				for x := 0; x < scaledWidth; x++ {
+					srcX := int(float64(x) / scale)
+					srcY := int(float64(y) / scale)
+					if srcX < width && srcY < height {
+						scaled.Set(x, y, rgba.At(srcX, srcY))
+					}
 				}
 			}
+		case ScalingBiLinear:
+			// Bilinear interpolation (balanced quality/speed)
+			xdraw.BiLinear.Scale(scaled, scaled.Bounds(), rgba, rgba.Bounds(), xdraw.Over, nil)
+		case ScalingCatmullRom:
+			// Catmull-Rom interpolation (highest quality, slowest)
+			xdraw.CatmullRom.Scale(scaled, scaled.Bounds(), rgba, rgba.Bounds(), xdraw.Over, nil)
 		}
+
 		return scaled, nil
 	}
 
