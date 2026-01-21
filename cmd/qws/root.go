@@ -484,7 +484,12 @@ func handleKeyPress(ctx context.Context, conn *x11.Connection, e xproto.KeyPress
 
 	// Create or reuse selector
 	if selector == nil {
-		selector = ui.NewSelector(ctx, conn.Conn, conn.Root, windows, cfg.Appearance, cfg.Keybindings, cfg.Windows.Workspace, watcher)
+		var err error
+		selector, err = ui.NewSelector(ctx, conn.Conn, conn.Root, windows, cfg.Appearance, cfg.Keybindings, cfg.Windows.Workspace, watcher)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to create selector")
+			return selector
+		}
 	} else {
 		// Update window list, preserving position
 		selector.UpdateWindows(windows)

@@ -54,7 +54,7 @@ type Selector struct {
 }
 
 // NewSelector creates a new graphical window selector
-func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, windows []x11.WindowInfo, appearance config.Appearance, keybindings config.Keybindings, initialWorkspaceOpt string, watcher *focus.Watcher) *Selector {
+func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, windows []x11.WindowInfo, appearance config.Appearance, keybindings config.Keybindings, initialWorkspaceOpt string, watcher *focus.Watcher) (*Selector, error) {
 	// Try to get current monitor geometry, fallback to full screen on error
 	monitor, err := x11.GetCurrentMonitor(conn, root)
 	if err != nil {
@@ -194,8 +194,7 @@ func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, window
 	// Initialize renderer
 	renderer, err := carousel.NewRenderer(appearance.Renderer, windowWidth, windowHeight)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to create renderer")
-		return nil
+		return nil, fmt.Errorf("failed to create renderer: %w", err)
 	}
 	s.renderer = renderer
 
@@ -207,7 +206,7 @@ func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, window
 	}
 	// If "all", windows are already unfiltered
 
-	return s
+	return s, nil
 }
 
 // UpdateWindows updates the window list, preserving the index
