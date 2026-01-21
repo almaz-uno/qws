@@ -32,7 +32,7 @@ clean:
 
 install: build
 	@echo "→ Installing $(BINARY_NAME) to /usr/local/bin..."
-	sudo cp $(BINARY_NAME) /usr/local/bin/
+	sudo cp -f $(BINARY_NAME) /usr/local/bin/
 	@echo "✓ Installation completed"
 
 deps:
