@@ -1,0 +1,770 @@
+= Оптимизация производительности QWS
+:toc:
+:toclevels: 3
+
+== Введение
+
+Данный документ содержит рекомендации по оптимизации производительности приложения QWS, особенно в режимах carousel и grid. Основные проблемы: медленная отрисовка при большом количестве окон и высокое потребление CPU/памяти.
+
+**Статус профилирования:** ✅ Профилирование полностью реализовано и активно используется. Собранные профили находятся в директории `profiles/`.
+
+== Текущее состояние архитектуры
+
+=== Используемые технологии
+
+* **X11 библиотека:** `github.com/jezek/xgb` (X Go Binding)
+* **Composite extension:** Используется для захвата окон через `pkg/composite/capture.go`
+* **XSHM:** Уже реализовано и доступно (`c.shmAvailable`)
+* **Рендеринг:** Два бэкенда — CPU (`renderer-cpu.go`) и OpenGL (`renderer-opengl.go`)
+* **Отрисовка:** Через `xproto.PutImage` с разбиением на полосы для обхода лимитов X11
+
+=== Критические участки кода
+
+. **`pkg/composite/capture.go`** — захват thumbnails
+.. Стратегии: XComposite+XSHM → XComposite+XGetImage → Direct+XSHM → Direct+XGetImage
+.. Масштабирование через `golang.org/x/image/draw`
+.. Проблема: нет кэширования результатов между показами
+
+. **`pkg/carousel/renderer-cpu.go`** — CPU рендеринг
+.. `Draw3DCarouselWithData()` — отрисовка carousel
+.. `DrawGridLayout()` — отрисовка grid
+.. Использует `github.com/fogleman/gg` для векторной графики
+.. Проблема: много аллокаций при каждой отрисовке
+
+. **`pkg/carousel/window.go`** — вывод на экран
+.. `DrawImage()` разбивает изображение на полосы (strips)
+.. Использует `xproto.PutImage` → `xproto.CopyArea`
+.. Проблема: не использует XSHM для вывода
+
+. **`pkg/ui/selector.go`** — главный контроллер
+.. `prepareThumbnails()` — подготовка без кэша
+.. `render()` — вызывается при каждом изменении
+.. Проблема: нет батчинга X11 команд
+
+== Рекомендации по оптимизации
+
+**Статус реализации:**
+
+[cols="4*", options="header"]
+|===
+|Оптимизация
+|Приоритет
+|Статус
+|Ожидаемый эффект
+
+|#1 Кэширование thumbnails
+|ВЫСОКИЙ
+|⏳ Не реализовано
+|50-70% снижение времени подготовки
+
+|#2 Object Pool для изображений
+|СРЕДНИЙ
+|⏳ Не реализовано
+|20-30% снижение аллокаций
+
+|#3 XSHM для вывода изображения
+|ВЫСОКИЙ
+|⏳ Не реализовано
+|40-60% снижение времени отрисовки
+
+|#4 Батчинг X11 команд
+|СРЕДНИЙ
+|⏳ Не реализовано
+|10-20% снижение latency
+
+|#5 Оптимизация масштабирования
+|СРЕДНИЙ
+|⏳ Не реализовано
+|15-25% ускорение захвата
+
+|#6 Профилирование с pprof
+|ВЫСОКИЙ
+|✅ **РЕАЛИЗОВАНО**
+|Инструмент для измерений
+
+|#7 Оптимизация рендеринга grid
+|НИЗКИЙ
+|⏳ Не реализовано
+|30-50% при >50 окнах
+
+|#8 Адаптивный размер thumbnails
+|НИЗКИЙ
+|⏳ Не реализовано
+|10-15% снижение памяти
+|===
+
+=== 1. Кэширование thumbnails (КРИТИЧНО)
+
+==== Проблема
+`prepareThumbnails()` каждый раз создает новый массив, но thumbnails уже есть в `win.Preview`. Однако нет кэширования отмасштабированных версий между показами selector'а.
+
+==== Решение
+Добавить кэш для отмасштабированных thumbnails с LRU-eviction:
+
+[source,go]
+----
+// В pkg/ui/selector.go
+type thumbnailCache struct {
+    items    map[xproto.Window]*cachedThumb
+    maxSize  int
+    mu       sync.RWMutex
+}
+
+type cachedThumb struct {
+    image    image.Image
+    lastUsed time.Time
+}
+
+func (tc *thumbnailCache) Get(window xproto.Window) (image.Image, bool) {
+    tc.mu.RLock()
+    defer tc.mu.RUnlock()
+    if thumb, ok := tc.items[window]; ok {
+        thumb.lastUsed = time.Now()
+        return thumb.image, true
+    }
+    return nil, false
+}
+
+func (tc *thumbnailCache) Put(window xproto.Window, img image.Image) {
+    tc.mu.Lock()
+    defer tc.mu.Unlock()
+    tc.items[window] = &cachedThumb{
+        image:    img,
+        lastUsed: time.Now(),
+    }
+    tc.evictOldest()
+}
+----
+
+**Приоритет:** ВЫСОКИЙ +
+**Ожидаемый эффект:** 50-70% снижение времени подготовки thumbnails
+
+=== 2. Object Pool для изображений
+
+==== Проблема
+Каждый вызов `Draw3DCarouselWithData()` создает новый `*image.RGBA` и временные структуры через `gg.NewContext()`.
+
+==== Решение
+Использовать `sync.Pool` для переиспользования буферов:
+
+[source,go]
+----
+// В pkg/carousel/renderer-cpu.go
+var imagePool = sync.Pool{
+    New: func() interface{} {
+        return image.NewRGBA(image.Rect(0, 0, 1920, 1080))
+    },
+}
+
+func Draw3DCarouselWithData(...) *image.RGBA {
+    img := imagePool.Get().(*image.RGBA)
+    defer imagePool.Put(img)
+
+    // Проверяем размер
+    if img.Bounds().Dx() < cfg.Width || img.Bounds().Dy() < cfg.Height {
+        img = image.NewRGBA(image.Rect(0, 0, cfg.Width, cfg.Height))
+    }
+
+    // Используем существующий буфер
+    dc := gg.NewContextForRGBA(img)
+
+    // ... rest of rendering
+
+    // НЕ возвращаем img из pool, клонируем перед return
+    result := image.NewRGBA(img.Bounds())
+    copy(result.Pix, img.Pix)
+    return result
+}
+----
+
+**Приоритет:** СРЕДНИЙ +
+**Ожидаемый эффект:** 20-30% снижение аллокаций памяти
+
+=== 3. XSHM для вывода изображения
+
+==== Проблема
+`window.DrawImage()` использует `xproto.PutImage`, которое копирует данные через сокет. Даже при наличии XSHM в Capturer, вывод идет через PutImage.
+
+==== Решение
+Реализовать XSHM pixmap для вывода:
+
+[source,go]
+----
+// В pkg/carousel/window.go
+type Window struct {
+    // ... existing fields
+    shmPixmap   xproto.Pixmap
+    shmSegment  shm.Seg
+    shmData     []byte
+    shmAvailable bool
+}
+
+func (w *Window) initSHM() error {
+    if err := shm.Init(w.conn); err != nil {
+        return err
+    }
+
+    // Создаем shared memory segment
+    size := int(w.width) * int(w.height) * 4
+    shmid, addr, err := createSHM(size)
+    if err != nil {
+        return err
+    }
+
+    w.shmSegment, _ = shm.NewSegId(w.conn)
+    shm.Attach(w.conn, w.shmSegment, uint32(shmid), false)
+
+    w.shmData = (*[1 << 30]byte)(unsafe.Pointer(addr))[:size:size]
+    w.shmPixmap, _ = xproto.NewPixmapId(w.conn)
+
+    // Create pixmap using shared memory
+    shm.CreatePixmap(w.conn, w.shmPixmap, xproto.Drawable(w.window),
+        w.width, w.height, w.depth, w.shmSegment, 0)
+
+    w.shmAvailable = true
+    return nil
+}
+
+func (w *Window) DrawImage(img image.Image) error {
+    if w.shmAvailable {
+        return w.drawImageSHM(img)
+    }
+    return w.drawImagePutImage(img)
+}
+
+func (w *Window) drawImageSHM(img image.Image) error {
+    // Копируем напрямую в shared memory
+    bounds := img.Bounds()
+    i := 0
+    for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+        for x := bounds.Min.X; x < bounds.Max.X; x++ {
+            c := color.RGBAModel.Convert(img.At(x, y)).(color.RGBA)
+            w.shmData[i] = c.B
+            w.shmData[i+1] = c.G
+            w.shmData[i+2] = c.R
+            w.shmData[i+3] = c.A
+            i += 4
+        }
+    }
+
+    // Просто копируем pixmap — данные уже в shared memory!
+    xproto.CopyArea(w.conn, xproto.Drawable(w.shmPixmap),
+        xproto.Drawable(w.window), w.gc, 0, 0, 0, 0, w.width, w.height)
+
+    return nil
+}
+----
+
+**Приоритет:** ВЫСОКИЙ +
+**Ожидаемый эффект:** 40-60% снижение времени отрисовки на экран
+
+=== 4. Батчинг X11 команд
+
+==== Проблема
+`window.DrawImage()` вызывает `Sync()` после каждой отрисовки, что приводит к round-trip.
+
+==== Решение
+Убрать лишние `Sync()` и использовать `Flush()`:
+
+[source,go]
+----
+// В pkg/ui/selector.go
+func (s *Selector) render(thumbnails []image.Image) {
+    windowData := s.prepareWindowData()
+
+    var img *image.RGBA
+    if s.config.LayoutMode == "grid" {
+        img = s.renderer.DrawGridLayout(windowData, s.selectedIndex, s.hoverIndex, s.config)
+    } else {
+        img = s.renderer.Draw3DCarouselWithData(windowData, s.selectedIndex, s.hoverIndex, s.animOffset, s.config)
+    }
+
+    s.window.DrawImage(img)
+
+    // Один Flush в конце всех операций
+    s.window.conn.Flush()
+}
+
+// В pkg/carousel/window.go
+func (w *Window) DrawImage(img image.Image) error {
+    // ... rendering code ...
+
+    // УБРАТЬ: w.conn.Sync()
+    // Пусть caller делает Flush когда нужно
+    return nil
+}
+----
+
+**Приоритет:** СРЕДНИЙ +
+**Ожидаемый эффект:** 10-20% снижение latency
+
+=== 5. Оптимизация масштабирования в composite/capture.go
+
+==== Проблема
+Масштабирование выполняется при каждом захвате. `focus.Watcher` уже имеет кэш thumbnails, но нужно убедиться, что он используется оптимально.
+
+==== Решение
+Проверить что кэш не переполняется и thumbnails переиспользуются:
+
+[source,go]
+----
+// В pkg/focus/watcher.go - уже есть кэш!
+// Проверить что captureThumbnail вызывается только когда нужно
+
+func (fw *Watcher) GetThumbnailOrCapture(window xproto.Window) (image.Image, bool) {
+    // Сначала проверяем кэш
+    if thumb, ok := fw.GetThumbnail(window); ok {
+        return thumb, true
+    }
+
+    // Только если нет — захватываем
+    fw.captureThumbnail(window)
+    return fw.GetThumbnail(window)
+}
+----
+
+Также использовать более быструю библиотеку для масштабирования:
+
+[source,go]
+----
+// В pkg/composite/capture.go
+// Вместо xdraw можно использовать github.com/nfnt/resize для bilinear
+import "github.com/nfnt/resize"
+
+func (c *Capturer) scaleImage(src image.Image, targetWidth, targetHeight int) image.Image {
+    if c.scalingAlgorithm == ScalingBiLinear {
+        // Быстрая реализация
+        return resize.Resize(uint(targetWidth), uint(targetHeight), src, resize.Bilinear)
+    }
+    // ... остальные алгоритмы
+}
+----
+
+**Приоритет:** СРЕДНИЙ +
+**Ожидаемый эффект:** 15-25% ускорение захвата thumbnails
+
+=== 6. Профилирование с pprof
+
+==== Статус: ✅ УЖЕ РЕАЛИЗОВАНО
+
+Профилирование полностью интегрировано в QWS через флаги командной строки и HTTP-сервер.
+
+==== Доступные опции
+
+[source,bash]
+----
+# CPU профилирование в файл
+./qws --cpuprofile=cpu.prof
+
+# Memory профилирование в файл
+./qws --memprofile=mem.prof
+
+# HTTP-сервер для интерактивного профилирования
+./qws --pprof=localhost:6060
+
+# Комбинированное использование
+./qws --cpuprofile=cpu.prof --memprofile=mem.prof --pprof=localhost:6060
+----
+
+==== Быстрый старт с помощью скрипта
+
+В проекте есть готовый скрипт `script/profile.sh`:
+
+[source,bash]
+----
+# Запуск с автоматическим профилированием
+./script/profile.sh
+
+# Скрипт автоматически:
+# 1. Создаст директорию profiles/
+# 2. Запустит qws с CPU и memory профилированием
+# 3. После завершения покажет топ-10 функций по CPU и памяти
+# 4. Предложит команды для детального анализа
+----
+
+==== Интерактивный анализ через HTTP
+
+[source,bash]
+----
+# Запустить QWS с HTTP-сервером
+./qws --pprof=localhost:6060
+
+# В другом терминале:
+
+# CPU профиль (30 секунд)
+go tool pprof http://localhost:6060/debug/pprof/profile?seconds=30
+
+# Memory профиль (heap)
+go tool pprof http://localhost:6060/debug/pprof/heap
+
+# Memory профиль (allocations)
+go tool pprof http://localhost:6060/debug/pprof/allocs
+
+# Goroutine профиль (поиск утечек)
+go tool pprof http://localhost:6060/debug/pprof/goroutine
+
+# Блокировки
+go tool pprof http://localhost:6060/debug/pprof/block
+
+# Визуализация в браузере
+go tool pprof -http=:8080 http://localhost:6060/debug/pprof/profile?seconds=30
+----
+
+==== Анализ сохраненных профилей
+
+[source,bash]
+----
+# Текстовый вывод топ функций
+go tool pprof -top cpu.prof
+
+# Интерактивный режим
+go tool pprof cpu.prof
+
+# Визуализация в браузере
+go tool pprof -http=:8080 cpu.prof
+
+# Сравнение двух профилей (до/после оптимизации)
+go tool pprof -base=cpu_before.prof cpu_after.prof
+
+# Flame graph
+go tool pprof -http=:8080 -flame cpu.prof
+----
+
+==== Полезные команды в интерактивном режиме pprof
+
+[source]
+----
+(pprof) top10          # топ-10 функций
+(pprof) list Draw      # исходный код функций с Draw в имени
+(pprof) web            # открыть граф в браузере
+(pprof) svg > out.svg  # сохранить граф в SVG
+(pprof) help           # справка по командам
+----
+
+**Приоритет:** ✅ РЕАЛИЗОВАНО +
+**Ожидаемый эффект:** Инструмент для поиска bottlenecks (активно используется для измерения эффекта других оптимизаций)
+
+=== 7. Оптимизация рендеринга grid
+
+==== Проблема
+`DrawGridLayout()` отрисовывает ВСЕ окна, даже те, что за пределами экрана (хотя это редкость для grid).
+
+==== Решение
+Добавить culling для больших списков:
+
+[source,go]
+----
+// В pkg/carousel/renderer-cpu.go
+func DrawGridLayout(windowData []WindowData, selected int, hoverIndex int, cfg Config) *image.RGBA {
+    // ... existing setup ...
+
+    // Вычисляем viewport
+    viewportBounds := image.Rect(0, 0, cfg.Width, cfg.Height)
+
+    for i, win := range windowData {
+        row := i / cols
+        col := i % cols
+
+        x := offsetX + spacing + float64(col)*(tileW+spacing)
+        y := offsetY + spacing + float64(row)*(tileH+spacing)
+
+        // Culling: пропускаем тайлы вне видимой области
+        tileBounds := image.Rect(
+            int(x), int(y),
+            int(x+tileW), int(y+tileH),
+        )
+        if !tileBounds.Overlaps(viewportBounds) {
+            continue // НЕ рисуем
+        }
+
+        drawGridTile(dc, &win, x, y, tileW, tileH, i == selected, i == hoverIndex, cfg)
+    }
+
+    return getImageRGBA(dc)
+}
+----
+
+**Приоритет:** НИЗКИЙ (актуально только для >50 окон) +
+**Ожидаемый эффект:** 30-50% ускорение при большом количестве окон
+
+=== 8. Адаптивный размер thumbnails
+
+==== Проблема
+`CaptureWindow(window, 512, 512)` — фиксированный размер, может быть избыточен для grid с маленькими тайлами.
+
+==== Решение
+Передавать целевой размер в зависимости от режима:
+
+[source,go]
+----
+// В pkg/focus/watcher.go
+func NewWatcher(..., cfg *config.Appearance) (*Watcher, error) {
+    // Сохранить конфигурацию
+    fw.thumbSize = cfg.Thumbnail.Width // Использовать из конфига!
+    // ...
+}
+
+func (fw *Watcher) captureThumbnail(window xproto.Window) {
+    // Использовать адаптивный размер
+    img, err := fw.capturer.CaptureWindow(window, fw.thumbSize, fw.thumbSize)
+    // ...
+}
+----
+
+**Приоритет:** НИЗКИЙ +
+**Ожидаемый эффект:** 10-15% снижение использования памяти
+
+== План реализации
+
+=== Фаза 1: Инструментирование (1 день)
+
+. [x] ~~Добавить pprof support в main.go~~ **УЖЕ РЕАЛИЗОВАНО**
+. [ ] Добавить метрики времени выполнения критических функций
+. [ ] Собрать baseline профили (CPU, memory, goroutine)
+. [ ] Документировать текущую производительность
+
+**Цель:** Получить измеримые данные о текущем состоянии.
+
+**Метрики для сбора:**
+* Время `render()` для carousel и grid
+* Время `prepareThumbnails()`
+* Время `DrawImage()`
+* Количество аллокаций в heap профиле
+* Использование памяти
+
+**Как собрать baseline:**
+
+[source,bash]
+----
+# 1. Запустить с профилированием
+./script/profile.sh
+
+# 2. Во время работы активно переключаться между окнами
+#    в режимах carousel и grid
+
+# 3. Сохранить результаты как baseline
+cp profiles/cpu_*.prof profiles/baseline_cpu.prof
+cp profiles/mem_*.prof profiles/baseline_mem.prof
+
+# 4. Проанализировать узкие места
+go tool pprof -http=:8080 profiles/baseline_cpu.prof
+----
+
+**Анализ существующих профилей:**
+
+В директории `profiles/` уже есть собранные профили:
+
+[source,bash]
+----
+# Просмотр топ функций по CPU
+go tool pprof -top profiles/cpu_20260119_152345.prof
+
+# Просмотр топ функций по памяти
+go tool pprof -top profiles/mem_20260119_152345.prof
+
+# Интерактивный анализ в браузере
+go tool pprof -http=:8080 profiles/cpu_20260119_152345.prof
+go tool pprof -http=:8081 profiles/mem_20260119_152345.prof
+----
+
+=== Фаза 2: Быстрые победы (2-3 дня)
+
+. [ ] **Оптимизация #4:** Батчинг X11 команд (убрать Sync)
+. [ ] **Оптимизация #5:** Проверить использование кэша в focus.Watcher
+. [ ] **Оптимизация #8:** Адаптивный размер thumbnails
+. [ ] Измерить улучшения с помощью pprof
+
+**Цель:** Получить первые 15-25% улучшения без крупных изменений.
+
+=== Фаза 3: Кэширование (3-5 дней)
+
+. [ ] **Оптимизация #1:** Реализовать thumbnailCache в selector
+. [ ] Интегрировать с prepareThumbnails()
+. [ ] Добавить LRU-eviction с настраиваемым размером
+. [ ] Тестирование с большим количеством окон (50+)
+. [ ] Измерить улучшения
+
+**Цель:** Основное улучшение 50-70% для prepareThumbnails.
+
+**Критерий успеха:** prepareThumbnails() при повторном вызове должен быть <10ms для 20 окон.
+
+=== Фаза 4: XSHM для вывода (5-7 дней)
+
+. [ ] **Оптимизация #3:** Реализовать Window.initSHM()
+. [ ] Реализовать Window.drawImageSHM()
+. [ ] Fallback на PutImage если SHM недоступен
+. [ ] Тестирование на разных системах (локально, SSH X11 forwarding)
+. [ ] Измерить улучшения
+
+**Цель:** Ускорение отрисовки на экран на 40-60%.
+
+**Критерий успеха:** DrawImage() должен быть <20ms для 1920x1080.
+
+=== Фаза 5: Продвинутые оптимизации (3-5 дней)
+
+. [ ] **Оптимизация #2:** Object Pool для изображений
+. [ ] **Оптимизация #7:** Grid culling (если актуально)
+. [ ] Тестирование edge cases
+. [ ] Финальное профилирование
+
+**Цель:** Финальные 20-30% улучшения.
+
+=== Фаза 6: Документация и тестирование (2-3 дня)
+
+. [ ] Обновить документацию
+. [ ] Написать бенчмарки для критических функций
+. [ ] Тестирование на разных конфигурациях (4K, multi-monitor)
+. [ ] Измерить общее улучшение
+. [ ] Задокументировать known limitations
+
+**Цель:** Убедиться в стабильности и измерить итоговый эффект.
+
+== Метрики успеха
+
+=== Целевые показатели
+
+[cols="3*", options="header"]
+|===
+|Метрика
+|До оптимизации (оценка)
+|Целевое значение
+
+|Время отрисовки carousel (20 окон)
+|~150ms
+|<50ms
+
+|Время отрисовки grid (20 окон)
+|~200ms
+|<70ms
+
+|Количество аллокаций на render
+|~500
+|<100
+
+|Использование памяти (20 окон)
+|~150MB
+|<80MB
+
+|CPU при переключении
+|60-80%
+|<30%
+
+|Время prepareThumbnails (повторный вызов)
+|~80ms
+|<10ms
+|===
+
+=== Способы измерения
+
+[source,go]
+----
+// Добавить в критические функции
+func (s *Selector) render(thumbnails []image.Image) {
+    start := time.Now()
+    defer func() {
+        duration := time.Since(start)
+        if duration > 50*time.Millisecond {
+            log.Warn().
+                Dur("duration", duration).
+                Int("windows", len(thumbnails)).
+                Str("mode", s.config.LayoutMode).
+                Msg("Slow render detected")
+        }
+    }()
+
+    // ... existing code
+}
+----
+
+=== Инструменты профилирования
+
+. **pprof** — встроенный профилировщик Go
+.. CPU профиль: где тратится время
+.. Heap профиль: где происходят аллокации
+.. Goroutine профиль: утечки горутин
+
+. **runtime.MemStats** — статистика памяти
+. **trace** — детальная временная шкала
+
+== Дополнительные рекомендации
+
+=== Мониторинг производительности в production
+
+[source,go]
+----
+// Периодически выводить метрики
+func (s *Selector) logPerformanceMetrics() {
+    var m runtime.MemStats
+    runtime.ReadMemStats(&m)
+
+    log.Debug().
+        Uint64("alloc_mb", m.Alloc/1024/1024).
+        Uint64("total_alloc_mb", m.TotalAlloc/1024/1024).
+        Uint32("num_gc", m.NumGC).
+        Msg("Performance metrics")
+}
+----
+
+=== Потенциальные проблемы
+
+. **XSHM может быть недоступен** через SSH X11 forwarding
+.. Решение: fallback на PutImage (уже реализован в capture.go)
+.. Детектировать удаленное подключение и отключать XSHM автоматически
+
+. **Object Pool может не помочь** если изображения разного размера
+.. Решение: несколько pools для популярных размеров (1920x1080, 1280x720)
+
+. **Кэш может занимать много памяти** при большом количестве окон
+.. Решение: LRU с настраиваемым лимитом (например, 50 thumbnails max)
+.. Опция в конфиге: `cache_size: 50`
+
+=== Альтернативные подходы (для будущего)
+
+. **XRender для композитинга** — может быть быстрее для blend операций
+.. Требует изучения XRender extension в xgb
+.. Потенциально более эффективно чем CPU rendering
+
+. **Предрендеринг grid tiles** — если layout не меняется часто
+.. Кэшировать отрендеренные tiles целиком
+.. Актуально если тайлы статичны
+
+. **Асинхронный захват thumbnails** — не блокировать UI
+.. Показывать placeholder пока идет захват
+.. Обновлять UI когда thumbnail готов
+
+== Инструменты и библиотеки
+
+=== Текущие зависимости
+
+* `github.com/jezek/xgb` — X11 protocol binding
+* `github.com/fogleman/gg` — 2D graphics
+* `golang.org/x/image/draw` — масштабирование изображений
+
+=== Рекомендуемые добавить
+
+* `github.com/nfnt/resize` — быстрое масштабирование изображений
+* `github.com/rs/zerolog` — структурированное логирование (уже используется)
+
+=== Не рекомендуется
+
+* CGO-based библиотеки (libvips, ImageMagick) — усложняет сборку и deployment
+* Сторонние UI фреймворки — противоречит архитектуре qws
+
+== Заключение
+
+Реализация всех оптимизаций должна дать **суммарное улучшение 2-3x** в производительности отрисовки carousel/grid.
+
+**Критичными являются:**
+
+. **Кэширование thumbnails** (Фаза 3) — 50-70% улучшение
+. **XSHM для вывода** (Фаза 4) — 40-60% улучшение
+. **Профилирование** (Фаза 1) — для поиска других bottlenecks
+
+**Порядок реализации:**
+
+. Начать с Фазы 1 (профилирование) — измерить baseline
+. Затем Фаза 2 (быстрые победы) — получить первые результаты
+. Фазы 3-4 — основные улучшения
+. Фазы 5-6 — финальные оптимизации и документация
+
+**Важно:** Измерять эффект на каждом этапе через pprof и метрики производительности.
