@@ -49,6 +49,7 @@ type Selector struct {
 	modifierPressed     bool           // Track if primary modifier is currently pressed
 	workspacePressed    bool           // Track if workspace modifier is currently pressed
 	initialWorkspaceOpt string         // Initial workspace configuration ("all", "current", "all-except-current")
+	initialLayoutMode   string         // Initial layout mode ("carousel" or "grid") for restoration on exit
 	lastMouseUpdate     time.Time      // Last time mouse hover was processed
 	watcher             *focus.Watcher // Focus watcher for getting active window
 }
@@ -188,6 +189,7 @@ func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, window
 		resultChan:          make(chan *x11.WindowInfo, 1),
 		keyConfig:           keyConf,
 		initialWorkspaceOpt: initialWorkspaceOpt,
+		initialLayoutMode:   appearance.Layout, // Save initial layout mode
 		watcher:             watcher,
 	}
 
@@ -399,6 +401,17 @@ func (s *Selector) Show() (*x11.WindowInfo, error) {
 	return result, nil
 }
 
+// restoreInitialLayoutMode restores the initial layout mode before hiding
+func (s *Selector) restoreInitialLayoutMode() {
+	if s.config.LayoutMode != s.initialLayoutMode {
+		log.Debug().
+			Str("from", s.config.LayoutMode).
+			Str("to", s.initialLayoutMode).
+			Msg("Restoring initial layout mode")
+		s.config.LayoutMode = s.initialLayoutMode
+	}
+}
+
 // handleEventsSync processes keyboard events synchronously
 func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 	// Get keycodes for modifiers
@@ -422,6 +435,7 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 
 			// Handle Enter key - select current window
 			if enterKeycode != 0 && e.Detail == enterKeycode {
+				s.restoreInitialLayoutMode()
 				if s.selectedIndex >= 0 && s.selectedIndex < len(s.windows) {
 					return &s.windows[s.selectedIndex]
 				}
@@ -430,6 +444,7 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 
 			if s.handleKeyPressSimple(e, thumbnails) {
 				// Cancel key pressed
+				s.restoreInitialLayoutMode()
 				return nil
 			}
 
@@ -462,6 +477,8 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 				// Only react to modifier release if modifier was pressed while selector was open
 				if s.modifierPressed {
 					s.modifierPressed = false
+					// Restore layout mode before exiting
+					s.restoreInitialLayoutMode()
 					// Return selected window when modifier is released
 					if s.selectedIndex >= 0 && s.selectedIndex < len(s.windows) {
 						return &s.windows[s.selectedIndex]
@@ -495,6 +512,8 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 			if e.Detail == 1 {
 				windowIndex := s.getWindowIndexAtPosition(int(e.EventX), int(e.EventY))
 				if windowIndex >= 0 && windowIndex < len(s.windows) {
+					// Restore layout mode before exiting
+					s.restoreInitialLayoutMode()
 					// Select and return the clicked window
 					return &s.windows[windowIndex]
 				}
