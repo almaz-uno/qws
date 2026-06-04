@@ -539,6 +539,7 @@ func findIconByClass(wmClass string) image.Image {
 }
 
 // findIconNameFromDesktop searches desktop files for icon name
+// Uses two-pass algorithm: first exact matches, then fuzzy matches
 func findIconNameFromDesktop(windowClass string) string {
 	dirs := []string{
 		"/usr/share/applications",
@@ -561,6 +562,7 @@ func findIconNameFromDesktop(windowClass string) string {
 
 	windowClassLower := strings.ToLower(windowClass)
 
+	// Pass 1: Exact matches (StartupWMClass, Name, exact filename)
 	for _, dir := range dirs {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
@@ -573,7 +575,26 @@ func findIconNameFromDesktop(windowClass string) string {
 			}
 
 			desktopFile := filepath.Join(dir, entry.Name())
-			if iconName := parseDesktopFileForIcon(desktopFile, windowClass, windowClassLower); iconName != "" {
+			if iconName := parseDesktopFileForIcon(desktopFile, windowClass, windowClassLower, true); iconName != "" {
+				return iconName
+			}
+		}
+	}
+
+	// Pass 2: Fuzzy matches (substring in filename)
+	for _, dir := range dirs {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".desktop") {
+				continue
+			}
+
+			desktopFile := filepath.Join(dir, entry.Name())
+			if iconName := parseDesktopFileForIcon(desktopFile, windowClass, windowClassLower, false); iconName != "" {
 				return iconName
 			}
 		}
@@ -583,7 +604,9 @@ func findIconNameFromDesktop(windowClass string) string {
 }
 
 // parseDesktopFileForIcon parses a desktop file and returns icon name if matches
-func parseDesktopFileForIcon(path, windowClass, windowClassLower string) string {
+// exactOnly=true: only exact matches (StartupWMClass, Name, exact filename)
+// exactOnly=false: also substring matches in filename
+func parseDesktopFileForIcon(path, windowClass, windowClassLower string, exactOnly bool) string {
 	file, err := os.Open(path)
 	if err != nil {
 		return ""
@@ -640,19 +663,26 @@ func parseDesktopFileForIcon(path, windowClass, windowClassLower string) string 
 		return ""
 	}
 
-	// Match by StartupWMClass first
+	// Match by StartupWMClass first (exact, case-insensitive)
 	if startupWMClass != "" && strings.EqualFold(startupWMClass, windowClass) {
 		return icon
 	}
 
-	// Match by Name
+	// Match by Name (exact, case-insensitive)
 	if name != "" && strings.EqualFold(name, windowClass) {
 		return icon
 	}
 
 	// Match by desktop filename (without .desktop)
 	baseName := strings.TrimSuffix(filepath.Base(path), ".desktop")
-	if strings.EqualFold(baseName, windowClass) || strings.Contains(strings.ToLower(baseName), windowClassLower) {
+
+	// Exact match always allowed
+	if strings.EqualFold(baseName, windowClass) {
+		return icon
+	}
+
+	// Substring match only if not exactOnly
+	if !exactOnly && strings.Contains(strings.ToLower(baseName), windowClassLower) {
 		return icon
 	}
 
