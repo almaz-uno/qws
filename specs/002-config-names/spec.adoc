@@ -1,0 +1,120 @@
+= 002 — configuration names
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-09-30
+:status: implemented 2026-09-30; K1–K6 met (section "Results"); not merged
+:issue: 7
+
+== What and why
+
+qws reads its configuration through Viper from three sources — flags, `QWS_*`
+environment variables and `~/.config/qws/config.yaml` — and two of them do
+not use the names the documentation and qws itself give (checked on
+2026-09-30 at `2c59c26`):
+
+* *Environment variables.* Viper's `AutomaticEnv` looks a key up as `QWS_`
+  plus the key in upper case with its dots kept: `appearance.renderer` is
+  `QWS_APPEARANCE.RENDERER`. The names in the reference table of
+  `doc/configuration.asciidoc`, `QWS_APPEARANCE_RENDERER` and so on, are not
+  read: `QWS_APPEARANCE_RENDERER=glx qws config show` prints `renderer: cpu`,
+  `env 'QWS_APPEARANCE.RENDERER=glx' qws config show` prints `glx`.
+  `QWS_CONFIG`, documented as the path of the configuration file, is read
+  nowhere.
+* *Keys that `qws config init` and `qws config show` write.* Both marshal the
+  configuration with `yaml.v3`, which names a field by lowercasing it, while
+  qws reads a file by the `mapstructure` tags. The 12 multi-word keys are
+  written joined and read with underscores: `workspace_modifier`,
+  `window_background`, `window_padding`, `scaling_algorithm`,
+  `selection_frame`, `inactive_frame`, `urgent_title_background`,
+  `border_radius`, `snapshot_interval`, `show_delay`, `ignore_skip_taskbar`,
+  `sort_minimized_last`. In a file written by `config init` they are all
+  ignored, and their defaults apply. The author's file says
+  `snapshotinterval: 1s`; `qws config show` prints `snapshotinterval: 10s`.
+
+The specification is a delta to `develop` at `2c59c26`. Unchanged: the keys
+and their meaning, the defaults, the precedence — flags, then environment,
+then file, then defaults — and the file's location.
+
+== Behavior
+
+. *Environment variables* are read under the names of the reference: `QWS_`
+  and the key in upper case with dots replaced by `_` —
+  `QWS_APPEARANCE_RENDERER`, `QWS_BEHAVIOR_SNAPSHOT_INTERVAL`,
+  `QWS_KEYBINDINGS_WORKSPACE_MODIFIER`. The dotted names, never documented,
+  are no longer read; the only known user, `measure.sh` of specification
+  001, passes both.
+. *`QWS_CONFIG`* gives the path of the configuration file; `--config` takes
+  precedence over it.
+. *`config init` and `config show`* write the keys qws reads: the
+  multi-word ones with underscores.
+. *Files with joined keys*, as `config init` wrote them: every key whose
+  path has one of the 12 names joined — 17 of them, since `window_background`
+  and `window_padding` hold one-word keys too — is read as the key it stands
+  for, at the precedence of the file, so what such a file says takes effect:
+  in the author's configuration the snapshot interval becomes 1 s instead of
+  10 s. qws logs a warning for each joined key it finds, naming the key to
+  use. When a file has both, the key with underscores is used, and the
+  warning says the joined one is ignored.
+
+== Acceptance criteria
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| Environment: with `QWS_APPEARANCE_RENDERER`, `QWS_BEHAVIOR_SNAPSHOT_INTERVAL`
+  and `QWS_APPEARANCE_COLORS_DARK_SELECTION_FRAME` set, `Load` returns their
+  values, over those of a file. Test in `internal/config`.
+
+| K2
+| `QWS_CONFIG`: set to a file, the file is read; with `--config` too, the
+  flag's file is. Test.
+
+| K3
+| Round trip: a configuration with every field different from its default,
+  marshalled as `config init` does and read back by `Load`, equals the
+  original. Test; so is a test that every field's `yaml` name equals its
+  `mapstructure` name.
+
+| K4
+| Joined keys: a file with every key joined gives their values, and one
+  warning per joined key naming the key to use; with both forms of a key,
+  the one with underscores wins. Test.
+
+| K5
+| E1: `qws config show` with the author's file prints `snapshot_interval: 1s`
+  and logs the warnings of its joined keys.
+
+| K6
+| `go vet ./...` and `go test ./...` pass.
+|===
+
+== Results
+
+2026-09-30, E1. The tests of K1–K4 were written first and did not build
+against `2c59c26`: `Load` had no warnings to return.
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | `TestEnvironment`.
+| K2 | `TestConfigVariable`.
+| K3 | `TestRoundTrip`, `TestTagNames`.
+| K4 | `TestJoinedKeys`: 17 joined keys, 17 warnings.
+| K5 | `qws config show` with the author's file: `snapshot_interval: 1s`, the
+  keys written with underscores, nine warnings for the nine joined keys of
+  the file; `QWS_APPEARANCE_RENDERER=glx qws config show` prints
+  `renderer: glx`.
+| K6 | `go vet ./...`, `go test ./...`.
+|===
+
+`config show` loaded the configuration twice — by `cobra.OnInitialize` and
+once more itself — and printed every warning twice; the second load is gone.
+
+== Open decisions
+
+. Whether joined keys stop being read in a later version, once warnings
+  have had time to be seen. Until decided, they are read.

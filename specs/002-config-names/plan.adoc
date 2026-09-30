@@ -1,0 +1,30 @@
+= 002 — plan
+:toc: left
+:toc-title: Contents
+:revdate: 2026-09-30
+
+[cols="2,5"]
+|===
+| File | What changes
+
+| `internal/config/config.go`
+| `yaml` tags equal to the `mapstructure` ones on every field. `Load`:
+  `SetEnvKeyReplacer(".", "_")`; after reading the file, the joined keys —
+  derived from the tags, not listed by hand — are merged into the config
+  layer under the keys they stand for, with `MergeConfigMap`, which keeps
+  environment and flags above them; a warning per joined key.
+
+| `cmd/qws/root.go`, `cmd/qws/config.go`
+| `initConfig` logs the warnings of `Load` once logging is set up. `Load`
+  itself reads `QWS_CONFIG` when no file is given, so that the tests can
+  reach it. `config show` stops loading the configuration a second time.
+
+| `internal/config/config_test.go`
+| New: K1–K4.
+
+| `doc/configuration.asciidoc`
+| Its environment variables were right all along; a note on files written by
+  earlier versions of `config init` and on `QWS_CONFIG`.
+|===
+
+The order: the tests of K1–K4 first, failing on `2c59c26`, then the code.

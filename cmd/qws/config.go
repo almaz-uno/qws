@@ -93,9 +93,7 @@ func runConfigInit(cmd *cobra.Command, args []string) error {
 }
 
 func runConfigShow(cmd *cobra.Command, args []string) error {
-	// Initialize config to load current configuration
-	initConfig()
-
+	// The configuration is loaded by cobra.OnInitialize before any command runs
 	// Marshal current config to YAML
 	data, err := yaml.Marshal(cfg)
 	if err != nil {

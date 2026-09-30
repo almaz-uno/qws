@@ -112,7 +112,8 @@ func init() {
 // initConfig reads in config file and ENV variables if set
 func initConfig() {
 	var err error
-	cfg, err = config.Load(cfgFile)
+	var warnings []string
+	cfg, warnings, err = config.Load(cfgFile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
 		os.Exit(1)
@@ -123,6 +124,9 @@ func initConfig() {
 
 	// Setup logging
 	setupLogging()
+	for _, w := range warnings {
+		log.Warn().Msg(w)
+	}
 }
 
 // applyFlags applies command-line flags over configuration
