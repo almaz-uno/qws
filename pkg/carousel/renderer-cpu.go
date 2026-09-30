@@ -161,9 +161,10 @@ func Draw3DCarouselWithData(windowData []WindowData, selected int, hoverIndex in
 	centerX := float64(cfg.Width) / 2
 	centerY := float64(cfg.Height) / 2
 
-	// Resample the thumbnails of the visible cards in parallel
-	canvas := dc.Image().Bounds()
-	thumbs := make([]*preparedThumbnail, len(windowData))
+	// Resample the thumbnails and icons of the visible cards in parallel
+	canvas := dc.Image().(*image.RGBA)
+	thumbs := make([]*preparedImage, len(windowData))
+	icons := make([]*preparedImage, len(windowData))
 	var wg sync.WaitGroup
 	for i := range windowData {
 		card, ok := carouselCard(&windowData[i], i, selected, animOffset, centerX, centerY, cfg)
@@ -171,14 +172,19 @@ func Draw3DCarouselWithData(windowData []WindowData, selected int, hoverIndex in
 			continue
 		}
 		wg.Go(func() {
-			thumbs[i] = prepareThumbnail(canvas, card.thumbnailMatrix(), windowData[i].Thumbnail)
+			thumbs[i] = prepareOpaque(canvas.Bounds(), card.thumbnailMatrix(), windowData[i].Thumbnail)
 		})
+		if icon := windowData[i].Icon; icon != nil {
+			wg.Go(func() {
+				icons[i] = prepareOnUniform(canvas, card.iconMatrix(icon), icon)
+			})
+		}
 	}
 	wg.Wait()
 
 	// Draw each window with icon, title, and thumbnail
 	for i := range windowData {
-		drawWindowWithData(dc, &windowData[i], i, selected, hoverIndex, animOffset, centerX, centerY, cfg, thumbs[i])
+		drawWindowWithData(dc, &windowData[i], i, selected, hoverIndex, animOffset, centerX, centerY, cfg, thumbs[i], icons[i])
 	}
 
 	return getImageRGBA(dc)
@@ -415,9 +421,24 @@ func (c cardGeometry) thumbnailMatrix() gg.Matrix {
 		Translate(-c.thumbW/2, -c.thumbH/2)
 }
 
-// drawWindowWithData draws a window with icon, title, and thumbnail; thumb is
-// its thumbnail prepared by prepareThumbnail, or nil to draw it in place
-func drawWindowWithData(dc *gg.Context, data *WindowData, index, selected, hoverIndex int, animOffset, centerX, centerY float64, cfg Config, thumb *preparedThumbnail) {
+// iconMatrix is the matrix drawWindowWithData draws the icon under
+func (c cardGeometry) iconMatrix(icon image.Image) gg.Matrix {
+	iconBounds := icon.Bounds()
+	iconW := float64(iconBounds.Dx())
+	iconH := float64(iconBounds.Dy())
+	iconSize := 48.0 * c.scale
+	iconY := c.y - c.finalH/2 - 80*c.scale
+	iconScale := iconSize / math.Max(iconW, iconH)
+	return gg.Identity().
+		Translate(c.x, iconY).
+		Scale(iconScale, iconScale).
+		Translate(-iconW/2, -iconH/2)
+}
+
+// drawWindowWithData draws a window with icon, title, and thumbnail; thumb and
+// icon are its thumbnail and icon resampled in advance, or nil to draw them in
+// place
+func drawWindowWithData(dc *gg.Context, data *WindowData, index, selected, hoverIndex int, animOffset, centerX, centerY float64, cfg Config, thumb, icon *preparedImage) {
 	card, ok := carouselCard(data, index, selected, animOffset, centerX, centerY, cfg)
 	if !ok {
 		return
@@ -454,7 +475,9 @@ func drawWindowWithData(dc *gg.Context, data *WindowData, index, selected, hover
 		dc.Scale(iconScale, iconScale)
 		dc.Translate(-iconW/2, -iconH/2)
 		dc.SetRGBA(1, 1, 1, alpha)
-		dc.DrawImage(data.Icon, 0, 0)
+		if icon == nil || !icon.drawTo(dc.Image().(*image.RGBA)) {
+			dc.DrawImage(data.Icon, 0, 0)
+		}
 		dc.Pop()
 	}
 
@@ -560,9 +583,7 @@ skipWorkspace:
 	dc.Translate(-thumbW/2, -thumbH/2)
 
 	dc.SetRGBA(1, 1, 1, alpha)
-	if thumb != nil {
-		thumb.drawTo(dc.Image().(*image.RGBA))
-	} else {
+	if thumb == nil || !thumb.drawTo(dc.Image().(*image.RGBA)) {
 		dc.DrawImage(data.Thumbnail, 0, 0)
 	}
 
