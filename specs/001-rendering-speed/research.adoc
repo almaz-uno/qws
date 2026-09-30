@@ -1,0 +1,229 @@
+= 001 — research
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-09-30
+
+Facts the specification rests on. Code references are to `develop` at
+`2c59c26` unless stated otherwise.
+
+== Measurement environment E1
+
+[cols="1,3"]
+|===
+| Host | ws1, Debian 12, Linux 6.12
+| Window manager | i3
+| Compositor | picom `--backend glx --vsync`
+| GPU | NVIDIA GeForce RTX 4080 SUPER, driver 580.105.08, OpenGL 4.6 core
+| Display | one monitor, DP-0, 2560×1440 at 144 Hz — refresh period 6.94 ms
+| Windows | 24 client windows (`wmctrl -l`, 2026-09-30)
+| Author's configuration | `appearance.thumbnail` 512×512, `renderer` not set
+  (default `cpu`), `behavior.snapshotinterval` 1s, `behavior.showdelay` 0s
+| Tools | `xdotool`, `xwd`, ImageMagick `import` and `compare`, `go tool pprof`
+|===
+
+Two qws instances run on ws1 day to day (`/usr/local/bin/qws`, built
+2026-06-29): one with `--keybindings-key grave --windows-workspace current`,
+one with `--pprof=localhost:6061` on the default `Alt+Tab`. X11 lets one
+client grab a key combination, so a measuring instance needs a combination
+neither of them, nor i3, grabs.
+
+== Pipeline on develop
+
+=== Activation — the path of M1
+
+. The main loop reads the grabbed `KeyPress` and calls `handleKeyPress`
+  (`cmd/qws/root.go:446`). With `behavior.showdelay` > 0 it sleeps first.
+. `GetWindowListFiltered` (`pkg/x11/windows.go:250`) rebuilds the window list
+  from scratch on every activation. For each client window, sequentially and
+  synchronously: the name (one or two `GetProperty`), the skip-taskbar state,
+  the workspace name, `_NET_WM_ICON` (`InternAtom` and `GetProperty`, decoded
+  into an image by `findBestIcon` each time), the urgency hint. A window
+  without `_NET_WM_ICON` falls back to `WM_CLASS`: `findIconByClass` scans
+  the `.desktop` files in `/usr/share/applications`,
+  `/usr/local/share/applications`, `~/.local/share/applications` and
+  `$XDG_DATA_DIRS` and loads the icon file from disk. Nothing is cached
+  between activations.
+. The list is sorted by MRU; thumbnails are taken from the watcher's cache —
+  there is no capture on activation.
+. `Selector.Show` (`pkg/ui/selector.go:235`): `GetActiveWindow` and
+  `GetCurrentMonitor` (RandR) — round trips; the overlay window is recreated
+  only when the monitor geometry changed; `prepareThumbnails`; the window is
+  mapped; `GrabKeyboard` — a round trip; the modifier state is queried; the
+  first `render`.
+. `render` (`pkg/ui/selector.go:560`) ignores its `thumbnails` argument and
+  rebuilds the data with `prepareWindowData`. For a window without a
+  thumbnail, `DrawPlaceholder(256, 256, …)` is therefore drawn twice per
+  activation — in `prepareThumbnails` and again in `prepareWindowData` — and
+  the first result is discarded.
+
+The window list collection and the X round trips are part of the activation
+latency, but not of drawing. M1 is therefore recorded by phases (see the
+specification) so that its composition is known before targets are set.
+
+=== Step — the path of M2
+
+`handleEventsSync` → `handleKeyPressSimple` → `selectNext`/`selectPrevious` →
+`animateTransition` → `render` (`pkg/ui/selector.go:416–715`). There is no
+animation: `animOffset` is 0 and the switch is instant. Every step repeats the
+whole of `render`: `prepareWindowData` (placeholders again), the full scene,
+and the full-window output. Mouse motion is throttled to 16 ms and re-renders
+when the hovered card changes.
+
+=== Thumbnail capture — off the frame path
+
+The watcher captures a window 100 ms after it becomes active
+(`HandlePropertyNotify`, `pkg/focus/watcher.go:89`) and re-captures the active
+window every `behavior.snapshotinterval` (`startSnapshotRoutine`,
+`pkg/focus/watcher.go:214`). The capture size is hard-coded,
+`CaptureWindow(window, 512, 512)` (`pkg/focus/watcher.go:182`), independent of
+`appearance.thumbnail`. `CaptureWindow` (`pkg/composite/capture.go:90`) tries
+XComposite with MIT-SHM, XComposite with `GetImage`, then direct `GetImage`,
+converts BGRA to RGBA per pixel and scales the frame down to fit 512×512 with
+`appearance.thumbnail.scaling_algorithm` (`capture.go:299–328`).
+
+Capture and its scaling run in the background and are not on the path of M1
+or M2. Stages 2 and 3 of the prototype plan (raw BGRA upload, GPU downscale
+instead of the CPU one) therefore do not shorten M1 or M2, while stage 3
+would change the pixels of thumbnails — see the specification, "Visual
+parity".
+
+=== Output — cpu and glx on develop
+
+`cpu`:: `Draw3DCarouselWithData` and `DrawGridLayout`
+(`pkg/carousel/renderer-cpu.go`) are pure functions returning a premultiplied
+`*image.RGBA` of the overlay window size. Each call allocates a new canvas,
+`gg.NewContext(cfg.Width, cfg.Height)` (`renderer-cpu.go:157`, `605`); font
+faces are cached (`pkg/carousel/fontfallback.go:35`). `Window.DrawImage`
+(`pkg/carousel/window.go:242`) converts the frame to BGRA per pixel, sends it
+with `PutImage` in strips of at most 200 000 bytes into a pixmap, copies it to
+the window with `CopyArea` and waits for `conn.Sync()`.
+
+`glx`:: `NewOpenGLRenderer` (`pkg/carousel/renderer-opengl.go`) creates a
+hidden 1×1 GLFW window as the context holder (`:137`) and draws the scene
+into an offscreen 4× MSAA framebuffer, resolves it with `BlitFramebuffer`,
+reads it back with `glReadPixels` (`:399`), flips it vertically on the CPU
+(`:405`) and returns an `*image.RGBA` that goes down the same
+`Window.DrawImage` path. Its size is fixed at construction
+(`pkg/ui/selector.go:197`) and is not updated when the overlay window is
+recreated for another monitor (`selector.go:299–300`).
+
+=== Visual parity of the GL renderers
+
+Inventory made by reading the code of `develop` and of `issue/optimize-gl`
+on 2026-09-30, element by element, for both layouts and placeholders. The
+pixel differences are not measured; the list shows why they exist.
+
+[cols="2,5"]
+|===
+| Mechanism | Difference
+
+| Alpha model
+| `cpu` is premultiplied throughout: `image/draw` and the freetype painter
+  compose with Porter–Duff _over_ in 16-bit intermediates and truncate. `glx`
+  clears with a straight colour and blends with
+  `BlendFunc(SRC_ALPHA, ONE_MINUS_SRC_ALPHA)` on all four channels
+  (`renderer-opengl.go:377`, `791`), so the destination alpha becomes
+  sA² + dA(1 − sA) and every translucent pixel differs; shadows get alpha².
+  Go's premultiplied images (text, PNG icons) are uploaded and blended as
+  straight.
+
+| Elements absent in GL
+| Rounded window background (`border_radius`), the pills under the title and
+  the workspace label, the urgent colour of the title pill and the urgent
+  bar of the grid.
+
+| Geometry
+| Frames: square centred strokes in `cpu` against radius-8 bands inside the
+  box in `glx`; the thumbnail border width in `cpu` is in device pixels,
+  `2/(scaleMin·scale)`. Text baselines differ by about 5–6 px; `glx` measures
+  width without kerning, so truncation differs. Non-square grid icons are
+  stretched to 24×24 in `glx`.
+
+| Image alpha
+| gg's `DrawImage` ignores the context colour (`gg@v1.3.0/context.go:663–668`:
+  `BiLinear.Transform(…, draw.Over, nil)`), so in `cpu` side thumbnails and
+  icons are opaque; `glx` fades them with their card's alpha.
+
+| Resampling and edges
+| `cpu`: `x/image/draw` BiLinear with its support widened when downscaling;
+  image edges are binary by pixel centre, path edges get analytic coverage.
+  `glx`: `GL_LINEAR` without mipmaps and 4× MSAA with driver-defined sample
+  positions. They coincide only for a 1:1 mapping on integer pixels.
+
+| Rounding
+| Go truncates, GL rounds to nearest; ±1 in every blended channel.
+|===
+
+The prototype on `issue/optimize-gl` fixes the double alpha of frames and
+snaps text to pixels, but keeps the straight-alpha model, the missing
+elements, the geometry and the filtering; it presents with `glXSwapBuffers`
+and returns no image, so it cannot be compared in-process at all.
+
+Conclusion for the specification: a GPU-drawn scene matches the `cpu` image
+only approximately, and bit-exactness would require porting the integer
+arithmetic of gg, the freetype rasteriser and `x/image/draw` into shaders.
+The author chose (2026-09-30) that the `cpu` drawing code produces the
+pixels for both renderers and `glx` only presents them.
+
+=== Bit-exact savings on the CPU side
+
+Facts the plan can use without changing a single pixel of the `cpu` output:
+
+* A thumbnail is opaque — capture forces alpha to 255
+  (`pkg/composite/capture.go:278–297`) — so the _over_ in gg's
+  `BiLinear.Transform` degenerates to _src_: the pixels it writes do not
+  depend on what is under them. The transformed thumbnail of a card is a
+  function of the source image and the transform alone, and a cached copy
+  written back to the same pixels is identical. In the carousel, for a given
+  window geometry, the transform depends only on the card's offset from the
+  selection; cards with `|o| > 5` are not drawn (`renderer-cpu.go:308–330`).
+* The full-window canvas is allocated on every frame; reusing it changes no
+  pixel as long as it is cleared the same way.
+* Placeholders are drawn twice per activation and the first result is
+  discarded (section "Activation").
+* A texture upload of 8-bit RGBA drawn 1:1 with nearest sampling and with
+  blending and dithering disabled reproduces the source bytes exactly
+  (k/255 → k).
+
+Whether each saving is worth its code is decided by measurement (plan).
+
+== Prior measurements
+
+`profiles/cpu_analysis_report_20260122_103901.txt` (local, `profiles/` is
+ignored by git), 2026-01-22: a 60 s session, 20.35 s of CPU. `Selector.render`
+— 16.31 s cumulative (80%); `golang.org/x/image/draw` — 5.69 s cumulative,
+mostly `Kernel.transform`, i.e. render-time scaling; `fogleman/gg` and the
+freetype rasterizer — about 7.5 s; `Window.DrawImage` — 3.42 s; `mallocgc` —
+3.36 s cumulative; `captureThumbnail` — 1.65 s.
+
+The render code has barely changed since: after 2026-01-22 only `bc6c253`
+(restore the layout mode) and `07ce760` (icon matching) touched the pipeline.
+The report does not record the renderer, the number of frames, the number of
+windows, the compositor or the commit, so its figures cannot be reproduced.
+They show where the time goes, and are not a baseline.
+
+The "expected effect" section of `doc/optimize-gl.adoc` (branch
+`issue/optimize-gl`) — about 3–6 ms per capture, 5–10 ms for readback and
+`XPutImage` at 1440p — is an order-of-magnitude estimate by its own account,
+not a measurement.
+
+== Prototype — branch `issue/optimize-gl`
+
+`81116cd` (2026-06-04) — `doc/optimize-gl.adoc`, a five-stage plan: direct
+GLX on the overlay window, raw BGRA upload, GPU downscale, a GPU texture cache
+with XDamage, pre-warm and instanced drawing. The document is in Russian and
+is not merged as such; this specification takes over its content.
+
+`93ebc6e` (2026-07-29) — work in progress towards stages 1–3: a minimal cgo
+binding `pkg/glx` (its own Xlib display, an FBConfig with a depth-32 ARGB
+visual, a direct context, `glXSwapBuffers`); the GL renderer draws into the
+overlay window's back buffer — no offscreen FBO, no MSAA resolve, no
+`glReadPixels`, no `XPutImage`, no CPU flip; thumbnails and icons cached as
+textures; `NewWindowAt` takes a visual ID; the selector rebinds the context
+when the overlay window is recreated; phase timings in `CaptureWindow`;
+`console/glxoverlay`, a standalone sample. The commit message says "builds,
+not benchmarked against the CPU path yet".
+
+Checked 2026-09-30 on a copy of the branch (`git archive`): `go build
+./cmd/qws`, `go vet ./...` and `go test ./...` pass. Not run, not measured.

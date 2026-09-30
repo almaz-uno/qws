@@ -1,0 +1,169 @@
+= 001 — rendering speed
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-09-30
+:status: draft; baseline not measured (T2), targets of K5–K7 open; nothing implemented
+:issue: 5
+
+== What and why
+
+Every frame qws shows is drawn on the CPU and sent to the X server as an
+image. The `cpu` renderer draws the scene with fogleman/gg and ships it as
+BGRA through `PutImage` in 200 KB strips, `CopyArea` and a blocking `Sync`.
+The `glx` renderer draws the scene on the GPU into an offscreen framebuffer,
+reads it back with `glReadPixels`, flips it on the CPU and sends it down the
+same path — and its picture is not the one `cpu` draws (research, "Visual
+parity"). The January 2026 profile attributes 80% of the process CPU time to
+`Selector.render` (research, "Prior measurements").
+
+The change makes switching faster — activation, every step, CPU work per
+frame — with `glx` as the fast path. Author's requirement (2026-09-30): `glx`
+shows exactly, bit for bit, what `cpu` shows. The `cpu` drawing code
+therefore produces the pixels for both renderers; `glx` only presents them
+through GLX on the overlay window, without the readback and `PutImage` path.
+The `cpu` renderer stays the reference and the fallback, and neither its
+picture nor its speed may get worse.
+
+The specification is a delta to `develop` at `2c59c26`. Unchanged: the
+layouts (carousel and grid) and their look as `cpu` draws it today, key and
+mouse handling, MRU order, window filtering, thumbnail capture (strategies,
+`scaling_algorithm`, the 512×512 cap, the snapshot routine), configuration
+keys, their meaning and defaults, the default renderer `cpu`.
+
+Branch `issue/optimize-gl` (`81116cd`, `93ebc6e`) is a prototype: what fits
+this specification is carried over stage by stage, and each stage is
+measured (plan). Issue #1, migration to Gio, is an alternative that stays
+open and is outside this specification.
+
+== Metrics
+
+All times are wall-clock, taken in-process with a monotonic clock.
+
+*P* — the end of presentation of a frame: for `cpu`, the reply to
+`conn.Sync()` after the `CopyArea` of the frame; for `glx`, the return of
+`glFinish()` after `glXSwapBuffers()`. At P the frame is in the overlay
+window's drawable; the compositor's own frame comes on top for both renderers
+and is not measured.
+
+M1 — activation latency:: From the entry to `handleKeyPress` for the
+activating `KeyPress` to P of the first frame. Measured with
+`behavior.showdelay` 0. Recorded by phases: M1.list — the window list,
+MRU sort and thumbnails from the cache; M1.show — `Selector.Show` up to the
+first `render` (active window, monitor, window creation, map, keyboard grab,
+modifier state); M1.draw — drawing the scene; M1.present — from the end of
+drawing to P. _Cold_ — the first activation after the process starts;
+_warm_ — every other.
+
+M2 — step latency:: From reading a navigation `KeyPress` in
+`handleEventsSync` to P of the resulting frame; phases M2.draw and
+M2.present.
+
+M3 — CPU work per frame:: M3.cpu — CPU time in the `Selector.render` subtree
+of a CPU profile (`--cpuprofile`) divided by the number of frames drawn in
+the session; M3.alloc — bytes allocated in the same subtree (`--memprofile`,
+`alloc_space`) divided by the same number.
+
+Session S1:: A measuring instance on environment E1 (research) with a key
+combination not grabbed by i3 or by the running instances. A script drives
+it with `xdotool`: 20 activations; in each, 23 steps forward through the 24
+windows, then `Escape`, so the desktop's focus does not change. One run of S1
+gives 20 samples of M1 (1 cold, 19 warm) and 460 of M2. Percentiles p50 and
+p95 are taken over the samples of a run; the baseline is three runs.
+
+Scene set Σ:: Fixed input data rendered without an X server: both layouts;
+selection at the first, a middle and the last card; hover on another card;
+an urgent window; a window without a thumbnail (placeholder); a window
+without an icon; a non-square icon; a long title (truncation); titles that
+need font fallback (Cyrillic, CJK); 1, 2 and 24 windows; dark and light
+theme. Fonts are fixed files, so that the digests do not depend on the host.
+
+== Behavior
+
+. *`renderer: glx`* draws the frame with the `cpu` drawing code and presents
+  it through GLX: the overlay window is created with the visual of a
+  double-buffered GLX FBConfig with a depth-32 ARGB visual; the frame is
+  uploaded into a texture and drawn 1:1 into the back buffer — nearest
+  sampling, no blending, no dithering — then `glXSwapBuffers`. No
+  `PutImage`, `CopyArea` or `Sync` on the frame path.
+. *The GPU-drawn scene* of today's `glx` (shaders, MSAA framebuffer,
+  `glReadPixels`) is removed together with the hidden GLFW window, and so is
+  its stale size after a monitor change. Users of `renderer: glx` see the
+  `cpu` picture.
+. *`renderer: cpu`* draws exactly the pixels it draws on `develop`, and
+  presents them as today.
+. *Failure to initialise GLX* — no GLX, no suitable FBConfig, no context —
+  falls back to `cpu` with a warning in the log, as today.
+. *The shared drawing code* may be sped up only by changes that keep every
+  pixel: both renderers gain from them.
+. *Configuration:* no new keys; `renderer` keeps its values `cpu` and `glx`
+  and its default `cpu`.
+
+Outside the specification: drawing the scene on the GPU; the prototype's
+stages 2–5 — raw BGRA upload and GPU downscale (off the frame path, and the
+latter changes pixels), the texture cache with XDamage, pre-warm, instanced
+drawing; changes to the `cpu` picture, including its quirks (side
+thumbnails and icons ignore card alpha, `shadow.blur` is not applied) — such
+a change is a specification of its own and changes both renderers at once.
+
+== Acceptance criteria
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| `cpu` picture unchanged: for every scene of Σ, the SHA-256 of the `cpu`
+  frame's pixels equals the digest recorded from the drawing code of
+  `develop` at `2c59c26`, before any change to it (T3). Test in
+  `pkg/carousel`.
+
+| K2
+| `glx` equals `cpu` in-process: for every scene of Σ, the back buffer of
+  `glx`, read back before the swap by a test-only hook, equals the `cpu`
+  frame byte for byte. Test in `pkg/carousel`; skips without a display with
+  GLX.
+
+| K3
+| `glx` equals `cpu` on screen: E1 with picom running; for three activations
+  of each renderer, the overlay window captured with `xwd -id` after the
+  first frame equals the frame the renderer produced, dumped by the
+  measuring build — `compare -metric AE` gives 0.
+
+| K4
+| Fallback: a GLX initialisation error gives the `cpu` renderer and a
+  warning in the log. Test of the backend selection with an injected
+  initialisation error.
+
+| K5
+| `glx` step latency: M2 p95 ≤ _open — fixed after T2_ (proposed: one
+  refresh period of E1, 6.94 ms). S1, three runs.
+
+| K6
+| `glx` activation latency: M1 warm p95 ≤ _open — fixed after T2_; M1 cold
+  reported. S1, three runs.
+
+| K7
+| `glx` CPU work per frame: M3.cpu and M3.alloc ≤ _open — fixed after T2_.
+  S1, three runs.
+
+| K8
+| `cpu` without regression: p50 of M1 warm, M2, M3.cpu and M3.alloc of `cpu`
+  do not exceed the baseline p50 by more than the spread between the three
+  baseline runs. S1, three runs.
+
+| K9
+| `go vet ./...` and `go test ./...` pass.
+|===
+
+== Open decisions
+
+. Targets of K5–K7 — fixed from the baseline (T2), before implementation
+  starts.
+. Whether M1.list — the window list rebuilt from X properties and `.desktop`
+  files on every activation (research, "Activation") — is in scope. It is
+  part of M1 but not of drawing; decided together with the targets, once T2
+  shows its share of M1.
+. Whether `glx` becomes the default renderer once K2–K8 hold.
+. What happens to branch `issue/optimize-gl` and its `doc/optimize-gl.adoc`
+  after the port: the branch is not merged as is.

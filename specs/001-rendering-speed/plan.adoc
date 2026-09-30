@@ -1,0 +1,134 @@
+= 001 — plan
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-09-30
+
+== Approach
+
+Drawing and presentation are separated. Drawing is always the `cpu` code in
+`pkg/carousel/renderer-cpu.go`; the `renderer` key chooses only how the
+overlay window presents a finished `*image.RGBA`:
+
+* `cpu` — `Window.DrawImage` as today: BGRA conversion, `PutImage` strips,
+  `CopyArea`, `Sync`;
+* `glx` — the overlay window is a GLX drawable; the frame is uploaded with
+  `TexSubImage2D` into a texture of the window size, drawn as one full-window
+  quad with `GL_NEAREST`, blending and `GL_DITHER` disabled, then
+  `glXSwapBuffers`.
+
+Bit-exactness of `glx` follows from the construction and is checked by K2
+and K3; bit-exactness of `cpu` against `develop` is checked by K1 after every
+change to the shared drawing code.
+
+== Files
+
+[cols="2,5"]
+|===
+| File | What changes
+
+| `pkg/glx/glx_linux.go`
+| New, from the prototype (`93ebc6e`): its own Xlib display, a
+  double-buffered FBConfig with a depth-32 ARGB visual, a direct context made
+  current on the overlay window, `glXSwapBuffers`. Unlike the prototype: no
+  multisampling (`GLX_SAMPLES` 0 — the quad is drawn 1:1), swap interval 0
+  through `GLX_EXT_swap_control` where available, so that the swap does not
+  wait for vertical blank. Test-only readback of the back buffer before the
+  swap (K2).
+
+| `pkg/carousel/window.go`
+| `NewWindowAt` takes a visual ID (from the prototype): the GLX presenter
+  passes the FBConfig visual and skips the pixmap and GC; `cpu` passes 0 and
+  keeps `DrawImage` unchanged.
+
+| `pkg/carousel/renderer-opengl.go`
+| Removed: the GPU scene, the hidden GLFW window, the MSAA framebuffer,
+  `glReadPixels`, the CPU flip. Replaced by the GLX presenter — texture,
+  quad, swap.
+
+| `pkg/carousel/factory.go`, `renderer.go`
+| The backend returns the `cpu` renderer and the presenter; a GLX
+  initialisation error gives the `cpu` presenter and a warning. The
+  initialisation is injectable for the test of K4.
+
+| `pkg/ui/selector.go`
+| The visual comes from the presenter; the GLX context is rebound when the
+  overlay window is recreated (from the prototype). Timings M1.show,
+  M1.draw, M1.present, M2 and a frame counter. Stage 3: placeholders drawn
+  once per activation.
+
+| `cmd/qws/root.go`
+| The start of M1 at the entry of `handleKeyPress`, M1.list. The frame dump
+  for K3.
+
+| `pkg/carousel/renderer-cpu.go`
+| Stage 3 only: savings that keep every pixel (research, "Bit-exact savings
+  on the CPU side").
+
+| `pkg/carousel/scenes_test.go`, `pkg/carousel/testdata/`
+| New: the scene set Σ, the digests of K1 with the digests of the font files
+  they were recorded with, the test of K2.
+
+| `console/glx`
+| Removed — a GLFW sample of the path being removed; `console/glxoverlay`
+  from the prototype, which uses `pkg/glx`, takes its place.
+
+| `go.mod`, `go.sum`
+| `github.com/go-gl/glfw` removed; `github.com/go-gl/gl` stays.
+
+| `specs/001-rendering-speed/measure.sh`
+| New: session S1 through `xdotool`, collection of the timings from the JSON
+  log, p50 and p95 per metric and phase.
+
+| `README.md`, `config.yaml.example`, `doc/configuration.asciidoc`
+| `renderer`: what `glx` does, that it shows the `cpu` picture, the fallback,
+  the build dependencies (OpenGL and X11 development packages, no GLFW).
+
+| `specs/constitution.adoc`
+| "Stack and layout": `glx` uses GLX through `pkg/glx` and `go-gl/gl`; GLFW
+  is gone.
+|===
+
+== Measurement
+
+Timings are logged at debug level (`-v`) as zerolog fields in milliseconds,
+one record per frame with the metric, the phase durations, the renderer and
+the activation number; `measure.sh` runs the instance with `log.format: json`.
+P for `glx` needs `glFinish()`, which is called only while timings are
+logged: without it the swap returns earlier, so the production path is not
+slower than the measured one.
+
+The digests of Σ depend on font files: the scenes use fonts from
+`golang.org/x/image/font/gofont` written to temporary files, except the
+placeholder, which hard-codes DejaVu Sans (`renderer-cpu.go:575`). The test
+records the SHA-256 of each font file next to the frame digests and skips —
+rather than fails — a scene whose font file on the host differs.
+
+== Stages
+
+Each stage leaves the program working and ends with K1, K9 and a run of S1
+recorded in `research.adoc`.
+
+. *Harness on `develop` code.* The timings, the frame counter, `measure.sh`;
+  baseline: three runs of S1 for `cpu`, one run for today's `glx`, for
+  reference only; then Σ and the digests of K1. No behaviour changes.
+. *GLX presenter.* `pkg/glx`, the window visual, the rebinding, the
+  presenter, removal of the GPU scene and of GLFW, the fallback, the frame
+  dump. K2–K4, then S1 for both renderers.
+. *Bit-exact savings in the shared drawing code,* one at a time, in the order
+  the profile of stage 2 suggests. Candidates: reusing the canvas between
+  frames; drawing placeholders once per activation; a cache of transformed
+  thumbnails by source image and transform. A candidate stays only if S1
+  shows a gain in M2 or M3 beyond the spread of the baseline runs; the result
+  of each is recorded in `research.adoc` either way.
+. *Results.* K1–K9 against the targets, the "Results" section and `:status:`
+  of the specification, the documentation.
+
+== What is reused from the prototype
+
+Taken: `pkg/glx` (with the changes above), the visual ID in `NewWindowAt`,
+the rebinding of the context on window recreation, `console/glxoverlay`.
+
+Not taken: the GPU scene in `renderer-opengl.go` with its texture caches and
+shaders — its picture is not the `cpu` one; the phase timings in
+`CaptureWindow` — capture is off the path of M1 and M2.
