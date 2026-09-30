@@ -3,7 +3,7 @@
 :toc-title: Contents
 :sectnums:
 :revdate: 2026-09-30
-:status: draft; nothing implemented
+:status: implemented 2026-09-30; K1–K5 met (section "Results"); not merged
 :issue: 10
 
 == What and why
@@ -67,6 +67,30 @@ it.
 | K5
 | `go vet ./...` and `go test ./...` pass.
 |===
+
+== Results
+
+2026-09-30, E1.
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | `TestScenes`: the 18 digests of specification 001 unchanged; the diff
+  of `testdata/scenes.json` adds 6 lines.
+| K2 | Six scenes with the header — `carousel-e1-header`,
+  `carousel-header-light`, `carousel-header-no-hostname` and the same for the
+  grid — recorded; `TestGLXPresenterMatchesCPU` passes on them.
+| K3 | Frames dumped on E1: the carousel shows `ws1` and the version at the
+  top left; the grid shows them above its first row of tiles. `measure.sh
+  k3` with the header: absolute error 0 in all six captures.
+| K4 | `BenchmarkE1Frame`, five runs: 35.1 ms without the header, 36.2 ms with
+  it (medians) — 1.1 ms.
+| K5 | `go vet ./...`, `go test ./...`.
+|===
+
+The version is `dev` in a plain `go build`; `make build` builds the version
+in once specification 004 is merged.
 
 == Open decisions
 
