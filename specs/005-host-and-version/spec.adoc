@@ -1,0 +1,73 @@
+= 005 — hostname and version in the switcher
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-09-30
+:status: draft; nothing implemented
+:issue: 10
+
+== What and why
+
+qws runs on several machines of the author, and the overlay does not say
+which machine it belongs to, nor which build of qws draws it. The author
+asked for the version at the top left of the overlay and, next to it, the
+current hostname in large letters (2026-09-30).
+
+The specification is a delta to `develop` with specification 001 merged
+(`e094c55`). It changes the picture of both renderers, which specification
+001 made one picture. Unchanged: everything else in the picture, the layouts
+and their input, the configuration.
+
+== Behavior
+
+. *The header*: in the top-left corner of the overlay, 24 px from its left
+  and top edges, the hostname (`os.Hostname`, as it is) in the text colour
+  at 0.9 of its alpha, at 2.5 times `appearance.font.size`; after it, with a
+  gap of 16 px and on the same baseline, the version — what `qws version`
+  prints — in the text colour at 0.6, at `appearance.font.size`. Without a
+  hostname only the version is drawn.
+. *Both layouts* draw it, right after the background, before the cards. In
+  the grid, the tiles are laid out below the band of the header — its top
+  margin, the line of the hostname and a gap of 16 px — instead of over the
+  whole window; the carousel keeps its geometry, its cards are well below
+  the band.
+. *No configuration*: the header is always drawn. Without a hostname and a
+  version — which only a test can arrange — nothing is drawn, and the
+  picture is that of specification 001.
+
+Interpretation, open to the author's correction: "large letters" is taken
+as a large font, not as capitals; the hostname is shown as the system gives
+it.
+
+== Acceptance criteria
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| The picture without a header is unchanged: the 18 digests of Σ recorded
+  by specification 001 stay as they are. `TestScenes`; the diff of
+  `testdata/scenes.json` only adds lines.
+
+| K2
+| Scenes with a header — both layouts, dark and light, the frame of E1, one
+  without a hostname — are recorded in `testdata/scenes.json`, and `glx`
+  equals `cpu` on them byte for byte (`TestGLXPresenterMatchesCPU`).
+
+| K3
+| On E1, a frame of each layout dumped by `--debug-dump-frames` shows `ws1`
+  and the version at the top left, and no grid tile under them — checked on
+  the dumped image.
+
+| K4
+| Cost: drawing the frame of E1 with the header takes at most 3 ms more than
+  without, in `BenchmarkE1Frame`.
+
+| K5
+| `go vet ./...` and `go test ./...` pass.
+|===
+
+== Open decisions
+
+. A configuration key to hide the header, if it turns out to be in the way.
