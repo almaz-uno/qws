@@ -3,7 +3,7 @@
 :toc-title: Contents
 :sectnums:
 :revdate: 2026-09-30
-:status: draft; nothing implemented
+:status: implemented 2026-09-30; K1–K6 met (section "Results"); not merged
 :issue: 7
 
 == What and why
@@ -48,12 +48,14 @@ then file, then defaults — and the file's location.
   precedence over it.
 . *`config init` and `config show`* write the keys qws reads: the
   multi-word ones with underscores.
-. *Files with joined keys*, as `config init` wrote them: each of the 12
-  joined keys is read as the key it stands for, so what such a file says
-  takes effect — in the author's configuration the snapshot interval becomes
-  1 s instead of 10 s. qws logs a warning for each joined key it finds,
-  naming the key to use. When a file has both, the key with underscores is
-  used, and the warning says the joined one is ignored.
+. *Files with joined keys*, as `config init` wrote them: every key whose
+  path has one of the 12 names joined — 17 of them, since `window_background`
+  and `window_padding` hold one-word keys too — is read as the key it stands
+  for, at the precedence of the file, so what such a file says takes effect:
+  in the author's configuration the snapshot interval becomes 1 s instead of
+  10 s. qws logs a warning for each joined key it finds, naming the key to
+  use. When a file has both, the key with underscores is used, and the
+  warning says the joined one is ignored.
 
 == Acceptance criteria
 
@@ -77,18 +79,40 @@ then file, then defaults — and the file's location.
   `mapstructure` name.
 
 | K4
-| Joined keys: a file with the 12 joined keys gives their values, and one
-  warning per key naming the key to use; with both forms of a key, the one
-  with underscores wins. Test.
+| Joined keys: a file with every key joined gives their values, and one
+  warning per joined key naming the key to use; with both forms of a key,
+  the one with underscores wins. Test.
 
 | K5
 | E1: `qws config show` with the author's file prints `snapshot_interval: 1s`
   and logs the warnings of its joined keys.
 
 | K6
-| `go vet ./...` and `go test ./...` pass; K1 of specification 001, the
-  reference digests, still holds.
+| `go vet ./...` and `go test ./...` pass.
 |===
+
+== Results
+
+2026-09-30, E1. The tests of K1–K4 were written first and did not build
+against `2c59c26`: `Load` had no warnings to return.
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | `TestEnvironment`.
+| K2 | `TestConfigVariable`.
+| K3 | `TestRoundTrip`, `TestTagNames`.
+| K4 | `TestJoinedKeys`: 17 joined keys, 17 warnings.
+| K5 | `qws config show` with the author's file: `snapshot_interval: 1s`, the
+  keys written with underscores, nine warnings for the nine joined keys of
+  the file; `QWS_APPEARANCE_RENDERER=glx qws config show` prints
+  `renderer: glx`.
+| K6 | `go vet ./...`, `go test ./...`.
+|===
+
+`config show` loaded the configuration twice — by `cobra.OnInitialize` and
+once more itself — and printed every warning twice; the second load is gone.
 
 == Open decisions
 

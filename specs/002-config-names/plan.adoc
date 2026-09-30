@@ -14,15 +14,17 @@
   layer under the keys they stand for, with `MergeConfigMap`, which keeps
   environment and flags above them; a warning per joined key.
 
-| `cmd/qws/root.go`
-| `initConfig`: without `--config`, the path from `QWS_CONFIG`.
+| `cmd/qws/root.go`, `cmd/qws/config.go`
+| `initConfig` logs the warnings of `Load` once logging is set up. `Load`
+  itself reads `QWS_CONFIG` when no file is given, so that the tests can
+  reach it. `config show` stops loading the configuration a second time.
 
 | `internal/config/config_test.go`
 | New: K1–K4.
 
-| `doc/configuration.asciidoc`, `README.md`
-| The environment variables as they are read; that files written by earlier
-  versions of `config init` are read, with warnings.
+| `doc/configuration.asciidoc`
+| Its environment variables were right all along; a note on files written by
+  earlier versions of `config init` and on `QWS_CONFIG`.
 |===
 
 The order: the tests of K1–K4 first, failing on `2c59c26`, then the code.
