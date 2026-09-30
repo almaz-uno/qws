@@ -22,5 +22,5 @@ timing, and the reference digests before anything that could change a pixel.
   the frame dump. Check: K1, K2, K3, K4, K9; S1 for both renderers recorded.
 . [x] T6. Bit-exact savings, one candidate per step. Check per step: K1, K2,
   K9 and S1; kept or dropped by the rule of the plan.
-. [ ] T7. Documentation and the constitution's stack section.
+. [x] T7. Documentation and the constitution's stack section.
 . [ ] T8. Final runs of S1, the "Results" section, `:status:`.

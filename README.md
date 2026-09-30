@@ -10,6 +10,21 @@ Inspired by [alttab](https://github.com/sagb/alttab) — the X11 window switcher
 go build -o qws ./cmd/qws
 ```
 
+The build needs cgo: a C compiler, `pkg-config` and the OpenGL and X11
+development packages (on Debian: `libgl-dev`, `libx11-dev`).
+
+## Renderers
+
+`appearance.renderer` (`-r`) chooses how frames reach the screen. Both
+renderers draw the frame with the same code, so they show exactly the same
+picture:
+
+- `cpu` (default) sends the frame to the X server with `PutImage`;
+- `glx` uploads the frame into an OpenGL texture and presents it on the
+  switcher window through GLX, which is faster. It needs a direct OpenGL 4.6
+  core context with a 32-bit ARGB visual; without one, qws logs a warning and
+  falls back to `cpu`.
+
 ## Usage
 
 ```bash
@@ -166,6 +181,7 @@ Phase 4 is **complete** ✅
 
 - `github.com/jezek/xgb` — X11 protocol handling
 - `github.com/fogleman/gg` — 2D/2.5D graphics rendering for carousel
+- `github.com/go-gl/gl` — OpenGL for the `glx` renderer
 - `github.com/spf13/cobra` — CLI framework
 - `github.com/spf13/viper` — Configuration management
 - `github.com/rs/zerolog` — Structured logging
