@@ -3,7 +3,7 @@
 :toc-title: Contents
 :sectnums:
 :revdate: 2026-09-30
-:status: T1–T6 done; K6 and K7 met, K5 not (M2 p95 141.7 of ≤ 100 ms); two more candidates proposed (research, T6)
+:status: T1–T6 done; on one run each, K5–K7 are met (research, T6); documentation (T7) and the final runs (T8) remain
 :issue: 5
 
 == What and why

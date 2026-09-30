@@ -410,8 +410,8 @@ baseline runs (M1 16.1 ms, M2 2.5 ms, M3.cpu 0.4 ms, M3.alloc 0.1 MB):
   −27 MB: kept;
 * `Expose` refreshes — M1, M2 and M3 per frame within the spread: it removes
   a frame per activation, which none of them counts. M1.ready, which does,
-  fell by 106 ms (`cpu`) and 116 ms (`glx`). Kept pending the author's
-  decision, since the rule predates M1.ready;
+  fell by 106 ms (`cpu`) and 116 ms (`glx`). Kept: the author added M1.ready
+  to the rule (2026-09-30);
 * placeholders once — M2 −2.8 and −3.1 ms, M3.cpu −4.5 and −4.0 ms: kept;
 * pixel buffer object — M2 −12 ms, presenting 28 → 22 ms: kept;
 * changed rows only — M2 −13 ms, presenting 22 → 8.5 ms, M3.cpu +0.6 ms for
@@ -432,7 +432,8 @@ anew on every frame, then shadows and pills; icons resampled by
 `transform_RGBA_NRGBA_Over` 18 ms, which is what varies with the step: some
 windows have large icons, and they are resampled on every frame; text 7 ms.
 
-Two candidates follow, neither in the list agreed at T4:
+Two candidates follow, neither in the list agreed at T4; the author added
+them (2026-09-30):
 
 * the background drawn once per window size and colour and copied into
   each new canvas — the first thing drawn on a transparent canvas, so its
@@ -441,6 +442,40 @@ Two candidates follow, neither in the list agreed at T4:
   so its pixels depend on what is under it; that is the window background,
   uniform there, and the prepared icon would be used only after checking
   that the canvas under it still is that colour.
+
+=== The two added candidates
+
+Checked by K1 and K2; for the icons, a flipped byte in the copy of a
+prepared icon failed all 9 carousel scenes, so Σ does go through the
+prepared icons. K3 for the last one: absolute error 0 in all six captures.
+S1 in one session, 20:08–20:23, 29 windows, one run per binary, `cefe771`
+again as the reference. p50 / p95, ms.
+
+[cols="3,2,2,2,2,2",options="header"]
+|===
+| Binary | M1 warm | M1.ready | M2 | M2.draw | M3.cpu / .alloc
+
+6+| `cpu`
+| `cefe771`, reference | 270.5 / 296.8 | 270.8 / 297.0 | 96.6 / 146.1 | 58.9 / 106.3 | 71.0 / 28.0
+| `8a9570b`, background once | 247.7 / 265.9 | 247.9 / 266.1 | 74.4 / 124.3 | 36.4 / 83.9 | 47.0 / 28.1
+| `ce14f5b`, icons in parallel | 201.0 / 218.4 | 201.2 / 218.6 | 72.4 / 98.9 | 34.2 / 58.8 | 29.4 / 27.9
+6+| `glx`
+| `cefe771`, reference | 279.9 / 299.6 | 282.0 / 301.8 | 89.7 / 136.2 | 61.1 / 107.5 | 61.7 / 14.0
+| `8a9570b`, background once | 257.5 / 288.2 | 259.3 / 290.0 | 64.7 / 113.9 | 36.6 / 85.0 | 38.8 / 14.0
+| `ce14f5b`, icons in parallel | 202.3 / 228.0 | 204.1 / 229.6 | 62.9 / 90.7 | 34.3 / 62.1 | 20.9 / 14.0
+|===
+
+* Background once — M2 −25 ms at p50 (`glx`), −22 (`cpu`), M3.cpu −23 and
+  −24 ms: kept.
+* Icons in parallel — M2 p50 within the spread, p95 −23 and −25 ms, M1 warm
+  −55 and −47 ms, M3.cpu −18 ms: kept. It is the tail that goes, as the step
+  profile predicted.
+* The reference binary ran slower in this session than in the previous one
+  (M2 p50 89.7 against 70.7 ms for `glx`) on the same number of windows;
+  comparisons stay within a session.
+* `glx` after T6, one run, against the targets: K5, M2 p95 90.7 of ≤ 100 ms;
+  K6, M1 warm p95 228.0 of ≤ 300 ms; K7, 20.9 of ≤ 70 ms and 14.0 of
+  ≤ 16 MB — all met; T8 decides on three runs.
 
 == Prior measurements
 

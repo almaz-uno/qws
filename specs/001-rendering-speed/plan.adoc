@@ -147,12 +147,21 @@ recorded in `research.adoc`.
 * `glx`: the upload through a pixel buffer object — 18 instead of 24 ms of
   the GPU finishing it in the experiment of T5;
 * `glx`: uploading only the band of rows that changed since the last frame,
-  which the texture still holds.
+  which the texture still holds;
+* the rounded window background drawn once per size and colour and copied
+  into each new canvas;
+* the icons of the visible cards resampled in parallel like the thumbnails,
+  onto the colour of the background under them, used only if the canvas
+  still has that colour there.
 --
 +
-A candidate stays only if S1 shows a gain in M1, M2 or M3 beyond the spread
-of the baseline runs; the result of each is recorded in `research.adoc`
-either way. Reusing the canvas between frames is not a candidate (author,
+The last two were added after the measurements of the first six, which left
+K5 unmet (author, 2026-09-30).
++
+A candidate stays only if S1 shows a gain in M1, M1.ready, M2 or M3 beyond
+the spread of the baseline runs; the result of each is recorded in
+`research.adoc` either way. M1.ready joined the rule after it was measured
+(author, 2026-09-30). Reusing the canvas between frames is not a candidate (author,
 2026-09-30).
 . *Results.* K1–K9 against the targets, the "Results" section and `:status:`
   of the specification, the documentation.
