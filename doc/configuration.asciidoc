@@ -105,6 +105,12 @@ viper.BindPFlag("keybindings.workspace_modifier",
 * Dots (`.`) separate nesting levels in YAML and are converted to underscores for ENV
 * CLI flags convert both dots and underscores to dashes for GNU/POSIX compliance
 * Viper handles all conversions transparently — just use the YAML key in code
+* `qws config init` of versions before specification `002-config-names` wrote
+  multi-word keys joined (`workspacemodifier`, `snapshotinterval`). qws reads
+  such a key as the one it stands for and logs a warning naming the key to use;
+  when a file has both, the key with underscores wins
+* `QWS_CONFIG` gives the path of the configuration file; `--config` takes
+  precedence over it
 
 == Configuration Categories
 
