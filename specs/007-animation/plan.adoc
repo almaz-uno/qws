@@ -1,0 +1,72 @@
+= 007 — plan
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-01
+
+== Approach
+
+The CPU draws layers, the GPU composes them. The layers of an activation:
+
+* the *base* — the canvas with the background and the header, without
+  cards (carousel) or without the selection (grid);
+* a *card layer* per window and integer offset — the card as
+  `drawWindowWithData` draws it at that offset, onto a transparent image of
+  its bounding box; drawn on demand, in parallel, and kept for the
+  activation;
+* the *selection layer* — the selection frame of the card at the centre, or
+  of a grid tile.
+
+The GLX presenter keeps them as textures, with mipmaps for downscaling, and
+draws a frame as quads with premultiplied blending,
+`BlendFunc(ONE, ONE_MINUS_SRC_ALPHA)`, in the z-order of the carousel. At
+rest it presents the frame `cpu` draws, as now; the CPU draws it while the
+animation runs.
+
+`cpu` keeps presenting the frames it draws, at once.
+
+== Files
+
+[cols="2,5"]
+|===
+| File | What changes
+
+| `pkg/ui/motion.go`
+| New: the position and its target, ease-out cubic, retargeting — pure, for
+  the tests of K8.
+
+| `pkg/ui/selector.go`
+| The event loop polls while an animation runs and draws a frame per refresh
+  period; steps set targets; the fades on show and on selection, with the
+  window activated first.
+
+| `pkg/carousel/layers.go`
+| New: the base, the card layers and the selection layer, from the drawing
+  code of `cpu`.
+
+| `pkg/carousel/present_glx.go`
+| The scene: textures of layers, quads with transforms and alpha, blending;
+  the frame at rest as now.
+
+| `pkg/carousel/present.go`
+| The presenter says whether it animates; `cpu` does not.
+
+| `pkg/x11/randr.go`
+| The refresh rate of the monitor.
+
+| `pkg/ui/timing.go`, `specs/001-rendering-speed/measure.sh`
+| Frame records of animations; session S2 and the summary of A1–A3.
+|===
+
+== Stages
+
+Each stage leaves the program working and ends with K1 of 001, K10 and, from
+stage 2 on, a run of S2 recorded in `research.adoc`.
+
+. *Harness*: the records and S2, measured on `develop` code, where every
+  "animation" is one frame.
+. *The step*: layers, the scene of the presenter, the motion and the loop —
+  K1, K2, K3, K4, K5, K8.
+. *The grid*: the selection frame sliding.
+. *The fades*: appearance and disappearance — K6.
+. *The author's review* on E1 — K9; then the results, and 1.0.0.

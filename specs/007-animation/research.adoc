@@ -1,0 +1,67 @@
+= 007 — research
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-01
+
+Facts the specification rests on, `develop` at `73cfd5c`, E1 as in
+specification 001 (29 windows, 2520×1400, 144 Hz).
+
+== The cost of a frame in motion
+
+A benchmark of `Draw3DCarouselWithData` on the E1 scene of Σ, 40 frames
+each, 2026-10-01:
+
+[cols="3,1",options="header"]
+|===
+| Frame | ms
+| static, offset 0 | 37.1
+| a fractional offset, the same every frame | 33.4
+| a new fractional offset every frame, as an animation gives | 40.1
+|===
+
+With presenting, about 8.5 ms on `glx` (specification 001, T6), a frame in
+motion drawn by the CPU takes some 42–49 ms: about 20–25 frames a second, 3
+or 4 frames in a step of 150 ms. The third row is dearer because every new
+offset gives the titles a new font size, and `NewMultiFallbackFace` makes
+and caches a face for each size — without bound in an animation.
+
+Much of a card depends on its offset, not only its place: the scale, the
+alpha, the font size of the title and the workspace, the paddings and radii
+of their pills, and the truncation of the title, `max(int(30/scale), 10)`
+runes (`renderer-cpu.go:539`). A card drawn at one offset and scaled to
+another is therefore not the card of that offset; drawn at the two integer
+offsets around a fractional one and cross-faded, it ends as the card of the
+target offset.
+
+== Pacing
+
+An experiment on a copy of the code, 2026-10-01: an off-screen override-
+redirect window with the GLX context of `pkg/glx`, 300 swaps each followed
+by `glFinish`.
+
+[cols="1,3",options="header"]
+|===
+| Swap interval | Interval between swaps
+| 1 | p50 999.8 ms — the driver throttles a window that is not on screen to
+  one swap a second
+| 0 | p50 0.14 ms — no pacing at all
+|===
+
+The overlay is on screen, where an interval of 1 may well follow vertical
+blank; the tests of specification 001 draw off screen, and a compositor adds
+its own frame anyway. Pacing by a timer at the refresh period does not
+depend on either.
+
+== The keyboard
+
+`xset q` on ws1: autorepeat after 500 ms, 33 repeats a second — a held step
+key sets a new target every 30 ms, less than the 150 ms of a step.
+
+== What exists
+
+`Draw3DCarouselWithData` takes `animOffset`, and the geometry of a card is
+continuous in it (`carouselCard`); `Selector.animateTransition` sets it to 0
+and draws once — the animation was planned and never done.
+`handleEventsSync` blocks on `WaitForEvent`; an animation needs frames while
+it waits.
