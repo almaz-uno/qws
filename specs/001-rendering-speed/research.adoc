@@ -16,9 +16,12 @@ Facts the specification rests on. Code references are to `develop` at
 | Compositor | picom `--backend glx --vsync`
 | GPU | NVIDIA GeForce RTX 4080 SUPER, driver 580.105.08, OpenGL 4.6 core
 | Display | one monitor, DP-0, 2560×1440 at 144 Hz — refresh period 6.94 ms
-| Windows | 24 client windows (`wmctrl -l`, 2026-09-30)
-| Author's configuration | `appearance.thumbnail` 512×512, `renderer` not set
-  (default `cpu`), `behavior.snapshotinterval` 1s, `behavior.showdelay` 0s
+| Windows | 24 client windows in qws's list, 23 of them outside the i3
+  scratchpad (2026-09-30)
+| Overlay window | 2520×1400 (padding 20 px) — a frame is 14.1 MB of RGBA
+| Author's configuration | carousel layout, `appearance.thumbnail` 512×512,
+  `appearance.font.size` 20, `renderer` not set (default `cpu`),
+  `behavior.snapshotinterval` 1s, `behavior.showdelay` 0s
 | Tools | `xdotool`, `xwd`, ImageMagick `import` and `compare`, `go tool pprof`
 |===
 
@@ -26,7 +29,8 @@ Two qws instances run on ws1 day to day (`/usr/local/bin/qws`, built
 2026-06-29): one with `--keybindings-key grave --windows-workspace current`,
 one with `--pprof=localhost:6061` on the default `Alt+Tab`. X11 lets one
 client grab a key combination, so a measuring instance needs a combination
-neither of them, nor i3, grabs.
+neither of them, nor i3, grabs: every `Super+F<n>` tried failed with
+`BadAccess`; `Alt+F11` is free, and `measure.sh` uses it.
 
 == Pipeline on develop
 
@@ -187,6 +191,105 @@ Facts the plan can use without changing a single pixel of the `cpu` output:
   (k/255 → k).
 
 Whether each saving is worth its code is decided by measurement (plan).
+
+== Baseline — T2
+
+Build `44e8cb1` (timings on the drawing code of `2c59c26`), E1, session S1
+by `measure.sh`: 20 activations, 23 steps each. Raw logs, profiles and
+summaries are kept outside the repository, in
+`~/.cache/qws-measure/2026-09-30/`.
+
+Two sets were taken on 2026-09-30. In the first (16:51–17:00) run `cpu-1`
+got key and mouse input from the desk at 16:51:24–29 — one activation
+filtered to one window by `Ctrl`, extra frames from mouse motion — so the
+set is not used. The second (17:02–17:12), with the author away from the
+keyboard, is the baseline: every run has exactly 20 activation frames, 20
+frames from `Expose` and 460 step frames, and no wait for a frame timed out.
+
+=== Latency, ms
+
+p50 / p95 over the samples of a run; M1 cold is a single sample per run.
+
+[cols="3,2,2,2,2",options="header"]
+|===
+| Metric | cpu-1 | cpu-2 | cpu-3 | glx (develop)
+
+| M1 cold | 433.6 | 533.7 | 454.4 | 418.5
+| M1 warm | 524.5 / 558.9 | 512.9 / 549.2 | 508.5 / 581.2 | 475.0 / 544.1
+| — list | 137.1 / 157.7 | 132.3 / 156.3 | 134.5 / 148.8 | 139.9 / 158.4
+| — show | 6.1 / 15.9 | 6.0 / 9.2 | 6.3 / 19.9 | 6.5 / 10.2
+| — draw | 130.7 / 149.3 | 134.1 / 150.9 | 131.8 / 149.1 | 111.6 / 139.9
+| — present | 247.6 / 276.3 | 244.9 / 265.4 | 241.4 / 312.9 | 216.4 / 267.7
+| M2 | 228.6 / 272.9 | 230.8 / 273.3 | 228.3 / 272.2 | 238.6 / 271.0
+| — draw | 103.4 / 143.0 | 103.6 / 143.1 | 102.9 / 143.9 | 111.5 / 133.4
+| — present | 107.6 / 127.2 | 108.2 / 129.0 | 106.9 / 126.2 | 108.7 / 137.2
+|===
+
+=== CPU work per frame
+
+[cols="3,2,2,2,2",options="header"]
+|===
+| Metric | cpu-1 | cpu-2 | cpu-3 | glx (develop)
+
+| M3.cpu, ms | 202.2 | 202.6 | 202.2 | 205.3
+| M3.alloc, MB | 56.9 | 56.9 | 56.8 | 75.3
+|===
+
+Spread of the p50 between the three `cpu` runs — the tolerance of K8: M1
+warm 16.1 ms, M2 2.5 ms, M3.cpu 0.4 ms, M3.alloc 0.1 MB.
+
+=== Where the time goes
+
+CPU profile of `cpu-2`, subtree of `Selector.render`, divided by its 500
+frames:
+
+[cols="4,1",options="header"]
+|===
+| Function | ms per frame
+
+| `Selector.render` | 202.6
+| `carousel.Draw3DCarouselWithData` — drawing the scene | 109.0
+| — `x/image/draw.(*Kernel).Transform` — gg's `DrawImage` | 71.6
+| — — `transform_RGBA_RGBA_Src` — thumbnails, opaque, so _src_ | 52.2
+| — — `transform_RGBA_NRGBA_Over` — icons | 13.4
+| — `freetype/raster.(*Rasterizer).Rasterize` — gg's `Fill`: shadows,
+  frames, pills, background | 34.0
+| — `gg.(*Context).MeasureString` | 5.5
+| `carousel.(*Window).DrawImage` — presenting | 88.5
+| — `image.(*RGBA).At`, one interface call per pixel | 54.6
+| — — `runtime.convTnoptr`, a heap-allocated colour per pixel | 39.1
+|===
+
+Allocations of the same subtree, per frame: 56.9 MB, of which
+`Window.DrawImage` 41.1 MB — the BGRA buffer 13.6 MB, the copy into the
+`PutImage` requests 13.9 MB, the boxed colours of `At` the rest — and the
+canvas, `gg.NewContext`, 13.7 MB.
+
+=== Findings
+
+* A step is CPU-bound on one goroutine: M3.cpu 202 ms against M2 p50
+  229 ms. The rest of `present` is waiting for the X server: a frame goes as
+  74 strips of 19 rows, and `PutImageChecked(…).Check()` makes each strip a
+  round trip.
+* Presenting costs as much as drawing — M2.present ≈ M2.draw ≈ 105 ms — and
+  most of it is the per-pixel `At` in the BGRA conversion.
+* Today's `glx` is no faster than `cpu`: M2 p50 239 against 229 ms. It
+  draws on the GPU but reads the frame back and presents it through the same
+  `DrawImage`; in its profile `drawRectangleGL`, which rasterises rectangles
+  on the CPU and uploads them each frame, is 75 ms per frame.
+* The first frame of an activation presents in about 245 ms, more than twice
+  a step's 108 ms, with the same frame size and path. Not explained.
+* Mapping the overlay window brings an `Expose`, and the selector draws the
+  whole frame again — about 280 ms — before it reads the first key of the
+  activation. S1 waits for this frame before sending keys, so M1 and M2 do
+  not show it, but a user who steps right after activation waits for it.
+* M1.list was 76 ms p50 in the first set and 135 ms in the second, with M2
+  and M3 unchanged. Its CPU time is the same in both, about 48 ms per
+  activation; the rest is waiting for the X server. What changed is not
+  identified. It is 26% of M1 warm.
+* M1 cold differs from M1 warm by the window creation and, for `glx`, the
+  GL initialisation: 223 ms of M1.show in the first set, 11 ms in the second
+  — probably the driver's shader cache, not verified.
 
 == Prior measurements
 

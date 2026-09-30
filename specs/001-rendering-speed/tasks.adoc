@@ -6,10 +6,10 @@
 The order matters: the baseline is taken before anything that could change a
 timing, and the reference digests before anything that could change a pixel.
 
-. [ ] T1. Timings M1 (with phases), M2 and the frame counter; `measure.sh`.
+. [x] T1. Timings M1 (with phases), M2 and the frame counter; `measure.sh`.
   No behaviour changes. Check: one run of S1 gives 20 M1 samples and 460 M2
   samples.
-. [ ] T2. Baseline on E1: three runs of S1 for `cpu`, one for today's `glx`;
+. [x] T2. Baseline on E1: three runs of S1 for `cpu`, one for today's `glx`;
   CPU and memory profiles of the runs. Result: tables in `research.adoc`,
   including the share of M1.list in M1.
 . [ ] T3. Scene set Σ and the K1 digests recorded from the drawing code of

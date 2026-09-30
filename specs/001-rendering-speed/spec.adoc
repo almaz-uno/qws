@@ -3,7 +3,7 @@
 :toc-title: Contents
 :sectnums:
 :revdate: 2026-09-30
-:status: draft; baseline not measured (T2), targets of K5–K7 open; nothing implemented
+:status: draft; timings in place (T1), baseline measured (T2); targets of K5–K7 open (T4); presenter not implemented
 :issue: 5
 
 == What and why
