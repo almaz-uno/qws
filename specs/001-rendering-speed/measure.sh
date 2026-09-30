@@ -178,10 +178,16 @@ summary() {
 		printf 'M2      %-10s ' "$f"
 		frames "select(.cause == \"key\") | .$f" | pct
 	done
+	# Ready for the first step: the end of the first frame after the one of
+	# the activation, the Expose that mapping causes
+	printf 'M1 ready           '
+	jq -rs 'map(select(.message == "Frame")) | group_by(.activation)[]
+		| map(select(.cause == "event" or .cause == "refresh"))[0].activation_ms // empty' \
+		"$out/log.json" | pct
 
 	# glFinish runs only while timings are logged, and NVIDIA busy-waits in it:
 	# its samples are not CPU work of a frame
-	n=$(frames .cause | wc -l)
+	n=$(frames 'select(.cause != "refresh") | .cause' | wc -l)
 	cpu=$(go tool pprof -top -cum -unit=ms -ignore='_Cfunc_glowFinish' "$out/qws" "$out/cpu.prof" 2>/dev/null |
 		awk -v f="$render_fn" '$NF == f { sub(/ms$/, "", $4); print $4 }')
 	alloc=$(go tool pprof -sample_index=alloc_space -top -cum -unit=B "$out/qws" "$out/mem.prof" 2>/dev/null |

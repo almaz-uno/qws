@@ -501,7 +501,7 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 
 		case xproto.ExposeEvent:
 			if e.Window == s.window.GetWindowID() {
-				s.render(thumbnails)
+				s.refresh(thumbnails)
 			}
 
 		case xproto.MotionNotifyEvent:
@@ -591,6 +591,21 @@ func (s *Selector) render(thumbnails []image.Image) {
 	end := time.Now()
 	s.dumpFrame(img)
 	s.logFrame(drawStart, drawEnd, end)
+}
+
+// refresh shows the last frame again after an Expose: the presenter still
+// holds it, so it is not drawn anew
+func (s *Selector) refresh(thumbnails []image.Image) {
+	start := time.Now()
+	ok, err := s.presenter.Refresh()
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to refresh frame")
+	}
+	if !ok {
+		s.render(thumbnails)
+		return
+	}
+	s.logRefresh(start, time.Now())
 }
 
 // handleKeyPressSimple handles a key press event

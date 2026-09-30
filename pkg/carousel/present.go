@@ -21,24 +21,39 @@ type Presenter interface {
 	// is in the window's drawable
 	Present(img *image.RGBA) error
 
+	// Refresh shows the last presented frame again, without the frame itself;
+	// false when the bound window has none yet
+	Refresh() (bool, error)
+
 	// Close releases the presenter's resources
 	Close()
 }
 
 // x11Presenter sends frames to the window with PutImage through its pixmap
 type x11Presenter struct {
-	window *Window
+	window    *Window
+	presented bool // the window's pixmap holds a frame
 }
 
 func (p *x11Presenter) VisualID() xproto.Visualid { return 0 }
 
 func (p *x11Presenter) Bind(w *Window) error {
 	p.window = w
+	p.presented = false
 	return nil
 }
 
 func (p *x11Presenter) Present(img *image.RGBA) error {
-	return p.window.DrawImage(img)
+	err := p.window.DrawImage(img)
+	p.presented = err == nil
+	return err
+}
+
+func (p *x11Presenter) Refresh() (bool, error) {
+	if !p.presented {
+		return false, nil
+	}
+	return true, p.window.Refresh()
 }
 
 func (p *x11Presenter) Close() {}

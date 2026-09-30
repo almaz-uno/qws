@@ -40,7 +40,8 @@ type glxPresenter struct {
 	window  uint32
 	width   int
 	height  int
-	ready   bool // GL objects created
+	ready     bool // GL objects created
+	presented bool // the texture holds the last frame of the bound window
 	program uint32
 	vao     uint32
 	texture uint32
@@ -74,6 +75,7 @@ func (p *glxPresenter) Bind(w *Window) error {
 		}
 	}
 	p.window = id
+	p.presented = false
 
 	width, height := int(w.width), int(w.height)
 	if width != p.width || height != p.height {
@@ -130,13 +132,28 @@ func (p *glxPresenter) Present(img *image.RGBA) error {
 	if err := p.draw(img); err != nil {
 		return err
 	}
+	p.presented = true
+	p.swap()
+	return nil
+}
+
+func (p *glxPresenter) Refresh() (bool, error) {
+	if !p.presented {
+		return false, nil
+	}
+	gl.BindTexture(gl.TEXTURE_2D, p.texture)
+	gl.DrawArrays(gl.TRIANGLES, 0, 3)
+	p.swap()
+	return true, nil
+}
+
+func (p *glxPresenter) swap() {
 	p.ctx.SwapBuffers(p.window)
 	if timingEnabled() {
 		// The end of presentation, P, of the frame timings: the swap returns
 		// before the GPU is done
 		gl.Finish()
 	}
-	return nil
 }
 
 // draw uploads the frame and draws it into the back buffer

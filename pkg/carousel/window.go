@@ -337,6 +337,25 @@ func (w *Window) DrawImage(img image.Image) error {
 	return nil
 }
 
+// Refresh copies the pixmap, which holds the last frame, to the window again
+func (w *Window) Refresh() error {
+	err := xproto.CopyAreaChecked(
+		w.conn,
+		xproto.Drawable(w.pixmap),
+		xproto.Drawable(w.window),
+		w.gc,
+		0, 0, // src x, y
+		0, 0, // dst x, y
+		w.width,
+		w.height,
+	).Check()
+	if err != nil {
+		return fmt.Errorf("failed to copy area: %w", err)
+	}
+	w.conn.Sync()
+	return nil
+}
+
 // toBGRA converts rows [y0, y1) of img, counted from its top, into the bytes
 // PutImage takes: blue, green, red, then alpha for depth 32 or a zero pad
 // byte otherwise. An *image.RGBA is read from Pix directly; any other image
