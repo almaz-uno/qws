@@ -1,6 +1,7 @@
 package carousel
 
 import (
+	"bytes"
 	"fmt"
 	"image"
 	"unsafe"
@@ -42,7 +43,8 @@ type glxPresenter struct {
 	width   int
 	height  int
 	ready     bool // GL objects created
-	presented bool // the texture holds the last frame of the bound window
+	presented bool        // the texture holds the last frame of the bound window
+	last      *image.RGBA // that frame
 	program uint32
 	vao     uint32
 	texture uint32
@@ -78,6 +80,7 @@ func (p *glxPresenter) Bind(w *Window) error {
 	}
 	p.window = id
 	p.presented = false
+	p.last = nil
 
 	width, height := int(w.width), int(w.height)
 	if width != p.width || height != p.height {
@@ -165,11 +168,39 @@ func (p *glxPresenter) draw(img *image.RGBA) error {
 	if b.Dx() != p.width || b.Dy() != p.height {
 		return fmt.Errorf("frame %dx%d does not match the window %dx%d", b.Dx(), b.Dy(), p.width, p.height)
 	}
-	if err := p.upload(img, 0, p.height); err != nil {
-		return err
+	y0, y1 := 0, p.height
+	if p.last != nil && &p.last.Pix[0] != &img.Pix[0] {
+		// The texture holds the last frame: only the rows that differ go
+		y0, y1 = changedRows(p.last, img)
 	}
+	if y0 < y1 {
+		if err := p.upload(img, y0, y1); err != nil {
+			p.last = nil
+			return err
+		}
+	}
+	p.last = img
 	gl.DrawArrays(gl.TRIANGLES, 0, 3)
 	return nil
+}
+
+// changedRows is the band of rows [y0, y1) outside which two frames of one
+// size are equal; y0 == y1 when they are equal everywhere
+func changedRows(a, b *image.RGBA) (int, int) {
+	h := b.Bounds().Dy()
+	row := func(img *image.RGBA, y int) []byte {
+		r := img.Bounds()
+		return img.Pix[img.PixOffset(r.Min.X, r.Min.Y+y):][:4*r.Dx()]
+	}
+	y0 := 0
+	for y0 < h && bytes.Equal(row(a, y0), row(b, y0)) {
+		y0++
+	}
+	y1 := h
+	for y1 > y0 && bytes.Equal(row(a, y1-1), row(b, y1-1)) {
+		y1--
+	}
+	return y0, y1
 }
 
 // upload copies rows [y0, y1) of the frame into the texture through the pixel

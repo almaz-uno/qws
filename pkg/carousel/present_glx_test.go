@@ -51,6 +51,7 @@ func TestGLXPresenterMatchesCPU(t *testing.T) {
 		}
 	}()
 
+	var bound *Window
 	for _, sc := range scenes() {
 		fonts := []string{goFont}
 		if sc.host {
@@ -61,6 +62,8 @@ func TestGLXPresenterMatchesCPU(t *testing.T) {
 			fonts = append(fonts, fontFallback)
 		}
 
+		// Scenes of one size follow each other in one window, so that all but
+		// the first upload only the rows that changed
 		size := image.Pt(sc.width, sc.height)
 		w := windows[size]
 		if w == nil {
@@ -73,8 +76,11 @@ func TestGLXPresenterMatchesCPU(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if err := p.Bind(w); err != nil {
-			t.Fatal(err)
+		if w != bound {
+			if err := p.Bind(w); err != nil {
+				t.Fatal(err)
+			}
+			bound = w
 		}
 
 		frame := drawScene(sc, fonts)
