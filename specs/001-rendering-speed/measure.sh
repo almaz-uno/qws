@@ -75,7 +75,9 @@ run() {
 	} >"$out/meta"
 	cp "$qws" "$out/qws"
 
-	env 'QWS_LOG.FORMAT=json' "$out/qws" -v -r "$renderer" -m Alt -k "$KEY" \
+	# Both names of the variable: the dotted one is what Viper reads without a
+	# key replacer, the other what it reads with one (002-config-names)
+	env 'QWS_LOG.FORMAT=json' QWS_LOG_FORMAT=json "$out/qws" -v -r "$renderer" -m Alt -k "$KEY" \
 		--behavior-show-delay 0 \
 		--cpuprofile "$out/cpu.prof" --memprofile "$out/mem.prof" \
 		2>"$log" &
@@ -116,7 +118,7 @@ k3() {
 	for renderer in cpu glx; do
 		mkdir -p "$out/$renderer"
 		log=$out/$renderer/log.json
-		env 'QWS_LOG.FORMAT=json' "$qws" -v -r "$renderer" -m Alt -k "$KEY" \
+		env 'QWS_LOG.FORMAT=json' QWS_LOG_FORMAT=json "$qws" -v -r "$renderer" -m Alt -k "$KEY" \
 			--debug-dump-frames "$out/$renderer" 2>"$log" &
 		pid=$!
 		trap 'xdotool keyup alt; kill -INT '"$pid"' 2>/dev/null || true' EXIT
