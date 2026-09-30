@@ -21,7 +21,9 @@ Facts the specification rests on. Code references are to `develop` at
 | Overlay window | 2520×1400 (padding 20 px) — a frame is 14.1 MB of RGBA
 | Author's configuration | carousel layout, `appearance.thumbnail` 512×512,
   `appearance.font.size` 20, `renderer` not set (default `cpu`),
-  `behavior.snapshotinterval` 1s, `behavior.showdelay` 0s
+  `behavior.showdelay` 0s. The file also says `snapshotinterval: 1s`, but
+  qws reads `snapshot_interval`, so the default, 10 s, is in effect
+  (`qws config show`; found after T8, specification `002-config-names`)
 | Tools | `xdotool`, `xwd`, ImageMagick `import` and `compare`, `go tool pprof`
 |===
 

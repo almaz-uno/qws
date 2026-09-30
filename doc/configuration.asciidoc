@@ -394,7 +394,7 @@ log:
 | `--appearance-renderer` / `-r`
 | `QWS_APPEARANCE_RENDERER`
 | `string`
-| `cpu`
+| `glx`
 | How frames reach the screen: `cpu` sends them with `PutImage`, `glx` presents them through GLX from an OpenGL texture. Both draw the frame with the same code and show the same picture; `glx` needs a direct OpenGL 4.6 core context with a 32-bit ARGB visual and falls back to `cpu` with a warning without one
 
 | `appearance.thumbnail.width`

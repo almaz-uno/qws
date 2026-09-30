@@ -29,7 +29,8 @@ The specification is a delta to `develop` at `2c59c26`. Unchanged: the
 layouts (carousel and grid) and their look as `cpu` draws it today, key and
 mouse handling, MRU order, window filtering, thumbnail capture (strategies,
 `scaling_algorithm`, the 512×512 cap, the snapshot routine), configuration
-keys, their meaning and defaults, the default renderer `cpu`.
+keys, their meaning and defaults except the default renderer, which becomes
+`glx` (section "Decisions").
 
 Branch `issue/optimize-gl` (`81116cd`, `93ebc6e`) is a prototype: what fits
 this specification is carried over stage by stage, and each stage is
@@ -117,8 +118,10 @@ the digests were recorded with.
   falls back to `cpu` with a warning in the log, as today.
 . *The shared drawing code* may be sped up only by changes that keep every
   pixel: both renderers gain from them.
-. *Configuration:* no new keys; `renderer` keeps its values `cpu` and `glx`
-  and its default `cpu`.
+. *Configuration:* no new keys; `renderer` keeps its values `cpu` and `glx`.
+  Its default becomes `glx` once K2–K8 hold: a configuration that sets
+  `renderer` keeps what it sets; one that does not gets `glx`, or `cpu` with
+  a warning where GLX cannot be initialised.
 
 Outside the specification: drawing the scene on the GPU; the prototype's
 stages 2–5 — raw BGRA upload and GPU downscale (off the frame path, and the
@@ -126,8 +129,8 @@ latter changes pixels), the texture cache with XDamage, pre-warm, instanced
 drawing; changes to the `cpu` picture, including its quirks (side
 thumbnails and icons ignore card alpha, `shadow.blur` is not applied) — such
 a change is a specification of its own and changes both renderers at once;
-the window list collection, M1.list — specification 002 (author's decision,
-2026-09-30).
+the window list collection, M1.list — a specification of its own,
+`003-window-list` (author's decision, 2026-09-30).
 
 == Acceptance criteria
 
@@ -238,12 +241,15 @@ Notes:
 
 Author, 2026-09-30, from the baseline (T4): the targets of K5–K7 as above —
 a one-refresh step (6.94 ms) is out of reach while the CPU draws every pixel
-(research, "Where the time goes"); the window list collection is left to
-specification 002; the presentation of `cpu` without the per-pixel `At` and
-`Expose` without redrawing join stage 3.
+(research, "Where the time goes"); the window list collection is left to a
+specification of its own, `003-window-list`; the presentation of `cpu`
+without the per-pixel `At` and `Expose` without redrawing join stage 3.
 
-== Open decisions
+Author, 2026-09-30, from the measurements of T6: the background drawn once
+and the icons resampled in parallel join stage 3; M1.ready joins the rule of
+the plan.
 
-. Whether `glx` becomes the default renderer once K2–K8 hold.
-. What happens to branch `issue/optimize-gl` and its `doc/optimize-gl.adoc`
-  after the port: the branch is not merged as is.
+Author, 2026-09-30, from the results: `glx` becomes the default renderer;
+branch `issue/optimize-gl` is deleted — what fits this specification has
+been carried over, and its `doc/optimize-gl.adoc` lives on in `research.adoc`
+and `plan.adoc`.

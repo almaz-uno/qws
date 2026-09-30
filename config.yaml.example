@@ -15,11 +15,11 @@ appearance:
   layout: carousel
 
   # Renderer backend: how frames reach the screen; both show the same picture
-  #   - "cpu" - PutImage to the X server (default)
-  #   - "glx" - an OpenGL texture presented through GLX, faster; needs a direct
-  #             OpenGL 4.6 core context with a 32-bit ARGB visual, else falls
-  #             back to "cpu" with a warning
-  renderer: cpu
+  #   - "glx" - an OpenGL texture presented through GLX (default, faster);
+  #             needs a direct OpenGL 4.6 core context with a 32-bit ARGB
+  #             visual, else falls back to "cpu" with a warning
+  #   - "cpu" - PutImage to the X server
+  renderer: glx
 
   thumbnail:
     width: 256

@@ -19,11 +19,11 @@ development packages (on Debian: `libgl-dev`, `libx11-dev`).
 renderers draw the frame with the same code, so they show exactly the same
 picture:
 
-- `cpu` (default) sends the frame to the X server with `PutImage`;
-- `glx` uploads the frame into an OpenGL texture and presents it on the
-  switcher window through GLX, which is faster. It needs a direct OpenGL 4.6
-  core context with a 32-bit ARGB visual; without one, qws logs a warning and
-  falls back to `cpu`.
+- `glx` (default) uploads the frame into an OpenGL texture and presents it on
+  the switcher window through GLX, which is faster. It needs a direct OpenGL
+  4.6 core context with a 32-bit ARGB visual; without one, qws logs a warning
+  and falls back to `cpu`;
+- `cpu` sends the frame to the X server with `PutImage`.
 
 ## Usage
 
