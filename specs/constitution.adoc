@@ -64,18 +64,20 @@ decision recorded there says so and updates the document in the same change.
 
 * Go (version in `go.mod`), module `github.com/almaz-uno/qws`. Target — X11;
   the X protocol is spoken through `github.com/jezek/xgb`.
-* The build needs cgo: the `glx` renderer (`pkg/carousel/renderer-opengl.go`)
-  uses `go-gl/gl` and `go-gl/glfw`, so a C toolchain and the OpenGL and GLFW
-  development packages are required. The `cpu` renderer, the default, is pure
-  Go.
+* The build needs cgo: the GLX presenter of the `glx` renderer (`pkg/glx`,
+  `pkg/carousel/present_glx.go`) calls GLX through cgo and OpenGL through
+  `go-gl/gl`, so a C toolchain, `pkg-config` and the OpenGL and X11
+  development packages are required. GLFW is not used (specification
+  `001-rendering-speed`).
 * Command line — Cobra (`cmd/qws`: the switcher itself, `config init|show|path`,
   `version`); configuration — Viper (`internal/config`).
 * `cmd/qws` — the program; `internal/config` — configuration; `pkg/<package>` —
   one package per responsibility: `carousel` (rendering, fonts), `composite`
   (thumbnail capture), `focus`, `keygrab` (with `keysyms.yaml`), `mru`, `ui`,
   `x11`.
-* `console/` — standalone diagnostic programs (`capture`, `glx`), not part of
-  the qws binary; they use the standard `log` package.
+* `console/` — standalone diagnostic programs, not part of the qws binary:
+  `capture` (window capture), `glxoverlay` (the GLX presenter's mechanism
+  alone), `framecmp` (criterion K3 of `001-rendering-speed`).
 * Logging — zerolog, `github.com/rs/zerolog/log`, with structured fields
   instead of the standard `log` package (`AGENTS.md`).
 * Build — `make build` (binary `./qws`, ignored by git), tests — `make test`

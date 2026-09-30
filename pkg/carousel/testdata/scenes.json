@@ -1,0 +1,25 @@
+{
+  "fonts": {
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf": "abdc775b21b1bc470d50c97e790d276f2054b7504e56e5bd3e64f48d68582322"
+  },
+  "scenes": {
+    "carousel-1": "34221a63979dca27b47dc1ffd4d86b3d89183f46d1a05818b94274691260084e",
+    "carousel-2": "68ef1652c9e126fa3e6b2704a90f6b885a15bcd423a86ff3d5ce1954d729feef",
+    "carousel-24-first": "8783e2f2ef4043ef44e51e2e03e3af86454fadefa9e6b2df9bdb0b1b6362215e",
+    "carousel-24-last": "f9c5c5190464d6bbe4ec0a010bddcd928835df023efd0022b14a873aaee3abec",
+    "carousel-24-middle-hover": "f2d0ab794712b10266a69652c884c5c016a4c219ee9eec53bfd23a1164088e8f",
+    "carousel-24-middle-light": "ee9871de71919d1e505b95c323adc60f118af664e79e2620190d450369400c08",
+    "carousel-e1-24-second": "683d31ea2c1d0b6f1c23c01aeb6bff873aa82280c68b5b47d15a3b213ca35ec0",
+    "carousel-host": "6790642e8dd39461e7783847677e2c9cee2f7d3c44de4c642fc44fefc461a3f7",
+    "carousel-host-light": "201f8f018155e228d77916349f5ef7872141cb23706c6fd859399b576aa9dd6f",
+    "grid-1": "c7b2c296e938aa4fdce36baad8ce4860a4f0708fc775c4c8550e71803e0ecdb6",
+    "grid-2": "69de73bd54c73306e9a56b06e590bea6d2add2c5cad5d150af4fa39885135425",
+    "grid-24-first": "827266cc493cb6baabba8a0136635cf305049f8ffcc40d743fe69c297b6a43ec",
+    "grid-24-last": "6fa14eb7f60167f80a38041481f427dc89e2d6465f3762fb27a9972d993d2a2f",
+    "grid-24-middle-hover": "1fa71b602a69e85c9f0fbc1af5309dc7b01dcdee348d3bd20c32ca5c25277fad",
+    "grid-24-middle-light": "72480ab91602aa7e89fbe1232371afd9840b9e989fdb615cac5ba11028cf3f7d",
+    "grid-e1-24-second": "aab8f9a3783631e2677fdb8847545df53d3929c1022005354dc712e081161a9a",
+    "grid-host": "6599244c69f668a8af49f6229c23d185c9ea6eecae8866834ce18fb96ff1184c",
+    "grid-host-light": "0fb883674b7c418be789c43b94963bdf4b01cb59fb22184268e5a523e1ab8055"
+  }
+}

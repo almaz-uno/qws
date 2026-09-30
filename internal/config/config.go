@@ -164,7 +164,7 @@ func Default() *Config {
 		},
 		Appearance: Appearance{
 			Layout:   "carousel", // Default to carousel mode
-			Renderer: "cpu",      // Default to CPU renderer
+			Renderer: "glx",      // GLX presenter; falls back to cpu without GLX
 			Thumbnail: Thumbnail{
 				Width:            256,
 				Height:           256,

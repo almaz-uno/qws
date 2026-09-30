@@ -28,6 +28,10 @@ var (
 	cfg        *config.Config
 	version    = "dev" // Set by build flags
 	defaultCfg = config.Default()
+
+	// frameDumpDir receives the first frame of every activation (hidden flag
+	// --debug-dump-frames, specs/001-rendering-speed)
+	frameDumpDir string
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -53,6 +57,8 @@ func init() {
 	rootCmd.PersistentFlags().String("cpuprofile", "", "write cpu profile to file")
 	rootCmd.PersistentFlags().String("memprofile", "", "write memory profile to file")
 	rootCmd.PersistentFlags().String("pprof", "", "start pprof HTTP server on address (e.g. localhost:6060)")
+	rootCmd.PersistentFlags().String("debug-dump-frames", "", "write the first frame of every activation to this directory")
+	_ = rootCmd.PersistentFlags().MarkHidden("debug-dump-frames")
 
 	// Keybindings
 	rootCmd.PersistentFlags().StringP("keybindings-modifier", "m", defaultCfg.Keybindings.Modifier, "main modifier key (Alt, Super, Ctrl)")
@@ -349,6 +355,8 @@ func run(cmd *cobra.Command, args []string) error {
 	}
 	defer cleanupProfiling(cmd)
 
+	frameDumpDir, _ = cmd.Flags().GetString("debug-dump-frames")
+
 	// Create root context
 	ctx := cmd.Context()
 
@@ -445,6 +453,8 @@ func run(cmd *cobra.Command, args []string) error {
 // Returns updated selector to preserve state
 func handleKeyPress(ctx context.Context, conn *x11.Connection, e xproto.KeyPressEvent, selector *ui.Selector,
 	mruList *mru.MRUList, watcher *focus.Watcher) *ui.Selector {
+	start := time.Now()
+
 	// Apply show delay if configured
 	if cfg.Behavior.ShowDelay > 0 {
 		time.Sleep(cfg.Behavior.ShowDelay)
@@ -481,6 +491,7 @@ func handleKeyPress(ctx context.Context, conn *x11.Connection, e xproto.KeyPress
 			}
 		}
 	}
+	list := time.Since(start)
 
 	// Create or reuse selector
 	if selector == nil {
@@ -490,11 +501,15 @@ func handleKeyPress(ctx context.Context, conn *x11.Connection, e xproto.KeyPress
 			log.Error().Err(err).Msg("Failed to create selector")
 			return selector
 		}
+		if frameDumpDir != "" {
+			selector.SetFrameDump(frameDumpDir)
+		}
 	} else {
 		// Update window list, preserving position
 		selector.UpdateWindows(windows)
 	}
 
+	selector.BeginActivation(start, list)
 	selected, err := selector.Show()
 
 	// Register selector window in watcher after Show() (when window is created)
