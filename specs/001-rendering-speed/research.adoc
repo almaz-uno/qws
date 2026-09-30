@@ -291,6 +291,16 @@ canvas, `gg.NewContext`, 13.7 MB.
   GL initialisation: 223 ms of M1.show in the first set, 11 ms in the second
   — probably the driver's shader cache, not verified.
 
+== Reference digests — T3
+
+`pkg/carousel/testdata/scenes.json`: the SHA-256 of the 18 frames of Σ,
+recorded 2026-09-30 from the drawing code of `develop` at `2c59c26` (the
+branch had not touched `pkg/carousel`), with the SHA-256 of
+`/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf` on E1. The test takes
+2.6 s and passed twice in a row. Checks: flipping the lowest bit of one byte
+of the carousel's frame failed all 9 carousel scenes and none of the grid
+ones; a different recorded digest of DejaVu Sans skipped the 4 host scenes.
+
 == Prior measurements
 
 `profiles/cpu_analysis_report_20260122_103901.txt` (local, `profiles/` is

@@ -3,7 +3,7 @@
 :toc-title: Contents
 :sectnums:
 :revdate: 2026-09-30
-:status: timings in place (T1), baseline measured (T2), targets fixed (T4); presenter not implemented
+:status: timings in place (T1), baseline measured (T2), reference digests recorded (T3), targets fixed (T4); presenter not implemented
 :issue: 5
 
 == What and why
@@ -71,12 +71,18 @@ windows, then `Escape`, so the desktop's focus does not change. One run of S1
 gives 20 samples of M1 (1 cold, 19 warm) and 460 of M2. Percentiles p50 and
 p95 are taken over the samples of a run; the baseline is three runs.
 
-Scene set Σ:: Fixed input data rendered without an X server: both layouts;
-selection at the first, a middle and the last card; hover on another card;
-an urgent window; a window without a thumbnail (placeholder); a window
-without an icon; a non-square icon; a long title (truncation); titles that
-need font fallback (Cyrillic, CJK); 1, 2 and 24 windows; dark and light
-theme. Fonts are fixed files, so that the digests do not depend on the host.
+Scene set Σ:: Fixed input data rendered without an X server
+(`pkg/carousel/scenes_test.go`, 18 scenes): both layouts; the frame of E1,
+2520×1400, and 1260×700; selection at the first, the second, a middle and the
+last card; hover on another card; an urgent window; windows without a
+thumbnail (placeholder) and without an icon; square, non-square and NRGBA
+icons, and icons with straight alpha as `_NET_WM_ICON` gives them; a title
+long enough to truncate; Cyrillic titles; titles with glyphs only the
+fallback font has (★ ✓ ⌘) and a CJK title no font has; 1, 2, 6 and 24
+windows; dark and light theme. Portable scenes use only the Go font of
+`golang.org/x/image`; host scenes — placeholders and fallback titles — also
+use DejaVu Sans and are skipped when the host's file differs from the one
+the digests were recorded with.
 
 == Behavior
 

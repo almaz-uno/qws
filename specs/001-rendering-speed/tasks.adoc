@@ -12,7 +12,7 @@ timing, and the reference digests before anything that could change a pixel.
 . [x] T2. Baseline on E1: three runs of S1 for `cpu`, one for today's `glx`;
   CPU and memory profiles of the runs. Result: tables in `research.adoc`,
   including the share of M1.list in M1.
-. [ ] T3. Scene set Σ and the K1 digests recorded from the drawing code of
+. [x] T3. Scene set Σ and the K1 digests recorded from the drawing code of
   `develop` (`2c59c26`), together with the digests of the font files. Check:
   the test passes on E1 and fails when one pixel of a reference frame is
   altered.
