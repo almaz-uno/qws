@@ -1,0 +1,176 @@
+= QWS project constitution
+:toc: left
+:toc-title: Contents
+:toclevels: 2
+:sectnums:
+:revdate: 2026-09-30
+
+The set of rules a specification does not override. The specification decides
+_what_ a change does; the constitution constrains _how_ it may be done, and it
+applies equally to a human and to an agent.
+
+== Document status
+
+The constitution describes what the project actually follows, not what it
+would like to follow. Every rule is backed by a place in the repository —
+`AGENTS.md`, the directory layout, the `Makefile`, the documents — and can be
+checked rather than taken on trust.
+
+qws adopted spec-driven development with working code already in place: the
+constitution was written against `develop` at `5997f32` (2026-06-04). Behavior
+implemented before that point is described by `README.md` and `doc/`, not by
+specifications, and is not re-specified retroactively; the first specification
+describes a delta to that state. Issues opened before this layout (#1) get a
+specification when work on them resumes. Open questions are listed as open at
+the end of the document.
+
+Amending the constitution is a separate change with its own specification: a
+rule is either rewritten or withdrawn, and the specification says on what
+grounds. Silently diverging from the constitution is not allowed: if the code
+contradicts it, the error is either in the code or in this document, and both
+cases need an explicit decision, not an omission.
+
+== Language
+
+The project language is English (`AGENTS.md`): documentation, comments,
+commit messages, specifications, command-line help, log messages.
+Identifiers, file names, configuration keys and external terms keep their
+original spelling.
+
+== Documentation is part of the change, not its consequence
+
+A document describing the behavior of the system is updated in the same change
+set that changes that behavior. A description that lags behind the code is
+worse than a missing one: decisions are made from it. A document that no
+longer matches the code is updated or deleted in the same change.
+
+`specs/` holds the rationale and acceptance criteria of individual changes.
+Documentation describing behavior:
+
+* `README.md` — build, usage, features, configuration overview;
+* `doc/configuration.asciidoc` — configuration keys, their sources and
+  precedence;
+* `config.yaml.example` — sample configuration; no test parses it, and it is
+  kept in sync with `config.Default()` by hand;
+* `doc/scaling-algorithms.md`, `doc/font-fallback.md` — thumbnail scaling and
+  glyph-level font fallback.
+
+Design documents: `doc/windows-switcher.asciidoc` — the architectural
+decisions and the technology choices behind them; `doc/optimization.asciidoc` —
+performance analysis and recommendations. A specification that overturns a
+decision recorded there says so and updates the document in the same change.
+
+== Stack and layout
+
+* Go (version in `go.mod`), module `github.com/almaz-uno/qws`. Target — X11;
+  the X protocol is spoken through `github.com/jezek/xgb`.
+* The build needs cgo: the `glx` renderer (`pkg/carousel/renderer-opengl.go`)
+  uses `go-gl/gl` and `go-gl/glfw`, so a C toolchain and the OpenGL and GLFW
+  development packages are required. The `cpu` renderer, the default, is pure
+  Go.
+* Command line — Cobra (`cmd/qws`: the switcher itself, `config init|show|path`,
+  `version`); configuration — Viper (`internal/config`).
+* `cmd/qws` — the program; `internal/config` — configuration; `pkg/<package>` —
+  one package per responsibility: `carousel` (rendering, fonts), `composite`
+  (thumbnail capture), `focus`, `keygrab` (with `keysyms.yaml`), `mru`, `ui`,
+  `x11`.
+* `console/` — standalone diagnostic programs (`capture`, `glx`), not part of
+  the qws binary; they use the standard `log` package.
+* Logging — zerolog, `github.com/rs/zerolog/log`, with structured fields
+  instead of the standard `log` package (`AGENTS.md`).
+* Build — `make build` (binary `./qws`, ignored by git), tests — `make test`
+  (`go test -v ./...`), static checks — `go vet ./...`. `make lint` runs
+  `go vet` and then `gofmt -s -w .`, which rewrites files in place.
+* Profiling — the `--cpuprofile`, `--memprofile` and `--pprof` flags and
+  `script/profile.sh`; profiles are written to `profiles/`, which is ignored by
+  git.
+
+== Configuration and user data
+
+* qws keeps no state of its own between runs. The only persistent data it
+  reads is the user's configuration: the file `~/.config/qws/config.yaml` (or
+  `config.yaml` in `$HOME`, or the one given by `--config`), `QWS_*`
+  environment variables and flags. Precedence: flags, then environment, then
+  file, then defaults.
+* Default values have a single source — `config.Default()`
+  (`internal/config/config.go`); `qws config init` writes a file from it. A
+  default is changed there, and the documents quoting it are changed in the
+  same change set.
+* Configuration files belong to users and outlive program versions. Viper
+  reads them with `Unmarshal`, which ignores unknown keys: a renamed or removed
+  key does not fail, it silently falls back to the default. A change that
+  renames, removes or reinterprets a key, an environment variable or a flag
+  therefore says in its specification what happens to existing
+  configurations — the old name is kept as an alias, reported, or knowingly
+  dropped.
+
+== Verifiability
+
+Tests are updated together with the implementation — in the same change, not
+"later". There is no CI yet (see the open questions): `go vet ./...` and
+`go test ./...` are run locally and pass before a change is proposed for
+commit. At the time of writing, tests exist for `internal/config`,
+`pkg/carousel` (font fallback) and `pkg/mru`.
+
+Tests do not need an X server, a compositor, a window manager or a GPU. A test
+that depends on a resource of the host system skips when the resource is
+absent rather than failing (`TestMultiFallbackFace_Creation` skips without
+system fonts). Behavior that can only be observed under X11 — key grabs,
+compositing, rendering, focus — is checked by a manual scenario written in the
+specification: window manager, compositor on or off, renderer, steps and the
+expected observable result.
+
+== Decisions rest on measurements
+
+An acceptance criterion says what is checked and how: a number with its
+measurement method, a named test, or a reproducible manual scenario with an
+observable result. "Works better", "faster", "looks right" are not criteria
+and do not enter a specification in that form.
+
+The numbers a decision rests on are reproducible: the specification says on
+what data and how they were obtained, so that the next reader can repeat or
+refute them instead of trusting a retelling. For performance this means the
+conditions the figures depend on: machine and GPU, window manager, compositor,
+renderer, number of windows and monitors, thumbnail size and scaling
+algorithm.
+
+A decision not yet made is recorded as open. A specification that hides an
+unresolved choice behind a plausible default is worse than one that admits it.
+
+== Secrets
+
+There are no secrets in the repository, and qws needs none. Should a change
+introduce one, the local value stays outside git, and the repository holds
+only an example with empty values.
+
+== Working with history
+
+The agent does not run `git commit`, `push`, create tags or branches for a
+commit without the author's explicit agreement — even when the task looks
+finished. Model co-authorship (`Co-Authored-By`, "Generated with…") is not
+added to commit messages or pull request descriptions.
+
+Commit messages follow the style of the history: a gitmoji, then a
+Conventional Commits type and a summary — `✨ feat:`, `🐛 fix:`, `📝 docs:`,
+`♻️ refactor:`, `⚡ perf:`. Work happens on `issue/qws#NN-slug` branches off
+`develop` and lands through a GitHub pull request into `develop`.
+
+== What the constitution does not regulate
+
+Open questions, recorded as open. Each is closed by a separate change with a
+specification, after which the corresponding section appears above.
+
+* *CI* — there is none; checks are run locally (section "Verifiability").
+* *Releases and versions* — there are no tags; `version` in `cmd/qws/root.go`
+  is "set by build flags", but no build passes them, and `qws version` always
+  prints `dev`.
+* *Non-English documents* — `doc/optimization.asciidoc` and about half of
+  `doc/font-fallback.md` are in Russian, and a few paragraphs and code
+  comments in `doc/configuration.asciidoc` and `doc/windows-switcher.asciidoc`
+  are too, contrary to section "Language": they are either translated or the
+  rule gets an exception.
+* *Window contents* — qws reads titles, icons and pixels of the user's windows
+  in order to display them; there is no rule yet on whether they may be
+  logged, written to disk or sent anywhere.
+* *SDD framework* (OpenSpec, GSD, Spec Kit or a layout of our own) — until one
+  is chosen, the layout from `specs/README.adoc` applies.
