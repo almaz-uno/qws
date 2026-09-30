@@ -3,7 +3,7 @@
 :toc-title: Contents
 :sectnums:
 :revdate: 2026-09-30
-:status: timings (T1), baseline (T2), reference digests (T3), targets (T4) and the GLX presenter (T5) done; K5–K7 not yet met; savings (T6) not started
+:status: T1–T6 done; K6 and K7 met, K5 not (M2 p95 141.7 of ≤ 100 ms); two more candidates proposed (research, T6)
 :issue: 5
 
 == What and why
@@ -54,6 +54,11 @@ first `render` (active window, monitor, window creation, map, keyboard grab,
 modifier state); M1.draw — drawing the scene; M1.present — from the end of
 drawing to P. _Cold_ — the first activation after the process starts;
 _warm_ — every other.
+
+M1.ready — ready for the first step:: From the entry to `handleKeyPress` to
+the end of the first frame after the activation's, the one of the `Expose`
+that mapping causes: until then the selector does not read keys. Reported,
+no criterion; recorded since stage 3 (`activation_ms` of the frame records).
 
 M2 — step latency:: From reading a navigation `KeyPress` in
 `handleEventsSync` to P of the resulting frame; phases M2.draw and

@@ -66,8 +66,8 @@ change to the shared drawing code.
   RGBA, for K3.
 
 | `pkg/carousel/renderer-cpu.go`
-| Stage 3 only: the cache of transformed thumbnails (research, "Bit-exact
-  savings on the CPU side").
+| Stage 3: the thumbnails of the visible cards resampled in parallel before
+  the cards are drawn (`pkg/carousel/thumbnail.go`).
 
 | `pkg/carousel/scenes_test.go`, `pkg/carousel/testdata/`
 | New: the scene set Σ, the digests of K1 with the digests of the font files
@@ -130,16 +130,24 @@ recorded in `research.adoc`.
   of stage 2 suggests. Candidates:
 +
 --
-* a cache of transformed thumbnails by source image and transform — up to
-  52 ms per frame of `x/image/draw` (research, "Where the time goes"); its
-  memory is bounded and recorded;
+* the thumbnails of the visible cards resampled in parallel — up to 52 ms per
+  frame of `x/image/draw` (research, "Where the time goes"). Planned first as
+  a cache of transformed thumbnails; dropped before implementation, because
+  in S1 every pair of window and offset occurs once per activation, so a
+  cache would hit only from the second activation on and only with its whole
+  working set of about 100 MB for 24–30 windows, while an LRU smaller than
+  that never hits on a cyclic pass;
 * the `cpu` presentation: BGRA straight from `Pix` instead of `At`, one
   check per frame instead of 74 round trips — up to 55 ms of CPU per frame
   and the waits;
 * `Expose` re-presents the last frame instead of drawing a new one — a full
   frame, about 280 ms, per activation;
 * placeholders drawn once per window instead of on every frame — about 5 ms
-  per frame.
+  per frame;
+* `glx`: the upload through a pixel buffer object — 18 instead of 24 ms of
+  the GPU finishing it in the experiment of T5;
+* `glx`: uploading only the band of rows that changed since the last frame,
+  which the texture still holds.
 --
 +
 A candidate stays only if S1 shows a gain in M1, M2 or M3 beyond the spread
