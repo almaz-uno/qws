@@ -3,7 +3,7 @@
 :toc-title: Contents
 :sectnums:
 :revdate: 2026-09-30
-:status: timings in place (T1), baseline measured (T2), reference digests recorded (T3), targets fixed (T4); presenter not implemented
+:status: timings (T1), baseline (T2), reference digests (T3), targets (T4) and the GLX presenter (T5) done; K5–K7 not yet met; savings (T6) not started
 :issue: 5
 
 == What and why
@@ -61,7 +61,9 @@ M2.present.
 
 M3 — CPU work per frame:: M3.cpu — CPU time in the `Selector.render` subtree
 of a CPU profile (`--cpuprofile`) divided by the number of frames drawn in
-the session; M3.alloc — bytes allocated in the same subtree (`--memprofile`,
+the session, without the samples of `glFinish`: it is called only while
+timings are logged, to mark P, and the NVIDIA driver busy-waits in it;
+M3.alloc — bytes allocated in the same subtree (`--memprofile`,
 `alloc_space`) divided by the same number.
 
 Session S1:: A measuring instance on environment E1 (research) with a key
@@ -69,7 +71,10 @@ combination not grabbed by i3 or by the running instances. A script drives
 it with `xdotool`: 20 activations; in each, 23 steps forward through the 24
 windows, then `Escape`, so the desktop's focus does not change. One run of S1
 gives 20 samples of M1 (1 cold, 19 warm) and 460 of M2. Percentiles p50 and
-p95 are taken over the samples of a run; the baseline is three runs.
+p95 are taken over the samples of a run; the baseline is three runs. The
+desktop changes between sessions — 24 windows at T2, 30 at T5 — so a
+comparison with the baseline also runs the baseline binary, `44e8cb1`, in
+the same session (`QWS=… measure.sh run`).
 
 Scene set Σ:: Fixed input data rendered without an X server
 (`pkg/carousel/scenes_test.go`, 18 scenes): both layouts; the frame of E1,
@@ -139,9 +144,10 @@ the window list collection, M1.list — specification 002 (author's decision,
 
 | K3
 | `glx` equals `cpu` on screen: E1 with picom running; for three activations
-  of each renderer, the overlay window captured with `xwd -id` after the
-  first frame equals the frame the renderer produced, dumped by the
-  measuring build — `compare -metric AE` gives 0.
+  of each renderer, the contents of the overlay window after the first frame,
+  read from the server with `GetImage`, equal the frame the renderer
+  produced, dumped by `--debug-dump-frames` — `console/framecmp` gives an
+  absolute error of 0 pixels (`measure.sh k3`).
 
 | K4
 | Fallback: a GLX initialisation error gives the `cpu` renderer and a
@@ -163,8 +169,9 @@ the window list collection, M1.list — specification 002 (author's decision,
 
 | K8
 | `cpu` without regression: p50 of M1 warm, M2, M3.cpu and M3.alloc of `cpu`
-  do not exceed the baseline p50 by more than the spread between the three
-  baseline runs. S1, three runs.
+  do not exceed those of the baseline binary in the same session by more
+  than the spread between the runs of the baseline binary. S1, three runs
+  of each.
 
 | K9
 | `go vet ./...` and `go test ./...` pass.

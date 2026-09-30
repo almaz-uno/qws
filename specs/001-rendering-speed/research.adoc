@@ -301,6 +301,79 @@ branch had not touched `pkg/carousel`), with the SHA-256 of
 of the carousel's frame failed all 9 carousel scenes and none of the grid
 ones; a different recorded digest of DejaVu Sans skipped the 4 host scenes.
 
+== GLX presenter — T5
+
+`pkg/glx` from the prototype without multisampling and with swap interval 0
+(`GLX_EXT_swap_control` is present on E1), `pkg/carousel/present_glx.go`: a
+texture of the window size, copied to the back buffer with `texelFetch`,
+blending and dithering off, then the swap. The GPU scene, the hidden GLFW
+window and `console/glx` are gone, and GLFW with them.
+
+Checks on E1, 2026-09-30:
+
+* K2 — `TestGLXPresenterMatchesCPU`: all 18 scenes of Σ byte for byte. With
+  blending switched on for the check, 2 917 464 of 3 528 000 pixels of the
+  E1 scene differed, so the test does see a difference.
+* K3 — `measure.sh k3`: three activations of each renderer, absolute error 0
+  of 3 528 000 pixels in all six. The first attempt captured with
+  `xwd -id`: the second capture of each renderer came back 24 bpp, depth 24,
+  from xwd's path that reads the screen through the root visual; hence
+  `console/framecmp` and `GetImage`.
+* K4 — `TestGLXFallback` passes; K1 and K9 pass.
+
+=== S1 in one session
+
+18:24–18:32, 30 windows in qws's list (29 outside the scratchpad): the
+desktop had changed since T2, so the baseline binary `44e8cb1` ran in the
+same session. One run each; p50 / p95, ms.
+
+[cols="3,2,2,2",options="header"]
+|===
+| Metric | baseline `cpu` | `cpu` | `glx`
+
+| M1 cold | 423.7 | 411.1 | 470.3
+| M1 warm | 410.5 / 458.0 | 402.0 / 434.6 | 345.1 / 372.3
+| — list | 135.6 / 152.0 | 131.1 / 150.3 | 138.0 / 154.5
+| — show | 10.0 / 14.0 | 9.8 / 14.3 | 10.3 / 32.4
+| — draw | 157.5 / 171.5 | 155.5 / 167.8 | 154.5 / 169.4
+| — present | 106.5 / 141.0 | 103.0 / 129.5 | 40.2 / 56.3
+| M2 | 225.1 / 314.2 | 227.3 / 312.5 | 157.2 / 236.4
+| — draw | 103.7 / 180.6 | 104.3 / 182.6 | 104.5 / 181.4
+| — present | 102.8 / 118.9 | 103.1 / 121.3 | 30.5 / 49.5
+| M3.cpu, ms per frame | 210.6 | 210.7 | 125.4
+| M3.alloc, MB per frame | 56.8 | 57.0 | 15.8
+|===
+
+M1 cold of `glx` includes 142 ms of GL initialisation in M1.show. M3.cpu of
+`glx` with the samples of `glFinish` is 155.9 ms: the driver busy-waits
+there for 30.5 ms per frame, and the specification now leaves those samples
+out.
+
+=== Findings
+
+* `glx` against `cpu` in the same session: M2 −30% at p50 and −25% at p95,
+  presenting 103 → 30 ms, M3.cpu −40%, allocations 57 → 16 MB. Drawing, about
+  104 ms at p50 and 181 ms at p95, is now most of a step.
+* `cpu` is where the baseline binary is, within one run each; K8 is judged
+  at T8 on three runs of each.
+* Presenting in `glx` by phases — an experiment on a copy of the code, with
+  `glFinish` after each phase, three activations, not committed: the upload
+  call 4.6 ms, the GPU finishing the upload 23.7 ms, drawing 0.2 ms, the swap
+  0.3 ms (p50). Through a pixel buffer object: 2.7 / 18.2 / 1.0 / 0.4 ms.
+  Uploading as `GL_BGRA` with the shader swapping the channels back changed
+  nothing (23.8 ms), and K2 still held.
+* The upload is slow because the GPU idles: P8, the PCIe link at Gen1 ×4 of
+  Gen3 ×16 (`nvidia-smi`, 2026-09-30), PowerMizer adaptive. 14.1 MB in about
+  24 ms is 0.6 GB/s, and a single frame does not wake the link. This is the
+  environment; qws can only send fewer bytes.
+* The slow first present of an activation seen at T2 (245 against 108 ms)
+  did not recur: 106 against 103 ms for the baseline binary. It depends on
+  the desktop; not explained.
+* M2.draw p95 is 181 ms with 30 windows against 143 ms with 24 at T2, for
+  the baseline binary as well.
+* Against the targets: K5, M2 p95 236 of ≤ 100 ms; K6, M1 warm p95 372 of
+  ≤ 300 ms; K7, 125 of ≤ 70 ms and 15.8 of ≤ 16 MB.
+
 == Prior measurements
 
 `profiles/cpu_analysis_report_20260122_103901.txt` (local, `profiles/` is
