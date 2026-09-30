@@ -52,6 +52,8 @@ type Config struct {
 	LayoutMode              string   // Layout mode: "carousel" or "grid"
 	GridColumns             int      // Number of columns for grid layout (0 = auto)
 	GridSpacing             float64  // Spacing between tiles in grid mode
+	Hostname                string   // Drawn large at the top left (empty draws none)
+	Version                 string   // Drawn after the hostname (empty draws none)
 }
 
 // DefaultConfig returns default carousel configuration
@@ -157,6 +159,7 @@ func Draw3DCarousel(thumbnails []image.Image, selected int, animOffset float64, 
 func Draw3DCarouselWithData(windowData []WindowData, selected int, hoverIndex int, animOffset float64, cfg Config) *image.RGBA {
 	// Background - semi-transparent if enabled, fully transparent otherwise
 	dc := newCanvas(cfg)
+	drawHeader(dc, cfg)
 
 	centerX := float64(cfg.Width) / 2
 	centerY := float64(cfg.Height) / 2
@@ -188,6 +191,44 @@ func Draw3DCarouselWithData(windowData []WindowData, selected int, hoverIndex in
 	}
 
 	return getImageRGBA(dc)
+}
+
+// The header: the hostname, large, and the version after it, at the top left
+// of the overlay (specs/005-host-and-version)
+const (
+	headerMargin = 24.0 // from the left and top edges of the overlay
+	headerGap    = 16.0 // between the hostname and the version, and below the band
+	headerScale  = 2.5  // size of the hostname relative to the font size
+)
+
+// drawHeader draws the header and returns the bottom of its band, or 0 when
+// there is nothing to draw
+func drawHeader(dc *gg.Context, cfg Config) float64 {
+	if cfg.Hostname == "" && cfg.Version == "" {
+		return 0
+	}
+	large := NewMultiFallbackFace(cfg.FontPaths, float64(cfg.FontSize)*headerScale)
+	small := NewMultiFallbackFace(cfg.FontPaths, float64(cfg.FontSize))
+	if large == nil || small == nil {
+		return 0
+	}
+	metrics := large.Metrics()
+	baseline := headerMargin + float64(metrics.Ascent)/64
+
+	x := headerMargin
+	if cfg.Hostname != "" {
+		dc.SetFontFace(large)
+		setColor(dc, cfg.TextColor, 0.9)
+		dc.DrawString(cfg.Hostname, x, baseline)
+		width, _ := dc.MeasureString(cfg.Hostname)
+		x += width + headerGap
+	}
+	if cfg.Version != "" {
+		dc.SetFontFace(small)
+		setColor(dc, cfg.TextColor, 0.6)
+		dc.DrawString(cfg.Version, x, baseline)
+	}
+	return headerMargin + float64(metrics.Height)/64 + headerGap
 }
 
 // backgroundKey is what the rounded window background depends on
@@ -710,6 +751,7 @@ func CreateGradientBackground(width, height int, c1, c2 color.Color) image.Image
 func DrawGridLayout(windowData []WindowData, selected int, hoverIndex int, cfg Config) *image.RGBA {
 	// Background - semi-transparent if enabled, fully transparent otherwise
 	dc := newCanvas(cfg)
+	top := drawHeader(dc, cfg)
 
 	if len(windowData) == 0 {
 		return getImageRGBA(dc)
@@ -735,9 +777,9 @@ func DrawGridLayout(windowData []WindowData, selected int, hoverIndex int, cfg C
 		spacing = 20 // Default spacing
 	}
 
-	// Calculate tile size to fit all tiles in the window
+	// Calculate tile size to fit all tiles in the window, below the header
 	availableWidth := float64(cfg.Width) - spacing*(float64(cols)+1)
-	availableHeight := float64(cfg.Height) - spacing*(float64(rows)+1)
+	availableHeight := float64(cfg.Height) - top - spacing*(float64(rows)+1)
 
 	tileW := availableWidth / float64(cols)
 	tileH := availableHeight / float64(rows)
@@ -756,7 +798,7 @@ func DrawGridLayout(windowData []WindowData, selected int, hoverIndex int, cfg C
 	totalGridW := float64(cols)*tileW + (float64(cols)+1)*spacing
 	totalGridH := float64(rows)*tileH + (float64(rows)+1)*spacing
 	offsetX := (float64(cfg.Width) - totalGridW) / 2
-	offsetY := (float64(cfg.Height) - totalGridH) / 2
+	offsetY := top + (float64(cfg.Height)-top-totalGridH)/2
 
 	// Draw each window in its grid cell
 	for i, win := range windowData {

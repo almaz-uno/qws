@@ -245,6 +245,13 @@ func (s *Selector) UpdateWindows(windows []x11.WindowInfo) {
 	}
 }
 
+// SetHeader sets what the header of the overlay shows: the hostname and the
+// version of qws (specs/005-host-and-version)
+func (s *Selector) SetHeader(hostname, version string) {
+	s.config.Hostname = hostname
+	s.config.Version = version
+}
+
 // placeholder is the thumbnail of a window that has none, drawn once per title
 func (s *Selector) placeholder(title string) image.Image {
 	if img, ok := s.placeholders[title]; ok {

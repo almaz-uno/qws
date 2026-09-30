@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/rs/zerolog"
 	"golang.org/x/image/font/gofont/goregular"
 )
 
@@ -47,6 +48,8 @@ type scene struct {
 	windows  []WindowData
 	selected int
 	hover    int
+	hostname string // the header of specs/005-host-and-version
+	version  string
 }
 
 func TestScenes(t *testing.T) {
@@ -110,6 +113,30 @@ func TestScenes(t *testing.T) {
 	}
 }
 
+// BenchmarkE1Frame draws the frame of E1 in the carousel, without and with
+// the header (criterion K4 of specs/005-host-and-version)
+func BenchmarkE1Frame(b *testing.B) {
+	goFont := filepath.Join(b.TempDir(), "goregular.ttf")
+	if err := os.WriteFile(goFont, goregular.TTF, 0o644); err != nil {
+		b.Fatal(err)
+	}
+	zerolog.SetGlobalLevel(zerolog.InfoLevel)
+	defer zerolog.SetGlobalLevel(zerolog.TraceLevel)
+	for _, name := range []string{"carousel-e1-24-second", "carousel-e1-header"} {
+		var sc scene
+		for _, s := range scenes() {
+			if s.name == name {
+				sc = s
+			}
+		}
+		b.Run(name, func(b *testing.B) {
+			for range b.N {
+				drawScene(sc, []string{goFont})
+			}
+		})
+	}
+}
+
 // drawScene draws a scene the way Selector.render does
 func drawScene(sc scene, fonts []string) *image.RGBA {
 	cfg := sceneConfig(sc, fonts)
@@ -124,6 +151,8 @@ func drawScene(sc scene, fonts []string) *image.RGBA {
 // change of defaults does not change the digests
 func sceneConfig(sc scene, fonts []string) Config {
 	cfg := Config{
+		Hostname:                sc.hostname,
+		Version:                 sc.version,
 		Width:                   sc.width,
 		Height:                  sc.height,
 		ThumbWidth:              512,
@@ -165,7 +194,10 @@ func scenes() []scene {
 
 	var list []scene
 	add := func(name string, host bool, layout, theme string, w, h int, windows []WindowData, selected, hover int) {
-		list = append(list, scene{name, host, layout, theme, w, h, windows, selected, hover})
+		list = append(list, scene{name, host, layout, theme, w, h, windows, selected, hover, "", ""})
+	}
+	addHeader := func(name, layout, theme string, w, h int, selected int, hostname string) {
+		list = append(list, scene{name, false, layout, theme, w, h, many, selected, -1, hostname, "v0.1.0"})
 	}
 	for _, layout := range []string{"carousel", "grid"} {
 		// The frame of E1: 2520×1400, 24 windows, Alt+Tab selects the second
@@ -178,6 +210,11 @@ func scenes() []scene {
 		add(layout+"-1", false, layout, "dark", 1260, 700, many[:1], 0, -1)
 		add(layout+"-host", true, layout, "dark", 1260, 700, special, 2, 4)
 		add(layout+"-host-light", true, layout, "light", 1260, 700, special, 3, -1)
+
+		// With the header of specs/005-host-and-version
+		addHeader(layout+"-e1-header", layout, "dark", 2520, 1400, 1, "ws1")
+		addHeader(layout+"-header-light", layout, "light", 1260, 700, 12, "ws1")
+		addHeader(layout+"-header-no-hostname", layout, "dark", 1260, 700, 1, "")
 	}
 	return list
 }

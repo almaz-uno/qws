@@ -504,6 +504,8 @@ func handleKeyPress(ctx context.Context, conn *x11.Connection, e xproto.KeyPress
 		if frameDumpDir != "" {
 			selector.SetFrameDump(frameDumpDir)
 		}
+		hostname, _ := os.Hostname()
+		selector.SetHeader(hostname, version)
 	} else {
 		// Update window list, preserving position
 		selector.UpdateWindows(windows)
