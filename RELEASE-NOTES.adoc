@@ -25,6 +25,10 @@ through a YAML file, `QWS_*` environment variables and flags.
   with `cpu`, against 223 and 274 ms before; the first step can follow the
   activation after about 200 ms instead of 660.
 
+*Header* (link:specs/005-host-and-version/spec.adoc[specification 005]):
+the overlay shows the hostname in large letters and the qws version at its
+top left, so that it is plain which machine and which build it is.
+
 *Configuration* (link:specs/002-config-names/spec.adoc[specification 002]):
 
 * Environment variables are read under the documented names,

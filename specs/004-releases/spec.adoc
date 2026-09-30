@@ -3,7 +3,7 @@
 :toc-title: Contents
 :sectnums:
 :revdate: 2026-09-30
-:status: draft; nothing implemented
+:status: implemented 2026-09-30; K1, K3, K5 met, K2 in part; K4 waits for the tag v0.1.0 (section "Results")
 :issue: 8
 
 == What and why
@@ -94,6 +94,30 @@ history").
 | `make build` in a clean working copy gives a `qws version` equal to
   `git describe --tags --always --dirty`; `go vet ./...` and `go test ./...`
   pass.
+|===
+
+== Results
+
+2026-09-30.
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | `TestExtractNotes`, `TestExtractLevels`, `TestMarkdown`
+  (`internal/relnotes`).
+| K2 | ws1: `make release TAG=` and `TAG=v0.1` — the usage; `TAG=v9.9.9` —
+  "v9.9.9 is not an annotated tag"; no worktree was made. A tag not pushed
+  and a tag already released need a real tag: checked at the first release.
+| K3 | Workflow `test` on GitHub: the pull request passed at once; the branch
+  itself first failed — it lacked specification 001, merged into `develop`
+  meanwhile, and GLFW did not build without its X11 headers — and passed
+  after `develop` was merged into it.
+| K4 | Waits for `v0.1.0`.
+| K5 | `make build` gives `qws version` equal to `git describe --tags --always
+  --dirty` (`76a6680-dirty`); `go vet ./...`, `go test ./...`. In CI the
+  portable scenes of specification 001 match their digests too: the
+  pictures are the same on another machine.
 |===
 
 == Outside the specification
