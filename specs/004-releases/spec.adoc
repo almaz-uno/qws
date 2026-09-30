@@ -3,7 +3,7 @@
 :toc-title: Contents
 :sectnums:
 :revdate: 2026-09-30
-:status: implemented 2026-09-30; K1, K3, K5 met, K2 in part; K4 waits for the tag v0.1.0 (section "Results")
+:status: implemented 2026-09-30; K1–K5 met (section "Results"); v0.1.0 released 2026-09-30
 :issue: 8
 
 == What and why
@@ -107,18 +107,28 @@ history").
 | K1 | `TestExtractNotes`, `TestExtractLevels`, `TestMarkdown`
   (`internal/relnotes`).
 | K2 | ws1: `make release TAG=` and `TAG=v0.1` — the usage; `TAG=v9.9.9` —
-  "v9.9.9 is not an annotated tag"; no worktree was made. A tag not pushed
-  and a tag already released need a real tag: checked at the first release.
+  "v9.9.9 is not an annotated tag"; `TAG=v0.1.0` before its push — "tag
+  v0.1.0 is not pushed to origin", after the release — "release v0.1.0
+  exists"; in no case was a worktree made.
 | K3 | Workflow `test` on GitHub: the pull request passed at once; the branch
   itself first failed — it lacked specification 001, merged into `develop`
   meanwhile, and GLFW did not build without its X11 headers — and passed
   after `develop` was merged into it.
-| K4 | Waits for `v0.1.0`.
+| K4 | Release `v0.1.0`: `qws-linux-amd64` and `SHA256SUMS`; the downloaded
+  binary passes `sha256sum -c`, needs glibc 2.34 at most, starts on ws1
+  (Debian 12, glibc 2.36) and prints `QWS version v0.1.0`.
 | K5 | `make build` gives `qws version` equal to `git describe --tags --always
   --dirty` (`76a6680-dirty`); `go vet ./...`, `go test ./...`. In CI the
   portable scenes of specification 001 match their digests too: the
   pictures are the same on another machine.
 |===
+
+The first run of workflow `release` on the pushed tag failed at `git
+fetch`: in the container the steps run as root, the checkout belongs to the
+runner's user, and git refused it as of dubious ownership. Both workflows
+now mark the workspace as a safe directory (issue #13), and the tag was
+released by `gh workflow run release --ref issue/qws#13-ci-safe-directory -f
+tag=v0.1.0` — the workflow of the fix, the code of the tag.
 
 == Outside the specification
 

@@ -47,6 +47,10 @@ jobs:
         with:
           ref: refs/tags/${{ env.TAG }}
           fetch-depth: 0
+      # The steps run as root of the container, the checkout belongs to the
+      # runner's user: without this git refuses it as of dubious ownership
+      - name: safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       # On a tag event checkout may leave the tag lightweight, and the script
       # wants it annotated
       - name: annotated tags
