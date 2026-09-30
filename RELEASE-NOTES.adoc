@@ -1,0 +1,40 @@
+= qws — release notes
+:toc: left
+:toc-title: Contents
+:toclevels: 2
+:revdate: 2026-09-30
+
+Every minor release is a chapter, its patches are subsections, the newest
+come first (link:specs/004-releases/spec.adoc[specification 004]). The
+version of a build is `qws version`. Release files are built on Debian 12:
+they need glibc 2.36 or newer and the OpenGL and X11 libraries.
+
+== 0.1.0 — 2026-09-30
+
+The first release: a carousel and grid window switcher for X11 with MRU
+order, live thumbnails, keyboard and mouse navigation, and configuration
+through a YAML file, `QWS_*` environment variables and flags.
+
+*Rendering* (link:specs/001-rendering-speed/spec.adoc[specification 001]):
+
+* The `glx` renderer shows exactly the picture of `cpu`: the frame is drawn
+  by the same code and presented through GLX. It is now the default, and
+  falls back to `cpu` with a warning where GLX cannot be initialised.
+* Both renderers are faster. On the author's desktop a step through the
+  carousel takes 62 ms at p50 and 91 ms at p95 with `glx`, 72 and 98 ms
+  with `cpu`, against 223 and 274 ms before; the first step can follow the
+  activation after about 200 ms instead of 660.
+
+*Configuration* (link:specs/002-config-names/spec.adoc[specification 002]):
+
+* Environment variables are read under the documented names,
+  `QWS_APPEARANCE_RENDERER`, and `QWS_CONFIG` gives the configuration file.
+* `qws config init` and `qws config show` write multi-word keys with
+  underscores, as qws reads them. Files written by earlier `config init`,
+  with such keys joined (`snapshotinterval`), are read as they were meant,
+  with a warning per joined key — so their values now take effect.
+
+Build::
+cgo, `pkg-config` and the OpenGL and X11 development packages
+(`scripts/debian-deps.sh` lists them for Debian 12). `make build` builds in
+the version.

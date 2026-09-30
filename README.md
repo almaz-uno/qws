@@ -170,6 +170,16 @@ Phase 4 is **complete** ✅
 - `github.com/spf13/viper` — Configuration management
 - `github.com/rs/zerolog` — Structured logging
 
+## Releases
+
+Versions are annotated tags `vX.Y.Z`; `make build` builds the version in
+(`qws version`). Every tag gets a
+[GitHub release](https://github.com/almaz-uno/qws/releases) with
+`qws-linux-amd64`, built on Debian 12 — it needs glibc 2.36 or newer and the
+OpenGL and X11 libraries — and `SHA256SUMS`. What changed is in
+`RELEASE-NOTES.adoc`. GitHub Actions run `make vet` and `make test` on every
+push and pull request.
+
 ## License
 
 MIT
