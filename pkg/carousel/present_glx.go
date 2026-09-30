@@ -3,6 +3,7 @@ package carousel
 import (
 	"fmt"
 	"image"
+	"unsafe"
 
 	"github.com/almaz-uno/qws/pkg/glx"
 	"github.com/go-gl/gl/v4.6-core/gl"
@@ -45,6 +46,7 @@ type glxPresenter struct {
 	program uint32
 	vao     uint32
 	texture uint32
+	pbo     uint32 // pixel unpack buffer the frames are uploaded through
 }
 
 // newGLXPresenter creates the GLX presenter; a variable, so that tests can make
@@ -109,6 +111,7 @@ func (p *glxPresenter) init() error {
 	gl.GenVertexArrays(1, &p.vao)
 	gl.BindVertexArray(p.vao)
 
+	gl.GenBuffers(1, &p.pbo)
 	gl.GenTextures(1, &p.texture)
 	gl.ActiveTexture(gl.TEXTURE0)
 	gl.BindTexture(gl.TEXTURE_2D, p.texture)
@@ -162,16 +165,44 @@ func (p *glxPresenter) draw(img *image.RGBA) error {
 	if b.Dx() != p.width || b.Dy() != p.height {
 		return fmt.Errorf("frame %dx%d does not match the window %dx%d", b.Dx(), b.Dy(), p.width, p.height)
 	}
-	gl.BindTexture(gl.TEXTURE_2D, p.texture)
-	gl.PixelStorei(gl.UNPACK_ROW_LENGTH, int32(img.Stride/4))
-	gl.TexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, int32(p.width), int32(p.height), gl.RGBA, gl.UNSIGNED_BYTE,
-		gl.Ptr(img.Pix[img.PixOffset(b.Min.X, b.Min.Y):]))
+	if err := p.upload(img, 0, p.height); err != nil {
+		return err
+	}
 	gl.DrawArrays(gl.TRIANGLES, 0, 3)
+	return nil
+}
+
+// upload copies rows [y0, y1) of the frame into the texture through the pixel
+// buffer: the driver takes the rows from its own memory rather than from the
+// process's. The buffer is orphaned first, so that the copy does not wait for
+// the previous upload.
+func (p *glxPresenter) upload(img *image.RGBA, y0, y1 int) error {
+	b := img.Bounds()
+	rowBytes := 4 * p.width
+	n := rowBytes * (y1 - y0)
+
+	gl.BindBuffer(gl.PIXEL_UNPACK_BUFFER, p.pbo)
+	defer gl.BindBuffer(gl.PIXEL_UNPACK_BUFFER, 0)
+	gl.BufferData(gl.PIXEL_UNPACK_BUFFER, n, nil, gl.STREAM_DRAW)
+	ptr := gl.MapBufferRange(gl.PIXEL_UNPACK_BUFFER, 0, n, gl.MAP_WRITE_BIT|gl.MAP_INVALIDATE_BUFFER_BIT)
+	if ptr == nil {
+		return fmt.Errorf("failed to map the pixel buffer: GL error 0x%x", gl.GetError())
+	}
+	dst := unsafe.Slice((*byte)(ptr), n)
+	for y := y0; y < y1; y++ {
+		copy(dst[(y-y0)*rowBytes:][:rowBytes], img.Pix[img.PixOffset(b.Min.X, b.Min.Y+y):])
+	}
+	gl.UnmapBuffer(gl.PIXEL_UNPACK_BUFFER)
+
+	gl.BindTexture(gl.TEXTURE_2D, p.texture)
+	gl.PixelStorei(gl.UNPACK_ROW_LENGTH, 0)
+	gl.TexSubImage2D(gl.TEXTURE_2D, 0, 0, int32(y0), int32(p.width), int32(y1-y0), gl.RGBA, gl.UNSIGNED_BYTE, nil)
 	return nil
 }
 
 func (p *glxPresenter) Close() {
 	if p.ready {
+		gl.DeleteBuffers(1, &p.pbo)
 		gl.DeleteTextures(1, &p.texture)
 		gl.DeleteVertexArrays(1, &p.vao)
 		gl.DeleteProgram(p.program)
