@@ -3,7 +3,7 @@
 :toc-title: Contents
 :sectnums:
 :revdate: 2026-09-30
-:status: T1–T7 done; on one run each, K5–K7 are met (research, T6); the final runs (T8) remain
+:status: implemented 2026-09-30; K1–K9 met (section "Results"); not merged
 :issue: 5
 
 == What and why
@@ -181,6 +181,58 @@ the window list collection, M1.list — specification 002 (author's decision,
 | K9
 | `go vet ./...` and `go test ./...` pass.
 |===
+
+== Results
+
+T8, 2026-09-30, E1 with 29 windows in qws's list: `go vet ./...` and
+`go test ./...` pass; three runs of S1 each for the baseline binary
+`44e8cb1` with `cpu` and for the final code (`ce14f5b`) with `cpu` and with
+`glx`, interleaved in one session. p50 / p95 of each run, ms; M1.ready of the
+baseline binary is the end of its activation frame plus the frame of the
+`Expose`.
+
+[cols="3,4,4,4",options="header"]
+|===
+| Metric | baseline `cpu` | `cpu` | `glx`
+
+| M1 cold | 435.7, 433.9, 411.3 | 237.0, 258.1, 251.2 | 350.0, 346.9, 392.7
+| M1 warm | 394.1 / 425.6, 392.0 / 423.5, 393.3 / 423.5 | 205.1 / 227.0, 199.7 / 223.3, 201.6 / 227.1 | 210.2 / 217.1, 213.2 / 225.6, 211.5 / 238.1
+| M1.ready | 660.0 / 700.6, 655.3 / 683.0, 657.7 / 674.5 | 205.3 / 227.2, 201.2 / 223.5, 201.8 / 229.2 | 212.6 / 218.9, 215.0 / 227.1, 213.3 / 239.8
+| M2 | 225.0 / 275.8, 222.6 / 272.7, 223.1 / 274.1 | 71.6 / 96.7, 71.9 / 97.7, 73.0 / 99.0 | 62.5 / 92.4, 62.0 / 90.8, 61.7 / 89.8
+| M3.cpu, ms per frame | 204.5, 203.8, 203.6 | 28.5, 29.0, 30.1 | 21.5, 20.8, 21.0
+| M3.alloc, MB per frame | 57.0, 56.6, 57.0 | 28.0, 28.0, 28.1 | 14.1, 14.0, 14.0
+|===
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | `TestScenes`: the 18 scenes of Σ match the digests of `2c59c26`, after
+  every commit of stage 3 as well.
+| K2 | `TestGLXPresenterMatchesCPU`: every scene byte for byte, including the
+  uploads of changed rows between scenes of one size.
+| K3 | `measure.sh k3`: absolute error 0 in all six captures.
+| K4 | `TestGLXFallback`.
+| K5 | M2 p95 of `glx`: 92.4, 90.8, 89.8 of ≤ 100 ms.
+| K6 | M1 warm p95 of `glx`: 217.1, 225.6, 238.1 of ≤ 300 ms.
+| K7 | M3.cpu of `glx`: 21.5, 20.8, 21.0 of ≤ 70 ms; M3.alloc: 14.1, 14.0,
+  14.0 of ≤ 16 MB.
+| K8 | Every p50 of `cpu` is below the baseline binary's: M1 warm 202 against
+  393 ms, M2 72 against 224 ms, M3.cpu 29 against 204 ms, M3.alloc 28
+  against 57 MB.
+| K9 | `go vet ./...`, `go test ./...`.
+|===
+
+Notes:
+
+* Most of the gain is shared: `cpu` steps in 72 ms at p50 and under 100 ms at
+  p95, 10 ms behind `glx`; `glx` pays about 100–140 ms more on the first
+  activation for the GL initialisation.
+* Not checked: the overlay window recreated on a monitor change, with the
+  GLX context rebound to it — E1 has one monitor.
+* Found on the way, outside this specification: the environment variables in
+  `doc/configuration.asciidoc` are written `QWS_APPEARANCE_RENDERER`, while
+  Viper, without a key replacer, reads `QWS_APPEARANCE.RENDERER`.
 
 == Decisions
 
