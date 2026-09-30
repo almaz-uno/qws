@@ -155,24 +155,8 @@ func Draw3DCarousel(thumbnails []image.Image, selected int, animOffset float64, 
 
 // Draw3DCarouselWithData renders a 2.5D carousel with icons and titles
 func Draw3DCarouselWithData(windowData []WindowData, selected int, hoverIndex int, animOffset float64, cfg Config) *image.RGBA {
-	dc := gg.NewContext(cfg.Width, cfg.Height)
-
 	// Background - semi-transparent if enabled, fully transparent otherwise
-	if cfg.WindowBackgroundEnabled {
-		setColor(dc, cfg.BackgroundColor, cfg.WindowBackgroundOpacity)
-		if cfg.WindowBackgroundRadius > 0 {
-			// Draw rounded rectangle
-			dc.DrawRoundedRectangle(0, 0, float64(cfg.Width), float64(cfg.Height), cfg.WindowBackgroundRadius)
-			dc.Fill()
-		} else {
-			// Draw regular rectangle
-			dc.Clear()
-		}
-	} else {
-		// Fully transparent
-		dc.SetRGBA(0, 0, 0, 0)
-		dc.Clear()
-	}
+	dc := newCanvas(cfg)
 
 	centerX := float64(cfg.Width) / 2
 	centerY := float64(cfg.Height) / 2
@@ -198,6 +182,58 @@ func Draw3DCarouselWithData(windowData []WindowData, selected int, hoverIndex in
 	}
 
 	return getImageRGBA(dc)
+}
+
+// backgroundKey is what the rounded window background depends on
+type backgroundKey struct {
+	width, height   int
+	color           string
+	opacity, radius float64
+}
+
+// background keeps the last rounded window background drawn. It is the first
+// thing drawn on a transparent canvas, so its pixels depend on its key alone,
+// and a copy of it is the canvas it would have made.
+var background struct {
+	sync.Mutex
+	key backgroundKey
+	img *image.RGBA
+}
+
+// newCanvas is a canvas of the window size with the window background on it
+func newCanvas(cfg Config) *gg.Context {
+	if !cfg.WindowBackgroundEnabled || cfg.WindowBackgroundRadius <= 0 {
+		dc := gg.NewContext(cfg.Width, cfg.Height)
+		if cfg.WindowBackgroundEnabled {
+			// Draw regular rectangle
+			setColor(dc, cfg.BackgroundColor, cfg.WindowBackgroundOpacity)
+		} else {
+			// Fully transparent
+			dc.SetRGBA(0, 0, 0, 0)
+		}
+		dc.Clear()
+		return dc
+	}
+
+	key := backgroundKey{cfg.Width, cfg.Height, cfg.BackgroundColor, cfg.WindowBackgroundOpacity, cfg.WindowBackgroundRadius}
+	background.Lock()
+	if background.img == nil || background.key != key {
+		// Draw rounded rectangle
+		dc := gg.NewContext(cfg.Width, cfg.Height)
+		setColor(dc, cfg.BackgroundColor, cfg.WindowBackgroundOpacity)
+		dc.DrawRoundedRectangle(0, 0, float64(cfg.Width), float64(cfg.Height), cfg.WindowBackgroundRadius)
+		dc.Fill()
+		background.key, background.img = key, getImageRGBA(dc)
+	}
+	img := image.NewRGBA(background.img.Rect)
+	copy(img.Pix, background.img.Pix)
+	background.Unlock()
+
+	// Leave the context as drawing the background does: its colour set, and
+	// no current point
+	dc := gg.NewContextForRGBA(img)
+	setColor(dc, cfg.BackgroundColor, cfg.WindowBackgroundOpacity)
+	return dc
 }
 
 // getImageRGBA converts gg.Context image to RGBA
@@ -651,21 +687,8 @@ func CreateGradientBackground(width, height int, c1, c2 color.Color) image.Image
 
 // DrawGridLayout renders windows in a grid layout (like Windows task switcher)
 func DrawGridLayout(windowData []WindowData, selected int, hoverIndex int, cfg Config) *image.RGBA {
-	dc := gg.NewContext(cfg.Width, cfg.Height)
-
 	// Background - semi-transparent if enabled, fully transparent otherwise
-	if cfg.WindowBackgroundEnabled {
-		setColor(dc, cfg.BackgroundColor, cfg.WindowBackgroundOpacity)
-		if cfg.WindowBackgroundRadius > 0 {
-			dc.DrawRoundedRectangle(0, 0, float64(cfg.Width), float64(cfg.Height), cfg.WindowBackgroundRadius)
-			dc.Fill()
-		} else {
-			dc.Clear()
-		}
-	} else {
-		dc.SetRGBA(0, 0, 0, 0)
-		dc.Clear()
-	}
+	dc := newCanvas(cfg)
 
 	if len(windowData) == 0 {
 		return getImageRGBA(dc)
