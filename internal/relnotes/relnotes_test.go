@@ -28,9 +28,13 @@ func TestExtractNotes(t *testing.T) {
 
 // TestExtractLevels separates a chapter from its patches
 func TestExtractLevels(t *testing.T) {
-	adoc := "= Notes\n\n== 0.3.0 — 2026-10-02\n\nThree.\n\n=== 0.3.1 — 2026-10-03\n\nThree one.\n\n" +
+	adoc := "= Notes\n\n== 1.0.0 — 2026-10-05\n\nOne.\n\n=== 1.0.1 — 2026-10-06\n\nOne one.\n\n" +
+		"== 0.3.0 — 2026-10-02\n\nThree.\n\n=== 0.3.1 — 2026-10-03\n\nThree one.\n\n" +
 		"=== 0.3.2 — 2026-10-04\n\nThree two.\n\n== 0.2.0 — 2026-10-01\n\nTwo.\n"
-	for version, want := range map[string]string{"0.3.0": "Three.\n", "0.3.1": "Three one.\n", "0.3.2": "Three two.\n", "0.2.0": "Two.\n"} {
+	for version, want := range map[string]string{
+		"1.0.0": "One.\n", "1.0.1": "One one.\n",
+		"0.3.0": "Three.\n", "0.3.1": "Three one.\n", "0.3.2": "Three two.\n", "0.2.0": "Two.\n",
+	} {
 		got, err := Extract(adoc, version)
 		if err != nil {
 			t.Fatal(err)

@@ -162,14 +162,21 @@ Conventional Commits type and a summary — `✨ feat:`, `🐛 fix:`, `📝 docs
 
 == Releases and versions
 
-The section is introduced by specification `004-releases`.
+The section is introduced by specification `004-releases`; the rule on the
+major version by `006-major-version`.
 
 * A version is an annotated tag `vX.Y.Z` on `develop`; `make build` takes it
   from `git describe` into `qws version`.
 * The minor version for new behaviour, a new configuration key or a changed
   default; the patch for fixes without new behaviour.
-* `RELEASE-NOTES.adoc`: a minor release is a chapter, its patches are
-  subsections, the newest come first.
+* The major version when a release is incompatible with the previous ones —
+  a configuration they read is not read the same way, a key, a flag or an
+  environment variable is removed or changes its meaning without an alias —
+  but always by agreement with the author: without it such a change goes out
+  as a minor version. Or by the author's direct request: 1.0.0, planned
+  after the animation (2026-10-01).
+* `RELEASE-NOTES.adoc`: a minor or major release is a chapter, its patches
+  are subsections, the newest come first.
 * Every version tag gets a GitHub release, built by GitHub Actions
   (`.github/workflows/release.yml`) when the tag is pushed: the checks on the
   tag, then `make release TAG=vX.Y.Z` (`scripts/release.sh`). A pushed tag
