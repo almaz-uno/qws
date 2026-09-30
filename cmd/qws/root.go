@@ -445,6 +445,8 @@ func run(cmd *cobra.Command, args []string) error {
 // Returns updated selector to preserve state
 func handleKeyPress(ctx context.Context, conn *x11.Connection, e xproto.KeyPressEvent, selector *ui.Selector,
 	mruList *mru.MRUList, watcher *focus.Watcher) *ui.Selector {
+	start := time.Now()
+
 	// Apply show delay if configured
 	if cfg.Behavior.ShowDelay > 0 {
 		time.Sleep(cfg.Behavior.ShowDelay)
@@ -481,6 +483,7 @@ func handleKeyPress(ctx context.Context, conn *x11.Connection, e xproto.KeyPress
 			}
 		}
 	}
+	list := time.Since(start)
 
 	// Create or reuse selector
 	if selector == nil {
@@ -495,6 +498,7 @@ func handleKeyPress(ctx context.Context, conn *x11.Connection, e xproto.KeyPress
 		selector.UpdateWindows(windows)
 	}
 
+	selector.BeginActivation(start, list)
 	selected, err := selector.Show()
 
 	// Register selector window in watcher after Show() (when window is created)

@@ -52,6 +52,7 @@ type Selector struct {
 	initialLayoutMode   string         // Initial layout mode ("carousel" or "grid") for restoration on exit
 	lastMouseUpdate     time.Time      // Last time mouse hover was processed
 	watcher             *focus.Watcher // Focus watcher for getting active window
+	timing              frameTiming    // Cause and start of the next frame, for latency logging
 }
 
 // NewSelector creates a new graphical window selector
@@ -426,6 +427,12 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 			return nil
 		}
 
+		if _, ok := event.(xproto.KeyPressEvent); ok {
+			s.markFrameCause(causeKey)
+		} else {
+			s.markFrameCause(causeEvent)
+		}
+
 		switch e := event.(type) {
 		case xproto.KeyPressEvent:
 			// Track primary modifier presses
@@ -558,6 +565,8 @@ func (s *Selector) prepareWindowData() []carousel.WindowData {
 
 // render renders the carousel with current state
 func (s *Selector) render(thumbnails []image.Image) {
+	drawStart := time.Now()
+
 	// Prepare window data with icons and titles
 	windowData := s.prepareWindowData()
 
@@ -569,8 +578,10 @@ func (s *Selector) render(thumbnails []image.Image) {
 		// Default to carousel
 		img = s.renderer.Draw3DCarouselWithData(windowData, s.selectedIndex, s.hoverIndex, s.animOffset, s.config)
 	}
+	drawEnd := time.Now()
 
 	s.window.DrawImage(img)
+	s.logFrame(drawStart, drawEnd, time.Now())
 }
 
 // handleKeyPressSimple handles a key press event
