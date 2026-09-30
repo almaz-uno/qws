@@ -16,7 +16,7 @@ timing, and the reference digests before anything that could change a pixel.
   `develop` (`2c59c26`), together with the digests of the font files. Check:
   the test passes on E1 and fails when one pixel of a reference frame is
   altered.
-. [ ] T4. Author's decision on the targets of K5–K7 and on the scope of
+. [x] T4. Author's decision on the targets of K5–K7 and on the scope of
   M1.list; the specification updated, `:status:` says so.
 . [ ] T5. GLX presenter, removal of the GPU scene and of GLFW, the fallback,
   the frame dump. Check: K1, K2, K3, K4, K9; S1 for both renderers recorded.

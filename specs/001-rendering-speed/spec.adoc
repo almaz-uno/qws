@@ -3,7 +3,7 @@
 :toc-title: Contents
 :sectnums:
 :revdate: 2026-09-30
-:status: draft; timings in place (T1), baseline measured (T2); targets of K5–K7 open (T4); presenter not implemented
+:status: timings in place (T1), baseline measured (T2), targets fixed (T4); presenter not implemented
 :issue: 5
 
 == What and why
@@ -90,8 +90,13 @@ theme. Fonts are fixed files, so that the digests do not depend on the host.
   `glReadPixels`) is removed together with the hidden GLFW window, and so is
   its stale size after a monitor change. Users of `renderer: glx` see the
   `cpu` picture.
-. *`renderer: cpu`* draws exactly the pixels it draws on `develop`, and
-  presents them as today.
+. *`renderer: cpu`* draws exactly the pixels it draws on `develop` and
+  presents them through `PutImage` as today; the conversion to BGRA and the
+  requests may be sped up as long as the bytes sent to the server are the
+  same.
+. *`Expose` of the overlay window* presents the last frame again instead of
+  drawing it anew — the same pixels, without the second full frame that now
+  stands between an activation and its first step (research, "Findings").
 . *Failure to initialise GLX* — no GLX, no suitable FBConfig, no context —
   falls back to `cpu` with a warning in the log, as today.
 . *The shared drawing code* may be sped up only by changes that keep every
@@ -104,7 +109,9 @@ stages 2–5 — raw BGRA upload and GPU downscale (off the frame path, and the
 latter changes pixels), the texture cache with XDamage, pre-warm, instanced
 drawing; changes to the `cpu` picture, including its quirks (side
 thumbnails and icons ignore card alpha, `shadow.blur` is not applied) — such
-a change is a specification of its own and changes both renderers at once.
+a change is a specification of its own and changes both renderers at once;
+the window list collection, M1.list — specification 002 (author's decision,
+2026-09-30).
 
 == Acceptance criteria
 
@@ -136,16 +143,17 @@ a change is a specification of its own and changes both renderers at once.
   initialisation error.
 
 | K5
-| `glx` step latency: M2 p95 ≤ _open — fixed after T2_ (proposed: one
-  refresh period of E1, 6.94 ms). S1, three runs.
+| `glx` step latency: M2 p95 ≤ 100 ms (baseline `cpu`: 273 ms). S1, three
+  runs.
 
 | K6
-| `glx` activation latency: M1 warm p95 ≤ _open — fixed after T2_; M1 cold
-  reported. S1, three runs.
+| `glx` activation latency: M1 warm p95 ≤ 300 ms (baseline `cpu`: 549–581
+  ms), with the window list collected as today; M1 cold reported. S1, three
+  runs.
 
 | K7
-| `glx` CPU work per frame: M3.cpu and M3.alloc ≤ _open — fixed after T2_.
-  S1, three runs.
+| `glx` CPU work per frame: M3.cpu ≤ 70 ms and M3.alloc ≤ 16 MB (baseline
+  `cpu`: 202 ms and 57 MB). S1, three runs.
 
 | K8
 | `cpu` without regression: p50 of M1 warm, M2, M3.cpu and M3.alloc of `cpu`
@@ -156,14 +164,16 @@ a change is a specification of its own and changes both renderers at once.
 | `go vet ./...` and `go test ./...` pass.
 |===
 
+== Decisions
+
+Author, 2026-09-30, from the baseline (T4): the targets of K5–K7 as above —
+a one-refresh step (6.94 ms) is out of reach while the CPU draws every pixel
+(research, "Where the time goes"); the window list collection is left to
+specification 002; the presentation of `cpu` without the per-pixel `At` and
+`Expose` without redrawing join stage 3.
+
 == Open decisions
 
-. Targets of K5–K7 — fixed from the baseline (T2), before implementation
-  starts.
-. Whether M1.list — the window list rebuilt from X properties and `.desktop`
-  files on every activation (research, "Activation") — is in scope. It is
-  part of M1 but not of drawing; decided together with the targets, once T2
-  shows its share of M1.
 . Whether `glx` becomes the default renderer once K2–K8 hold.
 . What happens to branch `issue/optimize-gl` and its `doc/optimize-gl.adoc`
   after the port: the branch is not merged as is.
