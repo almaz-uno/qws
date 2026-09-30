@@ -29,6 +29,10 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
+      # As in the release: without it git describe fails, and make builds in
+      # "dev" as the version
+      - name: safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: build dependencies
         run: scripts/debian-deps.sh
       - uses: actions/setup-go@v7
