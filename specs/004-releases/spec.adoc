@@ -1,0 +1,103 @@
+= 004 — versions, releases and CI
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-09-30
+:status: draft; nothing implemented
+:issue: 8
+
+== What and why
+
+qws has no versions and no builds outside the author's working copies. There
+are no tags; `version` in `cmd/qws/root.go` is "set by build flags", but no
+build passes them, and `qws version` always prints `dev`. There is no CI:
+`go vet` and `go test` run only locally. Both are open questions of the
+constitution ("CI", "Releases and versions"); the author asked for versions
+and builds on GitHub (2026-09-30). The change closes them, and the rules
+become sections of the constitution.
+
+The approach is the one of siphon (its specifications 008, 009 and 012),
+with two differences: qws is built with cgo against OpenGL and X11, so it is
+built for `linux-amd64` only, and in Debian 12 rather than on the runner's
+Ubuntu — a binary linked against a newer glibc does not start on Debian 12.
+
+Unchanged: the program, apart from `qws version`; `make build` building
+`./qws`; the rules on commits, tags and pushes (constitution, "Working with
+history").
+
+== Behavior
+
+. *Version* — an annotated tag `vX.Y.Z` on `develop`. `make build` passes
+  `git describe --tags --always --dirty` to `main.version`; `qws version`
+  prints it. Outside a repository, and with a plain `go build`, it is `dev`.
+. *Numbers*: the minor version for new behaviour, a new configuration key or
+  a changed default; the patch for fixes without new behaviour.
+. *`RELEASE-NOTES.adoc`* in English: a minor release is a chapter, its
+  patches are subsections, the newest come first.
+. *A release* is a GitHub release on a version tag: the title "qws X.Y.Z",
+  the files `qws-linux-amd64` and `SHA256SUMS`, and as text the section of
+  the release in `RELEASE-NOTES.adoc` at the tag, in Markdown — for `X.Y.0`
+  the chapter up to its first subsection, for a patch its subsection;
+  `link:path[text]` becomes a link to the file at the tag, `Label::` and
+  `*bold*` become bold.
+. *`make release TAG=vX.Y.Z`* (`scripts/release.sh`) refuses, before
+  building, a tag that is not annotated, not pushed to `origin`, or already
+  released — pushing a tag and replacing a release are the author's
+  decisions. It builds from a temporary `git worktree` at the tag, checks
+  that `qws version` of the build is the tag, writes `SHA256SUMS`, and
+  publishes with `gh release create --verify-tag`.
+. *The build environment* of CI and of releases is a `debian:bookworm`
+  container; its packages are listed once, in `scripts/debian-deps.sh`.
+. *Workflow `test`* runs `make vet` and `make test` on every push of a branch
+  and every pull request. Tests that need a display, GLX, a compositor or
+  the host's DejaVu Sans skip there, as they are designed to.
+. *Workflow `release`* runs on the push of a version tag: `test` on the
+  tag, then `make release`. A pushed tag without a release is released by
+  hand with `gh workflow run release -f tag=vX.Y.Z`.
+. *The first release* is `v0.1.0`, tagged by the author once the pull
+  requests of specifications 001 and 002 and of this one are merged.
+
+== Constitution
+
+* Section "Releases and versions" with the rules above.
+* Section "Verifiability": the checks run in GitHub Actions on every push
+  and pull request, and gate the release.
+* The open questions "CI" and "Releases and versions" are closed.
+
+== Acceptance criteria
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| Release text: from the real `RELEASE-NOTES.adoc`, the chapter of 0.1.0
+  without its heading; from a fixture, a patch — only its subsection, and a
+  chapter — without the text of its patches; a missing section — an error.
+  Links broken over a line, `Label::` and bold translated. Test in
+  `internal/relnotes`.
+
+| K2
+| `scripts/release.sh` refuses before building: no tag or a malformed one —
+  usage; a lightweight tag; a tag not pushed to `origin`; a tag already
+  released. Run on ws1.
+
+| K3
+| Workflow `test` passes on GitHub for this branch and for its pull request.
+
+| K4
+| Release `v0.1.0`: the two files; the downloaded `qws-linux-amd64` matches
+  `SHA256SUMS`, starts on ws1 (Debian 12) and prints `v0.1.0` as its
+  version.
+
+| K5
+| `make build` in a clean working copy gives a `qws version` equal to
+  `git describe --tags --always --dirty`; `go vet ./...` and `go test ./...`
+  pass.
+|===
+
+== Outside the specification
+
+* `linux-arm64` and other platforms: cgo with OpenGL and X11 would need
+  cross toolchains, and there is no such machine to run it on.
+* Packages (`.deb`) and installation from a release.
