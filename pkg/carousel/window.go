@@ -23,11 +23,15 @@ type Window struct {
 
 // NewWindow creates a new X11 window for carousel display at (0, 0)
 func NewWindow(conn *xgb.Conn, root xproto.Window, width, height int) (*Window, error) {
-	return NewWindowAt(conn, root, 0, 0, width, height)
+	return NewWindowAt(conn, root, 0, 0, width, height, 0)
 }
 
-// NewWindowAt creates a new X11 window for carousel display at specific coordinates
-func NewWindowAt(conn *xgb.Conn, root xproto.Window, x, y, width, height int) (*Window, error) {
+// NewWindowAt creates a new X11 window for carousel display at specific coordinates.
+// A non-zero visualID is the depth-32 ARGB visual of the GLX presenter: the
+// window gets that visual and no pixmap or GC, since frames reach it through
+// glXSwapBuffers. With 0 an ARGB visual is probed, and the pixmap and GC of
+// DrawImage are created.
+func NewWindowAt(conn *xgb.Conn, root xproto.Window, x, y, width, height int, visualID xproto.Visualid) (*Window, error) {
 	w := &Window{
 		conn:   conn,
 		root:   root,
@@ -42,12 +46,18 @@ func NewWindowAt(conn *xgb.Conn, root xproto.Window, x, y, width, height int) (*
 	setup := xproto.Setup(conn)
 	screen := setup.DefaultScreen(conn)
 
-	// Try to use ARGB visual for transparency
-	visualID, depth := findARGBVisual(conn)
-	if visualID == 0 {
-		// Fallback to default visual
-		visualID = screen.RootVisual
-		depth = screen.RootDepth
+	glMode := visualID != 0
+	var depth byte
+	if glMode {
+		depth = 32
+	} else {
+		// Try to use ARGB visual for transparency
+		visualID, depth = findARGBVisual(conn)
+		if visualID == 0 {
+			// Fallback to default visual
+			visualID = screen.RootVisual
+			depth = screen.RootDepth
+		}
 	}
 	w.depth = depth
 
@@ -84,6 +94,11 @@ func NewWindowAt(conn *xgb.Conn, root xproto.Window, x, y, width, height int) (*
 	).Check()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create window: %w", err)
+	}
+
+	if glMode {
+		w.setWindowProperties()
+		return w, nil
 	}
 
 	// Create pixmap for double buffering with same depth as window
@@ -243,6 +258,9 @@ func (w *Window) DrawImage(img image.Image) error {
 	if img == nil {
 		return fmt.Errorf("image is nil")
 	}
+	if w.pixmap == 0 {
+		return fmt.Errorf("window has no pixmap: it was created for the GLX presenter")
+	}
 
 	// Convert image to raw bytes (BGRA format for X11)
 	bounds := img.Bounds()
@@ -263,48 +281,23 @@ func (w *Window) DrawImage(img image.Image) error {
 		maxRowsPerRequest = 1
 	}
 
-	// Process image in strips
+	// One strip is converted at a time: xgb copies it into the request. The
+	// requests are checked after all of them are sent, which costs one round
+	// trip instead of one per strip.
+	data := make([]byte, bytesPerRow*min(maxRowsPerRequest, height))
+	type strip struct {
+		y      int
+		cookie xproto.PutImageCookie
+	}
+	strips := make([]strip, 0, (height+maxRowsPerRequest-1)/maxRowsPerRequest)
 	for startY := 0; startY < height; startY += maxRowsPerRequest {
-		endY := startY + maxRowsPerRequest
-		if endY > height {
-			endY = height
-		}
+		endY := min(startY+maxRowsPerRequest, height)
 		stripHeight := endY - startY
-
-		// Convert this strip to bytes (format depends on depth)
-		var data []byte
-		if w.depth == 32 {
-			// 32-bit: BGRA format
-			data = make([]byte, width*stripHeight*4)
-			i := 0
-			for y := bounds.Min.Y + startY; y < bounds.Min.Y+endY; y++ {
-				for x := bounds.Min.X; x < bounds.Max.X; x++ {
-					c := color.RGBAModel.Convert(img.At(x, y)).(color.RGBA)
-					data[i] = c.B
-					data[i+1] = c.G
-					data[i+2] = c.R
-					data[i+3] = c.A
-					i += 4
-				}
-			}
-		} else {
-			// 24-bit: BGR format (no alpha)
-			data = make([]byte, width*stripHeight*4) // Still need padding
-			i := 0
-			for y := bounds.Min.Y + startY; y < bounds.Min.Y+endY; y++ {
-				for x := bounds.Min.X; x < bounds.Max.X; x++ {
-					c := color.RGBAModel.Convert(img.At(x, y)).(color.RGBA)
-					data[i] = c.B
-					data[i+1] = c.G
-					data[i+2] = c.R
-					data[i+3] = 0 // Padding byte
-					i += 4
-				}
-			}
-		}
+		stripData := data[:bytesPerRow*stripHeight]
+		toBGRA(stripData, img, startY, endY, w.depth == 32)
 
 		// Put this strip to pixmap
-		err := xproto.PutImageChecked(
+		cookie := xproto.PutImageChecked(
 			w.conn,
 			xproto.ImageFormatZPixmap,
 			xproto.Drawable(w.pixmap),
@@ -314,14 +307,38 @@ func (w *Window) DrawImage(img image.Image) error {
 			0, int16(startY), // dst x, y
 			0,       // left pad
 			w.depth, // Use actual depth
-			data,
-		).Check()
-		if err != nil {
-			return fmt.Errorf("failed to put image strip at y=%d: %w", startY, err)
-		}
+			stripData,
+		)
+		strips = append(strips, strip{startY, cookie})
 	}
 
 	// Copy pixmap to window
+	copyCookie := xproto.CopyAreaChecked(
+		w.conn,
+		xproto.Drawable(w.pixmap),
+		xproto.Drawable(w.window),
+		w.gc,
+		0, 0, // src x, y
+		0, 0, // dst x, y
+		w.width,
+		w.height,
+	)
+
+	for _, st := range strips {
+		if err := st.cookie.Check(); err != nil {
+			return fmt.Errorf("failed to put image strip at y=%d: %w", st.y, err)
+		}
+	}
+	if err := copyCookie.Check(); err != nil {
+		return fmt.Errorf("failed to copy area: %w", err)
+	}
+
+	w.conn.Sync()
+	return nil
+}
+
+// Refresh copies the pixmap, which holds the last frame, to the window again
+func (w *Window) Refresh() error {
 	err := xproto.CopyAreaChecked(
 		w.conn,
 		xproto.Drawable(w.pixmap),
@@ -335,9 +352,44 @@ func (w *Window) DrawImage(img image.Image) error {
 	if err != nil {
 		return fmt.Errorf("failed to copy area: %w", err)
 	}
-
 	w.conn.Sync()
 	return nil
+}
+
+// toBGRA converts rows [y0, y1) of img, counted from its top, into the bytes
+// PutImage takes: blue, green, red, then alpha for depth 32 or a zero pad
+// byte otherwise. An *image.RGBA is read from Pix directly; any other image
+// through At, with the same result.
+func toBGRA(data []byte, img image.Image, y0, y1 int, alpha bool) {
+	b := img.Bounds()
+	i := 0
+	if rgba, ok := img.(*image.RGBA); ok {
+		for y := b.Min.Y + y0; y < b.Min.Y+y1; y++ {
+			row := rgba.Pix[rgba.PixOffset(b.Min.X, y):][:4*b.Dx()]
+			for j := 0; j < len(row); j += 4 {
+				data[i], data[i+1], data[i+2] = row[j+2], row[j+1], row[j]
+				if alpha {
+					data[i+3] = row[j+3]
+				} else {
+					data[i+3] = 0
+				}
+				i += 4
+			}
+		}
+		return
+	}
+	for y := b.Min.Y + y0; y < b.Min.Y+y1; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			c := color.RGBAModel.Convert(img.At(x, y)).(color.RGBA)
+			data[i], data[i+1], data[i+2] = c.B, c.G, c.R
+			if alpha {
+				data[i+3] = c.A
+			} else {
+				data[i+3] = 0
+			}
+			i += 4
+		}
+	}
 }
 
 // GetWindowID returns the X11 window ID

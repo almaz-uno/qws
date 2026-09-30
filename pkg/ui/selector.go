@@ -36,7 +36,8 @@ type Selector struct {
 	selectedIndex       int
 	hoverIndex          int // Index of window under mouse cursor (-1 if none)
 	window              *carousel.Window
-	renderer            carousel.Renderer // Rendering backend
+	renderer            carousel.Renderer  // Draws frames
+	presenter           carousel.Presenter // Shows frames in the overlay window
 	config              carousel.Config
 	appearance          config.Appearance   // Appearance configuration for recalculating on monitor change
 	monitorGeom         x11.MonitorGeometry // Current monitor geometry
@@ -45,13 +46,15 @@ type Selector struct {
 	animOffset          float64
 	animating           bool
 	resultChan          chan *x11.WindowInfo
-	keyConfig           keyConfig      // Configured keybindings
-	modifierPressed     bool           // Track if primary modifier is currently pressed
-	workspacePressed    bool           // Track if workspace modifier is currently pressed
-	initialWorkspaceOpt string         // Initial workspace configuration ("all", "current", "all-except-current")
-	initialLayoutMode   string         // Initial layout mode ("carousel" or "grid") for restoration on exit
-	lastMouseUpdate     time.Time      // Last time mouse hover was processed
-	watcher             *focus.Watcher // Focus watcher for getting active window
+	keyConfig           keyConfig              // Configured keybindings
+	modifierPressed     bool                   // Track if primary modifier is currently pressed
+	workspacePressed    bool                   // Track if workspace modifier is currently pressed
+	initialWorkspaceOpt string                 // Initial workspace configuration ("all", "current", "all-except-current")
+	initialLayoutMode   string                 // Initial layout mode ("carousel" or "grid") for restoration on exit
+	lastMouseUpdate     time.Time              // Last time mouse hover was processed
+	watcher             *focus.Watcher         // Focus watcher for getting active window
+	timing              frameTiming            // Cause and start of the next frame, for latency logging
+	placeholders        map[string]image.Image // Placeholders of windows without a thumbnail, by title
 }
 
 // NewSelector creates a new graphical window selector
@@ -193,12 +196,13 @@ func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, window
 		watcher:             watcher,
 	}
 
-	// Initialize renderer
-	renderer, err := carousel.NewRenderer(appearance.Renderer, windowWidth, windowHeight)
+	// Initialize renderer and presenter
+	renderer, presenter, err := carousel.NewBackend(appearance.Renderer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create renderer: %w", err)
 	}
 	s.renderer = renderer
+	s.presenter = presenter
 
 	// Apply initial workspace filtering based on configuration
 	if initialWorkspaceOpt == "current" {
@@ -228,6 +232,30 @@ func (s *Selector) UpdateWindows(windows []x11.WindowInfo) {
 	if s.selectedIndex >= len(s.windows) {
 		s.selectedIndex = 0
 	}
+
+	// Keep the placeholders of windows that are still there
+	titles := make(map[string]bool, len(windows))
+	for _, win := range windows {
+		titles[win.Name] = true
+	}
+	for title := range s.placeholders {
+		if !titles[title] {
+			delete(s.placeholders, title)
+		}
+	}
+}
+
+// placeholder is the thumbnail of a window that has none, drawn once per title
+func (s *Selector) placeholder(title string) image.Image {
+	if img, ok := s.placeholders[title]; ok {
+		return img
+	}
+	img := s.renderer.DrawPlaceholder(256, 256, title)
+	if s.placeholders == nil {
+		s.placeholders = make(map[string]image.Image)
+	}
+	s.placeholders[title] = img
+	return img
 }
 
 // Show displays the carousel UI and waits for user selection
@@ -318,9 +346,12 @@ func (s *Selector) Show() (*x11.WindowInfo, error) {
 		// Create window at monitor position with padding
 		s.window, err = carousel.NewWindowAt(s.conn, s.root,
 			s.monitorGeom.X+s.paddingX, s.monitorGeom.Y+s.paddingY,
-			s.config.Width, s.config.Height)
+			s.config.Width, s.config.Height, s.presenter.VisualID())
 		if err != nil {
 			return nil, fmt.Errorf("failed to create window: %w", err)
+		}
+		if err := s.presenter.Bind(s.window); err != nil {
+			return nil, fmt.Errorf("failed to bind presenter to window: %w", err)
 		}
 	}
 
@@ -426,6 +457,12 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 			return nil
 		}
 
+		if _, ok := event.(xproto.KeyPressEvent); ok {
+			s.markFrameCause(causeKey)
+		} else {
+			s.markFrameCause(causeEvent)
+		}
+
 		switch e := event.(type) {
 		case xproto.KeyPressEvent:
 			// Track primary modifier presses
@@ -489,7 +526,7 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 
 		case xproto.ExposeEvent:
 			if e.Window == s.window.GetWindowID() {
-				s.render(thumbnails)
+				s.refresh(thumbnails)
 			}
 
 		case xproto.MotionNotifyEvent:
@@ -530,7 +567,7 @@ func (s *Selector) prepareThumbnails() []image.Image {
 			thumbnails[i] = win.Preview
 		} else {
 			// Use placeholder if no thumbnail available
-			thumbnails[i] = s.renderer.DrawPlaceholder(256, 256, win.Name)
+			thumbnails[i] = s.placeholder(win.Name)
 		}
 	}
 	return thumbnails
@@ -543,7 +580,7 @@ func (s *Selector) prepareWindowData() []carousel.WindowData {
 		thumbnail := win.Preview
 		if thumbnail == nil {
 			// Use placeholder if no thumbnail available
-			thumbnail = s.renderer.DrawPlaceholder(256, 256, win.Name)
+			thumbnail = s.placeholder(win.Name)
 		}
 		data[i] = carousel.WindowData{
 			Thumbnail: thumbnail,
@@ -558,6 +595,8 @@ func (s *Selector) prepareWindowData() []carousel.WindowData {
 
 // render renders the carousel with current state
 func (s *Selector) render(thumbnails []image.Image) {
+	drawStart := time.Now()
+
 	// Prepare window data with icons and titles
 	windowData := s.prepareWindowData()
 
@@ -569,8 +608,29 @@ func (s *Selector) render(thumbnails []image.Image) {
 		// Default to carousel
 		img = s.renderer.Draw3DCarouselWithData(windowData, s.selectedIndex, s.hoverIndex, s.animOffset, s.config)
 	}
+	drawEnd := time.Now()
 
-	s.window.DrawImage(img)
+	if err := s.presenter.Present(img); err != nil {
+		log.Error().Err(err).Msg("Failed to present frame")
+	}
+	end := time.Now()
+	s.dumpFrame(img)
+	s.logFrame(drawStart, drawEnd, end)
+}
+
+// refresh shows the last frame again after an Expose: the presenter still
+// holds it, so it is not drawn anew
+func (s *Selector) refresh(thumbnails []image.Image) {
+	start := time.Now()
+	ok, err := s.presenter.Refresh()
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to refresh frame")
+	}
+	if !ok {
+		s.render(thumbnails)
+		return
+	}
+	s.logRefresh(start, time.Now())
 }
 
 // handleKeyPressSimple handles a key press event
@@ -717,6 +777,9 @@ func (s *Selector) animateTransition(targetIndex int, thumbnails []image.Image) 
 
 // Close closes the selector window and frees resources
 func (s *Selector) Close() error {
+	if s.presenter != nil {
+		s.presenter.Close()
+	}
 	if s.window != nil {
 		return s.window.Close()
 	}

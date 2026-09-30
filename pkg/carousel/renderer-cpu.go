@@ -7,6 +7,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/fogleman/gg"
 )
@@ -154,34 +155,91 @@ func Draw3DCarousel(thumbnails []image.Image, selected int, animOffset float64, 
 
 // Draw3DCarouselWithData renders a 2.5D carousel with icons and titles
 func Draw3DCarouselWithData(windowData []WindowData, selected int, hoverIndex int, animOffset float64, cfg Config) *image.RGBA {
-	dc := gg.NewContext(cfg.Width, cfg.Height)
-
 	// Background - semi-transparent if enabled, fully transparent otherwise
-	if cfg.WindowBackgroundEnabled {
-		setColor(dc, cfg.BackgroundColor, cfg.WindowBackgroundOpacity)
-		if cfg.WindowBackgroundRadius > 0 {
-			// Draw rounded rectangle
-			dc.DrawRoundedRectangle(0, 0, float64(cfg.Width), float64(cfg.Height), cfg.WindowBackgroundRadius)
-			dc.Fill()
-		} else {
-			// Draw regular rectangle
-			dc.Clear()
-		}
-	} else {
-		// Fully transparent
-		dc.SetRGBA(0, 0, 0, 0)
-		dc.Clear()
-	}
+	dc := newCanvas(cfg)
 
 	centerX := float64(cfg.Width) / 2
 	centerY := float64(cfg.Height) / 2
 
+	// Resample the thumbnails and icons of the visible cards in parallel
+	canvas := dc.Image().(*image.RGBA)
+	thumbs := make([]*preparedImage, len(windowData))
+	icons := make([]*preparedImage, len(windowData))
+	var wg sync.WaitGroup
+	for i := range windowData {
+		card, ok := carouselCard(&windowData[i], i, selected, animOffset, centerX, centerY, cfg)
+		if !ok {
+			continue
+		}
+		wg.Go(func() {
+			thumbs[i] = prepareOpaque(canvas.Bounds(), card.thumbnailMatrix(), windowData[i].Thumbnail)
+		})
+		if icon := windowData[i].Icon; icon != nil {
+			wg.Go(func() {
+				icons[i] = prepareOnUniform(canvas, card.iconMatrix(icon), icon)
+			})
+		}
+	}
+	wg.Wait()
+
 	// Draw each window with icon, title, and thumbnail
 	for i := range windowData {
-		drawWindowWithData(dc, &windowData[i], i, selected, hoverIndex, animOffset, centerX, centerY, cfg)
+		drawWindowWithData(dc, &windowData[i], i, selected, hoverIndex, animOffset, centerX, centerY, cfg, thumbs[i], icons[i])
 	}
 
 	return getImageRGBA(dc)
+}
+
+// backgroundKey is what the rounded window background depends on
+type backgroundKey struct {
+	width, height   int
+	color           string
+	opacity, radius float64
+}
+
+// background keeps the last rounded window background drawn. It is the first
+// thing drawn on a transparent canvas, so its pixels depend on its key alone,
+// and a copy of it is the canvas it would have made.
+var background struct {
+	sync.Mutex
+	key backgroundKey
+	img *image.RGBA
+}
+
+// newCanvas is a canvas of the window size with the window background on it
+func newCanvas(cfg Config) *gg.Context {
+	if !cfg.WindowBackgroundEnabled || cfg.WindowBackgroundRadius <= 0 {
+		dc := gg.NewContext(cfg.Width, cfg.Height)
+		if cfg.WindowBackgroundEnabled {
+			// Draw regular rectangle
+			setColor(dc, cfg.BackgroundColor, cfg.WindowBackgroundOpacity)
+		} else {
+			// Fully transparent
+			dc.SetRGBA(0, 0, 0, 0)
+		}
+		dc.Clear()
+		return dc
+	}
+
+	key := backgroundKey{cfg.Width, cfg.Height, cfg.BackgroundColor, cfg.WindowBackgroundOpacity, cfg.WindowBackgroundRadius}
+	background.Lock()
+	if background.img == nil || background.key != key {
+		// Draw rounded rectangle
+		dc := gg.NewContext(cfg.Width, cfg.Height)
+		setColor(dc, cfg.BackgroundColor, cfg.WindowBackgroundOpacity)
+		dc.DrawRoundedRectangle(0, 0, float64(cfg.Width), float64(cfg.Height), cfg.WindowBackgroundRadius)
+		dc.Fill()
+		background.key, background.img = key, getImageRGBA(dc)
+	}
+	img := image.NewRGBA(background.img.Rect)
+	copy(img.Pix, background.img.Pix)
+	background.Unlock()
+
+	// Leave the context as drawing the background does: its colour set, and
+	// no current point
+	dc := gg.NewContextForRGBA(img)
+	setColor(dc, cfg.BackgroundColor, cfg.WindowBackgroundOpacity)
+	return dc
 }
 
 // getImageRGBA converts gg.Context image to RGBA
@@ -298,10 +356,17 @@ func drawShadow(dc *gg.Context, x, y, w, h, rotation, scale float64, cfg Config)
 	dc.Pop()
 }
 
-// drawWindowWithData draws a window with icon, title, and thumbnail
-func drawWindowWithData(dc *gg.Context, data *WindowData, index, selected, hoverIndex int, animOffset, centerX, centerY float64, cfg Config) {
+// cardGeometry is where the carousel puts the card of a window
+type cardGeometry struct {
+	offset, scale, x, y, alpha, rotation     float64
+	thumbW, thumbH, scaleMin, finalW, finalH float64
+}
+
+// carouselCard computes the geometry of the card of the window at index;
+// false when the card is not drawn
+func carouselCard(data *WindowData, index, selected int, animOffset, centerX, centerY float64, cfg Config) (cardGeometry, bool) {
 	if data == nil || data.Thumbnail == nil {
-		return
+		return cardGeometry{}, false
 	}
 
 	// Position relative to center (with animation offset)
@@ -309,7 +374,7 @@ func drawWindowWithData(dc *gg.Context, data *WindowData, index, selected, hover
 
 	// Don't draw items too far from center (performance optimization)
 	if math.Abs(offset) > 5 {
-		return
+		return cardGeometry{}, false
 	}
 
 	// Calculate transformation parameters
@@ -344,6 +409,43 @@ func drawWindowWithData(dc *gg.Context, data *WindowData, index, selected, hover
 	finalW := thumbW * scaleMin * scale
 	finalH := thumbH * scaleMin * scale
 
+	return cardGeometry{offset, scale, x, y, alpha, rotation, thumbW, thumbH, scaleMin, finalW, finalH}, true
+}
+
+// thumbnailMatrix is the matrix drawWindowWithData draws the thumbnail under
+func (c cardGeometry) thumbnailMatrix() gg.Matrix {
+	return gg.Identity().
+		Translate(c.x, c.y).
+		Rotate(c.rotation).
+		Scale(c.scaleMin*c.scale, c.scaleMin*c.scale).
+		Translate(-c.thumbW/2, -c.thumbH/2)
+}
+
+// iconMatrix is the matrix drawWindowWithData draws the icon under
+func (c cardGeometry) iconMatrix(icon image.Image) gg.Matrix {
+	iconBounds := icon.Bounds()
+	iconW := float64(iconBounds.Dx())
+	iconH := float64(iconBounds.Dy())
+	iconSize := 48.0 * c.scale
+	iconY := c.y - c.finalH/2 - 80*c.scale
+	iconScale := iconSize / math.Max(iconW, iconH)
+	return gg.Identity().
+		Translate(c.x, iconY).
+		Scale(iconScale, iconScale).
+		Translate(-iconW/2, -iconH/2)
+}
+
+// drawWindowWithData draws a window with icon, title, and thumbnail; thumb and
+// icon are its thumbnail and icon resampled in advance, or nil to draw them in
+// place
+func drawWindowWithData(dc *gg.Context, data *WindowData, index, selected, hoverIndex int, animOffset, centerX, centerY float64, cfg Config, thumb, icon *preparedImage) {
+	card, ok := carouselCard(data, index, selected, animOffset, centerX, centerY, cfg)
+	if !ok {
+		return
+	}
+	offset, scale, x, y, alpha, rotation := card.offset, card.scale, card.x, card.y, card.alpha, card.rotation
+	thumbW, thumbH, scaleMin, finalW, finalH := card.thumbW, card.thumbH, card.scaleMin, card.finalW, card.finalH
+
 	// Icon size and position
 	iconSize := 48.0 * scale
 	iconY := y - finalH/2 - 80*scale // Above thumbnail
@@ -373,7 +475,9 @@ func drawWindowWithData(dc *gg.Context, data *WindowData, index, selected, hover
 		dc.Scale(iconScale, iconScale)
 		dc.Translate(-iconW/2, -iconH/2)
 		dc.SetRGBA(1, 1, 1, alpha)
-		dc.DrawImage(data.Icon, 0, 0)
+		if icon == nil || !icon.drawTo(dc.Image().(*image.RGBA)) {
+			dc.DrawImage(data.Icon, 0, 0)
+		}
 		dc.Pop()
 	}
 
@@ -479,7 +583,9 @@ skipWorkspace:
 	dc.Translate(-thumbW/2, -thumbH/2)
 
 	dc.SetRGBA(1, 1, 1, alpha)
-	dc.DrawImage(data.Thumbnail, 0, 0)
+	if thumb == nil || !thumb.drawTo(dc.Image().(*image.RGBA)) {
+		dc.DrawImage(data.Thumbnail, 0, 0)
+	}
 
 	// Draw border around thumbnail
 	dc.SetRGBA(1, 1, 1, alpha*0.8)
@@ -602,21 +708,8 @@ func CreateGradientBackground(width, height int, c1, c2 color.Color) image.Image
 
 // DrawGridLayout renders windows in a grid layout (like Windows task switcher)
 func DrawGridLayout(windowData []WindowData, selected int, hoverIndex int, cfg Config) *image.RGBA {
-	dc := gg.NewContext(cfg.Width, cfg.Height)
-
 	// Background - semi-transparent if enabled, fully transparent otherwise
-	if cfg.WindowBackgroundEnabled {
-		setColor(dc, cfg.BackgroundColor, cfg.WindowBackgroundOpacity)
-		if cfg.WindowBackgroundRadius > 0 {
-			dc.DrawRoundedRectangle(0, 0, float64(cfg.Width), float64(cfg.Height), cfg.WindowBackgroundRadius)
-			dc.Fill()
-		} else {
-			dc.Clear()
-		}
-	} else {
-		dc.SetRGBA(0, 0, 0, 0)
-		dc.Clear()
-	}
+	dc := newCanvas(cfg)
 
 	if len(windowData) == 0 {
 		return getImageRGBA(dc)

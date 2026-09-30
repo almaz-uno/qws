@@ -14,9 +14,12 @@ appearance:
   #   - Press 'g' to switch to grid
   layout: carousel
 
-  # Renderer backend: "cpu" (default, software rendering) or "glx" (GPU-accelerated)
-  # GLX provides better performance but requires OpenGL 4.6+ support
-  renderer: cpu
+  # Renderer backend: how frames reach the screen; both show the same picture
+  #   - "glx" - an OpenGL texture presented through GLX (default, faster);
+  #             needs a direct OpenGL 4.6 core context with a 32-bit ARGB
+  #             visual, else falls back to "cpu" with a warning
+  #   - "cpu" - PutImage to the X server
+  renderer: glx
 
   thumbnail:
     width: 256
