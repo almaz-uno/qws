@@ -46,14 +46,15 @@ type Selector struct {
 	animOffset          float64
 	animating           bool
 	resultChan          chan *x11.WindowInfo
-	keyConfig           keyConfig      // Configured keybindings
-	modifierPressed     bool           // Track if primary modifier is currently pressed
-	workspacePressed    bool           // Track if workspace modifier is currently pressed
-	initialWorkspaceOpt string         // Initial workspace configuration ("all", "current", "all-except-current")
-	initialLayoutMode   string         // Initial layout mode ("carousel" or "grid") for restoration on exit
-	lastMouseUpdate     time.Time      // Last time mouse hover was processed
-	watcher             *focus.Watcher // Focus watcher for getting active window
-	timing              frameTiming    // Cause and start of the next frame, for latency logging
+	keyConfig           keyConfig              // Configured keybindings
+	modifierPressed     bool                   // Track if primary modifier is currently pressed
+	workspacePressed    bool                   // Track if workspace modifier is currently pressed
+	initialWorkspaceOpt string                 // Initial workspace configuration ("all", "current", "all-except-current")
+	initialLayoutMode   string                 // Initial layout mode ("carousel" or "grid") for restoration on exit
+	lastMouseUpdate     time.Time              // Last time mouse hover was processed
+	watcher             *focus.Watcher         // Focus watcher for getting active window
+	timing              frameTiming            // Cause and start of the next frame, for latency logging
+	placeholders        map[string]image.Image // Placeholders of windows without a thumbnail, by title
 }
 
 // NewSelector creates a new graphical window selector
@@ -231,6 +232,30 @@ func (s *Selector) UpdateWindows(windows []x11.WindowInfo) {
 	if s.selectedIndex >= len(s.windows) {
 		s.selectedIndex = 0
 	}
+
+	// Keep the placeholders of windows that are still there
+	titles := make(map[string]bool, len(windows))
+	for _, win := range windows {
+		titles[win.Name] = true
+	}
+	for title := range s.placeholders {
+		if !titles[title] {
+			delete(s.placeholders, title)
+		}
+	}
+}
+
+// placeholder is the thumbnail of a window that has none, drawn once per title
+func (s *Selector) placeholder(title string) image.Image {
+	if img, ok := s.placeholders[title]; ok {
+		return img
+	}
+	img := s.renderer.DrawPlaceholder(256, 256, title)
+	if s.placeholders == nil {
+		s.placeholders = make(map[string]image.Image)
+	}
+	s.placeholders[title] = img
+	return img
 }
 
 // Show displays the carousel UI and waits for user selection
@@ -542,7 +567,7 @@ func (s *Selector) prepareThumbnails() []image.Image {
 			thumbnails[i] = win.Preview
 		} else {
 			// Use placeholder if no thumbnail available
-			thumbnails[i] = s.renderer.DrawPlaceholder(256, 256, win.Name)
+			thumbnails[i] = s.placeholder(win.Name)
 		}
 	}
 	return thumbnails
@@ -555,7 +580,7 @@ func (s *Selector) prepareWindowData() []carousel.WindowData {
 		thumbnail := win.Preview
 		if thumbnail == nil {
 			// Use placeholder if no thumbnail available
-			thumbnail = s.renderer.DrawPlaceholder(256, 256, win.Name)
+			thumbnail = s.placeholder(win.Name)
 		}
 		data[i] = carousel.WindowData{
 			Thumbnail: thumbnail,
