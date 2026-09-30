@@ -80,9 +80,10 @@ decision recorded there says so and updates the document in the same change.
   alone), `framecmp` (criterion K3 of `001-rendering-speed`).
 * Logging — zerolog, `github.com/rs/zerolog/log`, with structured fields
   instead of the standard `log` package (`AGENTS.md`).
-* Build — `make build` (binary `./qws`, ignored by git), tests — `make test`
-  (`go test -v ./...`), static checks — `go vet ./...`. `make lint` runs
-  `go vet` and then `gofmt -s -w .`, which rewrites files in place.
+* Build — `make build` (binary `./qws`, ignored by git, with the version of
+  `git describe`), tests — `make test` (`go test ./...`), static checks —
+  `make vet`. `make lint` runs `go vet` and then `gofmt -s -w .`, which
+  rewrites files in place.
 * Profiling — the `--cpuprofile`, `--memprofile` and `--pprof` flags and
   `script/profile.sh`; profiles are written to `profiles/`, which is ignored by
   git.
@@ -109,10 +110,12 @@ decision recorded there says so and updates the document in the same change.
 == Verifiability
 
 Tests are updated together with the implementation — in the same change, not
-"later". There is no CI yet (see the open questions): `go vet ./...` and
-`go test ./...` are run locally and pass before a change is proposed for
-commit. At the time of writing, tests exist for `internal/config`,
-`pkg/carousel` (font fallback) and `pkg/mru`.
+"later". `go vet ./...` and `go test ./...` pass locally before a change is
+proposed for commit, and run in GitHub Actions — workflow `test`, in Debian 12
+with the packages of `scripts/debian-deps.sh` — on every push of a branch and
+every pull request; the same workflow gates the release (specification
+`004-releases`). At the time of writing, tests exist for `internal/config`,
+`internal/relnotes`, `pkg/carousel` (font fallback) and `pkg/mru`.
 
 Tests do not need an X server, a compositor, a window manager or a GPU. A test
 that depends on a resource of the host system skips when the resource is
@@ -157,15 +160,32 @@ Conventional Commits type and a summary — `✨ feat:`, `🐛 fix:`, `📝 docs
 `♻️ refactor:`, `⚡ perf:`. Work happens on `issue/qws#NN-slug` branches off
 `develop` and lands through a GitHub pull request into `develop`.
 
+== Releases and versions
+
+The section is introduced by specification `004-releases`.
+
+* A version is an annotated tag `vX.Y.Z` on `develop`; `make build` takes it
+  from `git describe` into `qws version`.
+* The minor version for new behaviour, a new configuration key or a changed
+  default; the patch for fixes without new behaviour.
+* `RELEASE-NOTES.adoc`: a minor release is a chapter, its patches are
+  subsections, the newest come first.
+* Every version tag gets a GitHub release, built by GitHub Actions
+  (`.github/workflows/release.yml`) when the tag is pushed: the checks on the
+  tag, then `make release TAG=vX.Y.Z` (`scripts/release.sh`). A pushed tag
+  without a release is released by `gh workflow run release -f
+  tag=vX.Y.Z`; `make release` on the author's machine is the same script.
+  The files are built from the tag in a temporary `git worktree`, in Debian
+  12, for `linux-amd64`; the text is the section of the notes at the tag.
+* Tags, their push and releases only with the author's consent (section
+  "Working with history"): the script neither creates nor pushes a tag, and
+  pushing a tag is the consent to release it.
+
 == What the constitution does not regulate
 
 Open questions, recorded as open. Each is closed by a separate change with a
 specification, after which the corresponding section appears above.
 
-* *CI* — there is none; checks are run locally (section "Verifiability").
-* *Releases and versions* — there are no tags; `version` in `cmd/qws/root.go`
-  is "set by build flags", but no build passes them, and `qws version` always
-  prints `dev`.
 * *Non-English documents* — `doc/optimization.asciidoc` and about half of
   `doc/font-fallback.md` are in Russian, and a few paragraphs and code
   comments in `doc/configuration.asciidoc` and `doc/windows-switcher.asciidoc`
