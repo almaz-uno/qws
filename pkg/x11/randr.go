@@ -15,6 +15,8 @@ type MonitorGeometry struct {
 	Y      int
 	Width  int
 	Height int
+
+	Refresh float64 // Refresh rate of its mode in Hz, 0 when unknown
 }
 
 // GetMonitors returns a list of all active monitors using XRandR
@@ -74,10 +76,11 @@ func GetMonitors(conn *xgb.Conn, root xproto.Window) ([]MonitorGeometry, error) 
 		}
 
 		monitor := MonitorGeometry{
-			X:      int(crtcInfo.X),
-			Y:      int(crtcInfo.Y),
-			Width:  int(crtcInfo.Width),
-			Height: int(crtcInfo.Height),
+			X:       int(crtcInfo.X),
+			Y:       int(crtcInfo.Y),
+			Width:   int(crtcInfo.Width),
+			Height:  int(crtcInfo.Height),
+			Refresh: modeRefresh(resources.Modes, crtcInfo.Mode),
 		}
 
 		log.Debug().
@@ -225,6 +228,25 @@ func GetMonitorForWindow(conn *xgb.Conn, root xproto.Window, window xproto.Windo
 		Msg("Found monitor with largest window intersection")
 
 	return bestMonitor, nil
+}
+
+// modeRefresh is the refresh rate of the mode in Hz, 0 when the mode is not
+// among the modes
+func modeRefresh(modes []randr.ModeInfo, id randr.Mode) float64 {
+	for _, m := range modes {
+		if randr.Mode(m.Id) != id || m.Htotal == 0 || m.Vtotal == 0 {
+			continue
+		}
+		rate := float64(m.DotClock) / (float64(m.Htotal) * float64(m.Vtotal))
+		if m.ModeFlags&randr.ModeFlagInterlace != 0 {
+			rate *= 2
+		}
+		if m.ModeFlags&randr.ModeFlagDoubleScan != 0 {
+			rate /= 2
+		}
+		return rate
+	}
+	return 0
 }
 
 func max(a, b int) int {
