@@ -1,6 +1,10 @@
 package ui
 
 import (
+	"fmt"
+	"image"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -20,6 +24,7 @@ type frameTiming struct {
 	cause      string        // cause of the next frame
 	start      time.Time     // when the cause was read from the X connection
 	list       time.Duration // window list collection of the current activation (M1.list)
+	dumpDir    string        // where the first frame of every activation is written, if set
 }
 
 // BeginActivation marks the start of an activation: start is when the
@@ -29,6 +34,34 @@ func (s *Selector) BeginActivation(start time.Time, list time.Duration) {
 	s.timing.cause = causeActivation
 	s.timing.start = start
 	s.timing.list = list
+}
+
+// SetFrameDump makes the selector write the first frame of every activation to
+// dir as raw RGBA bytes, for comparison with a capture of the window
+// (criterion K3 of specs/001-rendering-speed)
+func (s *Selector) SetFrameDump(dir string) {
+	s.timing.dumpDir = dir
+}
+
+// dumpFrame writes the frame if it is the first of an activation and dumping
+// is on
+func (s *Selector) dumpFrame(img *image.RGBA) {
+	t := &s.timing
+	if t.dumpDir == "" || t.cause != causeActivation {
+		return
+	}
+	file := filepath.Join(t.dumpDir, fmt.Sprintf("frame-%d.rgba", t.activation))
+	if err := os.WriteFile(file, img.Pix, 0o644); err != nil {
+		log.Error().Err(err).Str("file", file).Msg("Failed to dump frame")
+		return
+	}
+	log.Debug().
+		Int("activation", t.activation).
+		Uint32("window", uint32(s.window.GetWindowID())).
+		Int("width", img.Bounds().Dx()).
+		Int("height", img.Bounds().Dy()).
+		Str("file", file).
+		Msg("Frame dumped")
 }
 
 // markFrameCause records that the event just read may cause a frame

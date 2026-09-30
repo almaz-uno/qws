@@ -61,8 +61,9 @@ change to the shared drawing code.
   every frame.
 
 | `cmd/qws/root.go`
-| The start of M1 at the entry of `handleKeyPress`, M1.list. The frame dump
-  for K3.
+| The start of M1 at the entry of `handleKeyPress`, M1.list. The hidden flag
+  `--debug-dump-frames <dir>`: the first frame of every activation as raw
+  RGBA, for K3.
 
 | `pkg/carousel/renderer-cpu.go`
 | Stage 3 only: the cache of transformed thumbnails (research, "Bit-exact
@@ -76,12 +77,19 @@ change to the shared drawing code.
 | Removed — a GLFW sample of the path being removed; `console/glxoverlay`
   from the prototype, which uses `pkg/glx`, takes its place.
 
+| `console/framecmp`
+| New: reads the overlay window with `GetImage` and compares it with a
+  dumped frame, for K3. `xwd -id` was tried first: in one of three captures
+  it switched to reading the screen through the root visual and returned a
+  24-bit image.
+
 | `go.mod`, `go.sum`
 | `github.com/go-gl/glfw` removed; `github.com/go-gl/gl` stays.
 
 | `specs/001-rendering-speed/measure.sh`
 | New: session S1 through `xdotool`, collection of the timings from the JSON
-  log, p50 and p95 per metric and phase.
+  log, p50 and p95 per metric and phase; `k3`, criterion K3 for both
+  renderers.
 
 | `README.md`, `config.yaml.example`, `doc/configuration.asciidoc`
 | `renderer`: what `glx` does, that it shows the `cpu` picture, the fallback,

@@ -23,11 +23,15 @@ type Window struct {
 
 // NewWindow creates a new X11 window for carousel display at (0, 0)
 func NewWindow(conn *xgb.Conn, root xproto.Window, width, height int) (*Window, error) {
-	return NewWindowAt(conn, root, 0, 0, width, height)
+	return NewWindowAt(conn, root, 0, 0, width, height, 0)
 }
 
-// NewWindowAt creates a new X11 window for carousel display at specific coordinates
-func NewWindowAt(conn *xgb.Conn, root xproto.Window, x, y, width, height int) (*Window, error) {
+// NewWindowAt creates a new X11 window for carousel display at specific coordinates.
+// A non-zero visualID is the depth-32 ARGB visual of the GLX presenter: the
+// window gets that visual and no pixmap or GC, since frames reach it through
+// glXSwapBuffers. With 0 an ARGB visual is probed, and the pixmap and GC of
+// DrawImage are created.
+func NewWindowAt(conn *xgb.Conn, root xproto.Window, x, y, width, height int, visualID xproto.Visualid) (*Window, error) {
 	w := &Window{
 		conn:   conn,
 		root:   root,
@@ -42,12 +46,18 @@ func NewWindowAt(conn *xgb.Conn, root xproto.Window, x, y, width, height int) (*
 	setup := xproto.Setup(conn)
 	screen := setup.DefaultScreen(conn)
 
-	// Try to use ARGB visual for transparency
-	visualID, depth := findARGBVisual(conn)
-	if visualID == 0 {
-		// Fallback to default visual
-		visualID = screen.RootVisual
-		depth = screen.RootDepth
+	glMode := visualID != 0
+	var depth byte
+	if glMode {
+		depth = 32
+	} else {
+		// Try to use ARGB visual for transparency
+		visualID, depth = findARGBVisual(conn)
+		if visualID == 0 {
+			// Fallback to default visual
+			visualID = screen.RootVisual
+			depth = screen.RootDepth
+		}
 	}
 	w.depth = depth
 
@@ -84,6 +94,11 @@ func NewWindowAt(conn *xgb.Conn, root xproto.Window, x, y, width, height int) (*
 	).Check()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create window: %w", err)
+	}
+
+	if glMode {
+		w.setWindowProperties()
+		return w, nil
 	}
 
 	// Create pixmap for double buffering with same depth as window
@@ -242,6 +257,9 @@ func (w *Window) Close() error {
 func (w *Window) DrawImage(img image.Image) error {
 	if img == nil {
 		return fmt.Errorf("image is nil")
+	}
+	if w.pixmap == 0 {
+		return fmt.Errorf("window has no pixmap: it was created for the GLX presenter")
 	}
 
 	// Convert image to raw bytes (BGRA format for X11)

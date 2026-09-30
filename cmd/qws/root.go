@@ -28,6 +28,10 @@ var (
 	cfg        *config.Config
 	version    = "dev" // Set by build flags
 	defaultCfg = config.Default()
+
+	// frameDumpDir receives the first frame of every activation (hidden flag
+	// --debug-dump-frames, specs/001-rendering-speed)
+	frameDumpDir string
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -53,6 +57,8 @@ func init() {
 	rootCmd.PersistentFlags().String("cpuprofile", "", "write cpu profile to file")
 	rootCmd.PersistentFlags().String("memprofile", "", "write memory profile to file")
 	rootCmd.PersistentFlags().String("pprof", "", "start pprof HTTP server on address (e.g. localhost:6060)")
+	rootCmd.PersistentFlags().String("debug-dump-frames", "", "write the first frame of every activation to this directory")
+	_ = rootCmd.PersistentFlags().MarkHidden("debug-dump-frames")
 
 	// Keybindings
 	rootCmd.PersistentFlags().StringP("keybindings-modifier", "m", defaultCfg.Keybindings.Modifier, "main modifier key (Alt, Super, Ctrl)")
@@ -349,6 +355,8 @@ func run(cmd *cobra.Command, args []string) error {
 	}
 	defer cleanupProfiling(cmd)
 
+	frameDumpDir, _ = cmd.Flags().GetString("debug-dump-frames")
+
 	// Create root context
 	ctx := cmd.Context()
 
@@ -492,6 +500,9 @@ func handleKeyPress(ctx context.Context, conn *x11.Connection, e xproto.KeyPress
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to create selector")
 			return selector
+		}
+		if frameDumpDir != "" {
+			selector.SetFrameDump(frameDumpDir)
 		}
 	} else {
 		// Update window list, preserving position

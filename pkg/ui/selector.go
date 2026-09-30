@@ -36,7 +36,8 @@ type Selector struct {
 	selectedIndex       int
 	hoverIndex          int // Index of window under mouse cursor (-1 if none)
 	window              *carousel.Window
-	renderer            carousel.Renderer // Rendering backend
+	renderer            carousel.Renderer  // Draws frames
+	presenter           carousel.Presenter // Shows frames in the overlay window
 	config              carousel.Config
 	appearance          config.Appearance   // Appearance configuration for recalculating on monitor change
 	monitorGeom         x11.MonitorGeometry // Current monitor geometry
@@ -194,12 +195,13 @@ func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, window
 		watcher:             watcher,
 	}
 
-	// Initialize renderer
-	renderer, err := carousel.NewRenderer(appearance.Renderer, windowWidth, windowHeight)
+	// Initialize renderer and presenter
+	renderer, presenter, err := carousel.NewBackend(appearance.Renderer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create renderer: %w", err)
 	}
 	s.renderer = renderer
+	s.presenter = presenter
 
 	// Apply initial workspace filtering based on configuration
 	if initialWorkspaceOpt == "current" {
@@ -319,9 +321,12 @@ func (s *Selector) Show() (*x11.WindowInfo, error) {
 		// Create window at monitor position with padding
 		s.window, err = carousel.NewWindowAt(s.conn, s.root,
 			s.monitorGeom.X+s.paddingX, s.monitorGeom.Y+s.paddingY,
-			s.config.Width, s.config.Height)
+			s.config.Width, s.config.Height, s.presenter.VisualID())
 		if err != nil {
 			return nil, fmt.Errorf("failed to create window: %w", err)
+		}
+		if err := s.presenter.Bind(s.window); err != nil {
+			return nil, fmt.Errorf("failed to bind presenter to window: %w", err)
 		}
 	}
 
@@ -580,8 +585,12 @@ func (s *Selector) render(thumbnails []image.Image) {
 	}
 	drawEnd := time.Now()
 
-	s.window.DrawImage(img)
-	s.logFrame(drawStart, drawEnd, time.Now())
+	if err := s.presenter.Present(img); err != nil {
+		log.Error().Err(err).Msg("Failed to present frame")
+	}
+	end := time.Now()
+	s.dumpFrame(img)
+	s.logFrame(drawStart, drawEnd, end)
 }
 
 // handleKeyPressSimple handles a key press event
@@ -728,6 +737,9 @@ func (s *Selector) animateTransition(targetIndex int, thumbnails []image.Image) 
 
 // Close closes the selector window and frees resources
 func (s *Selector) Close() error {
+	if s.presenter != nil {
+		s.presenter.Close()
+	}
 	if s.window != nil {
 		return s.window.Close()
 	}
