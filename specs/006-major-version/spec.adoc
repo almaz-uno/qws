@@ -1,0 +1,59 @@
+= 006 — when the major version
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-01
+:status: implemented 2026-10-01; K1, K2 met (section "Results"); changes the constitution, not the program — not released by itself
+:issue: 15
+
+== What and why
+
+Section "Releases and versions" of the constitution, introduced by
+specification 004, says when the minor and the patch version change, not the
+major one. The author asked to take over the rules of siphon, whose
+constitution has the rule (its commit `cbbd36f`, 2026-09-30), and plans
+1.0.0 after the animation (2026-10-01).
+
+Unchanged: the program, the other rules of the section, the release
+process.
+
+== Constitution
+
+Section "Releases and versions" gets, after the rule on minor and patch
+versions:
+
+* The major version when a release is incompatible with the previous ones —
+  a configuration they read is not read the same way, a key, a flag or an
+  environment variable is removed or changes its meaning without an alias —
+  but always by agreement with the author: without it such a change goes out
+  as a minor version. Or by the author's direct request: 1.0.0, planned
+  after the animation (2026-10-01).
+
+The rule is siphon's, with qws's kinds of incompatibility in place of
+siphon's nodes, protocol and database. A major release, `X.0.0`, is a chapter
+of `RELEASE-NOTES.adoc` like a minor one.
+
+== Acceptance criteria
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| The rule is in section "Releases and versions" of `specs/constitution.adoc`.
+
+| K2
+| The text of a major release is its chapter: `Extract` of `1.0.0` from a
+  fixture with `== 1.0.0` and `=== 1.0.1` gives the chapter without the
+  patch. Test in `internal/relnotes`.
+|===
+
+== Results
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | Section "Releases and versions".
+| K2 | `TestExtractLevels`, with `1.0.0` and `1.0.1` in its fixture.
+|===
