@@ -106,9 +106,12 @@ viper.BindPFlag("keybindings.workspace_modifier",
 * CLI flags convert both dots and underscores to dashes for GNU/POSIX compliance
 * Viper handles all conversions transparently — just use the YAML key in code
 * `qws config init` of versions before specification `002-config-names` wrote
-  multi-word keys joined (`workspacemodifier`, `snapshotinterval`). qws reads
-  such a key as the one it stands for and logs a warning naming the key to use;
-  when a file has both, the key with underscores wins
+  multi-word keys joined (`workspacemodifier`, `snapshotinterval`). qws no
+  longer reads such a key (specification `015-no-joined-keys`; versions up to
+  1.2.0 read it as the one it stands for): the key it stands for takes its
+  value from the other sources or its default, and qws logs a warning naming
+  the key to use. When a file has both, the key with underscores is read and
+  the joined one ignored, with a warning
 * `QWS_CONFIG` gives the path of the configuration file; `--config` takes
   precedence over it
 

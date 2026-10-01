@@ -273,7 +273,8 @@ func Default() *Config {
 
 // Load loads configuration from file, environment variables, and command-line
 // flags. The warnings are about the file: keys written as earlier versions of
-// config init wrote them, to be logged once logging is set up.
+// config init wrote them, which are not read, to be logged once logging is set
+// up.
 func Load(cfgFile string) (*Config, []string, error) {
 	v := viper.New()
 
@@ -313,10 +314,7 @@ func Load(cfgFile string) (*Config, []string, error) {
 		}
 		// Config file not found; using defaults
 	}
-	warnings, err := readJoinedKeys(v)
-	if err != nil {
-		return nil, nil, err
-	}
+	warnings := joinedKeyWarnings(v)
 
 	// Unmarshal config
 	if err := v.Unmarshal(cfg); err != nil {
@@ -335,7 +333,8 @@ func Load(cfgFile string) (*Config, []string, error) {
 // joinedKeys maps each key as earlier versions of config init wrote it — with
 // the lowercased Go names yaml.v3 gives fields without tags, so multi-word
 // names joined — to the key it stands for, where the two differ
-// (specs/002-config-names)
+// (specs/002-config-names). Such a key is not read
+// (specs/015-no-joined-keys).
 func joinedKeys() map[string]string {
 	keys := map[string]string{}
 	walkFields(reflect.TypeOf(Config{}), "", func(f reflect.StructField, path string) {
@@ -378,9 +377,9 @@ func walkFields(t reflect.Type, prefix string, fn func(f reflect.StructField, pa
 	}
 }
 
-// readJoinedKeys reads the joined keys of the file as the keys they stand
-// for, at the precedence of the file, and returns a warning for each
-func readJoinedKeys(v *viper.Viper) ([]string, error) {
+// joinedKeyWarnings returns a warning for each joined key of the file, which
+// is not read, naming the key to use
+func joinedKeyWarnings(v *viper.Viper) []string {
 	keys := joinedKeys()
 	joined := make([]string, 0, len(keys))
 	for k := range keys {
@@ -398,22 +397,9 @@ func readJoinedKeys(v *viper.Viper) ([]string, error) {
 			warnings = append(warnings, fmt.Sprintf("configuration key %s is ignored: %s is set", k, key))
 			continue
 		}
-		if err := v.MergeConfigMap(nestedMap(key, v.Get(k))); err != nil {
-			return nil, fmt.Errorf("failed to read configuration key %s: %w", k, err)
-		}
-		warnings = append(warnings, fmt.Sprintf("configuration key %s is read as %s; rename it", k, key))
+		warnings = append(warnings, fmt.Sprintf("configuration key %s is no longer read: rename it to %s", k, key))
 	}
-	return warnings, nil
-}
-
-// nestedMap is {"a": {"b": value}} for the key "a.b"
-func nestedMap(key string, value any) map[string]any {
-	parts := strings.Split(key, ".")
-	m := map[string]any{parts[len(parts)-1]: value}
-	for i := len(parts) - 2; i >= 0; i-- {
-		m = map[string]any{parts[i]: m}
-	}
-	return m
+	return warnings
 }
 
 // setDefaults sets default values in viper
