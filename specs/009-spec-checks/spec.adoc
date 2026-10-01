@@ -57,9 +57,12 @@ the content of specifications 001–007 except `:status:`.
 * *`:issue:` in every specification*, `draft` included: the issue comes
   first (`specs/README.adoc`, "Relation to issues"), so a committed
   specification always has its number.
-* *The check has its own test.* A check that broke and passes everything
-  is not seen: the build stays green. `scripts/check-specs-test.sh` runs the
-  check on generated `specs/` trees, valid and with each violation.
+* *No test of the check.* A test, `scripts/check-specs-test.sh` with nine
+  cases, and `mutate.sh`, which broke the check one rule at a time to see the
+  test fail, were written and removed by the author's decision (2026-10-01):
+  some 90 lines of test guarding some 60 of check are more complex than what
+  they guard. The check is short enough to be read; a change to it is tried
+  by hand on a copy of `specs/` with each violation (K2).
 * *A shell script, not a Go test.* lxqt-weather is C++, and one check for
   three projects is one logic to read. The copies differ in the heading of
   the results section and in what `:issue:` holds — siphon has no tracker
@@ -73,8 +76,7 @@ the content of specifications 001–007 except `:status:`.
 
 == Behavior
 
-`make check-specs` runs `scripts/check-specs-test.sh`, then
-`scripts/check-specs.sh`. The check passes when:
+`make check-specs` runs `scripts/check-specs.sh`. The check passes when:
 
 * every entry of `specs/` is `README.adoc`, `constitution.adoc` or a
   directory `NNN-slug` — three digits, a hyphen, lowercase words of letters
@@ -104,10 +106,10 @@ A section "Specifications" is added after "Releases and versions":
 * A specification does not copy what git and GitHub hold — whether the
   change is merged or released, whether its issue is closed: such a fact
   arrives after the last commit of the change and cannot be written in it.
-* The form of `specs/` is checked by `make check-specs` — the check and its
-  own test — before a change is proposed and in workflow `test`. The check
-  sees the form, not the truth: that a specification matches the code rests
-  on its criteria (section "Decisions rest on measurements").
+* The form of `specs/` is checked by `make check-specs` before a change is
+  proposed and in workflow `test`. The check sees the form, not the truth:
+  that a specification matches the code rests on its criteria (section
+  "Decisions rest on measurements").
 
 Section "Verifiability" names `make check-specs` among the checks that pass
 before a change is proposed; section "Stack and layout" names it among the
@@ -172,28 +174,22 @@ specification of its own".
 | # | Criterion and method
 
 | K1
-| `make check-specs` passes on the branch: the test, then the check of
-  specifications 001–009.
+| `make check-specs` passes on the branch: the check of specifications
+  001–009.
 
 | K2
-| `scripts/check-specs-test.sh` covers each rule of section "Behavior": a
-  valid tree with the three statuses passes; a stray file, a malformed
-  directory name, a repeated number, a directory without `spec.adoc`, a free
-  text status, an `implemented` specification without "Results", an
-  `:issue:` that is not a number and a `:status:` outside the header each
-  fail with their message.
+| The check passes a valid tree with the three statuses and rejects, with
+  its message, each violation of section "Behavior" on a copy of `specs/`
+  that has that violation alone: a stray file, a malformed directory name, a
+  repeated number, a directory without `spec.adoc`, a free text status, an
+  `implemented` specification without "Results", an `:issue:` that is not a
+  number, a `:status:` outside the header.
 
 | K3
-| The test fails when the check is broken: each rule of the check, removed or
-  weakened one at a time, makes `scripts/check-specs-test.sh` fail.
-  `mutate.sh` in this directory makes the mutants and reports each as killed
-  or survived.
-
-| K4
 | Workflow `test` on the pull request runs `make check-specs`, and the step
   passes.
 
-| K5
+| K4
 | `specs/constitution.adoc` has section "Specifications", "Verifiability"
   and "Stack and layout" name `make check-specs`, and the open question "SDD
   framework" is gone; `specs/README.adoc` has the rule on `:status:` of
@@ -208,27 +204,24 @@ specification of its own".
 |===
 | # | How it is met
 
-| K1 | `make check-specs` at `2d11248`: both scripts exit 0. Before the
+| K1 | `make check-specs` at `2d11248`: the check exits 0. Before the
   statuses were rewritten, the check of `develop` named the six of 001–007,
   and nothing else.
-| K2 | `scripts/check-specs-test.sh`, nine cases: `valid`, `stray-file`,
-  `bad-name`, `same-number`, `no-spec`, `free-status`, `no-results`,
-  `bad-issue`, `status-in-body`.
-| K3 | `mutate.sh`: nine mutants — a stray `.adoc` let through, any number of
-  digits, numbers not remembered, a missing `spec.adoc` not reported, any
-  status accepted, "Results" not required, `:issue:` not checked, the
-  attributes read from the whole document, exit status 0 — all killed.
-| K4 | Workflow `test` on `2d11248`: run 36875442104 (push) and 36875447197
+| K2 | Nine cases — `valid`, `stray-file`, `bad-name`, `same-number`,
+  `no-spec`, `free-status`, `no-results`, `bad-issue`, `status-in-body` — run
+  by `scripts/check-specs-test.sh` at `2d11248`, before the test was removed;
+  `mutate.sh` of that commit showed the test caught each of nine broken rules.
+| K3 | Workflow `test` on `2d11248`: run 36875442104 (push) and 36875447197
   (pull request), step `make check-specs` passed. Run 36875245643, the pull
   request at `a9d450f`, failed at that step on the merge with `develop`,
   which had just received 008 with "not merged" in its status: the case of
   section "Behavior", two branches meeting on `develop`, caught in CI.
-| K5 | Sections "Specifications", "Verifiability" and "Stack and layout" of
+| K4 | Sections "Specifications", "Verifiability" and "Stack and layout" of
   the constitution; "Layout" and "Rules" of `specs/README.adoc`.
 |===
 
 Found along the way: pull request #23 was merged at `2d11248` (14:21:13
-UTC), 43 s before this section reached the branch in `e21ea22`. K4 cites
+UTC), 43 s before this section reached the branch in `e21ea22`. K3 cites
 runs of the pull request itself, so its results could only follow its checks,
 and in between a green pull request looked ready while the specification said
 `draft`; release 1.1.0 carries 009 so. The check cannot see it — the form was
