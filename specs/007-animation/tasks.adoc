@@ -4,15 +4,17 @@
 :revdate: 2026-10-01
 
 . [ ] T1. Frame records of animations, session S2 and its summary; a run on
-  `develop` code as the reference.
-. [ ] T2. The motion (`pkg/ui/motion.go`) with the tests of K8.
-. [ ] T3. Layers: the base, card layers at integer offsets, the selection
+  `develop` code as the reference. Done but the reference run, with T8.
+. [x] T2. The motion (`pkg/ui/motion.go`) with the tests of K8.
+. [x] T3. Layers: the base, card layers at integer offsets, the selection
   layer.
-. [ ] T4. The scene in the GLX presenter; the test of K1.
-. [ ] T5. The loop: polling, pacing at the refresh period, targets and
-  retargeting; the frame at rest. Check: K1–K5 on S2.
-. [ ] T6. The grid: the selection frame sliding.
-. [ ] T7. The fades; K6.
+. [x] T4. The scene in the GLX presenter; the test of K1.
+. [x] T5. The loop: polling, pacing at the refresh period, targets and
+  retargeting; the frame at rest. Checked in tries of one activation
+  (research); K1 by `TestGLXPresenterMatchesCPU`, the frame at rest staged;
+  K2–K5 on S2 in T8.
+. [x] T6. The grid: the selection frame sliding.
+. [x] T7. The fades; K6 in a try, 0.68 ms.
 . [ ] T8. Three runs of S2; K3 confirmed with the author; the author's
   review, K9.
 . [ ] T9. The results, the release notes of 1.0.0.

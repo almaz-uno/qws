@@ -14,14 +14,30 @@ The CPU draws layers, the GPU composes them. The layers of an activation:
   `drawWindowWithData` draws it at that offset, onto a transparent image of
   its bounding box; drawn on demand, in parallel, and kept for the
   activation;
-* the *selection layer* — the selection frame of the card at the centre, or
-  of a grid tile.
+* the layers of the *grid* — its tiles without a selection, with the hover,
+  on a transparent image; the shadow of a selected tile under them and its
+  selection frame over them, both moving.
 
-The GLX presenter keeps them as textures, with mipmaps for downscaling, and
-draws a frame as quads with premultiplied blending,
-`BlendFunc(ONE, ONE_MINUS_SRC_ALPHA)`, in the z-order of the carousel. At
-rest it presents the frame `cpu` draws, as now; the CPU draws it while the
+The GLX presenter keeps them as textures and draws a frame as quads with
+premultiplied blending, `BlendFunc(ONE, ONE_MINUS_SRC_ALPHA)`, in the
+z-order of the carousel. A card at a fractional offset is its two layers
+of the integer offsets around it, placed and scaled to its geometry and
+cross-faded; each is scaled by at most the ratio of the scales of
+neighbouring offsets, so linear filtering does without mipmaps. At rest it
+presents the frame `cpu` draws, as now; the CPU draws it while the
 animation runs.
+
+The layers are drawn in the background, each with fonts of its own — the
+faces of `truetype` are not safe for concurrent use — on at most half the
+CPUs, ahead of the step that needs them: the layers of the next step
+either way are requested as soon as a step is set. The loop uploads them in
+the pauses between frames and between events, a megabyte a pause at most.
+The frame at rest, drawn in the background as well, goes to the GPU the
+same way, into a second texture of the window size, and is presented by
+swapping the two.
+
+The fades scale every channel of what is presented — the scene, the frame
+at rest, the last frame — by the alpha of the fade, in the same frames.
 
 `cpu` keeps presenting the frames it draws, at once.
 
@@ -35,18 +51,32 @@ animation runs.
 | New: the position and its target, ease-out cubic, retargeting — pure, for
   the tests of K8.
 
-| `pkg/ui/selector.go`
+| `pkg/ui/selector.go`, `pkg/ui/animation.go`
 | The event loop polls while an animation runs and draws a frame per refresh
-  period; steps set targets; the fades on show and on selection, with the
-  window activated first.
+  period; steps set targets; the layers and the frame at rest drawn in the
+  background; the fades on show and on selection, with the window activated
+  first. The keyboard mapping read once an activation.
 
 | `pkg/carousel/layers.go`
 | New: the base, the card layers and the selection layer, from the drawing
   code of `cpu`.
 
-| `pkg/carousel/present_glx.go`
+| `pkg/carousel/present_glx.go`, `pkg/carousel/present_glx_scene.go`
 | The scene: textures of layers, quads with transforms and alpha, blending;
   the frame at rest as now.
+
+| `pkg/carousel/fontfallback.go`
+| Fonts parsed once; sets of faces for drawings that run in parallel.
+
+| `pkg/carousel/renderer-cpu.go`, `pkg/composite/capture.go`
+| Copies of whole images a row or a piece at a time, preemptible.
+
+| `pkg/ui/fade.go`, `cmd/qws/root.go`
+| The fades; the chosen window activated before the fade-out, the events
+  read during it handled after it.
+
+| `pkg/focus/watcher.go`, `cmd/qws/root.go`
+| No snapshots while the switcher is shown.
 
 | `pkg/carousel/present.go`
 | The presenter says whether it animates; `cpu` does not.

@@ -3,7 +3,7 @@
 :toc-title: Contents
 :sectnums:
 :revdate: 2026-10-01
-:status: draft; nothing implemented
+:status: in progress; the step, the grid and the fades implemented (T2–T7); the runs of S2 to do
 :issue: 17
 
 == What and why
@@ -32,6 +32,24 @@ Author, 2026-10-01: the approach above; the scope — the carousel step with
 retargeting, the appearance and disappearance of the overlay, the selection
 frame of the grid; 150 ms with ease-out, a new frame every vertical blank.
 
+Made on the way, 2026-10-01, for the author to confirm — each for frames on
+time (research, "Frames on time"):
+
+* the background snapshots of the active window pause while the switcher is
+  shown;
+* the keyboard and modifier mappings are read once an activation, and again
+  on `MappingNotify`, not on every key;
+* K2 asks for no missed frame and a p95 half a millisecond above the
+  period, not a p95 of one period: an interval measured at P varies by a
+  tenth of a millisecond or more even when every frame makes its vertical
+  blank, so half of them are above the period;
+* the loop does not wait for the frame at rest: a step ends on time with
+  its scene at the target, and the frame at rest follows when drawn — for
+  the grid some 200 ms later;
+* S2 ends each activation not with `Escape` but with steps back to the
+  first window and the modifier released: an activation, for K6, that
+  leaves the focus where it was.
+
 == Behavior
 
 All of it on `glx`; `cpu` behaves as today.
@@ -48,26 +66,33 @@ All of it on `glx`; `cpu` behaves as today.
   centre. A wrap-around step — from the last window to the first or back —
   is not animated.
 . *At rest* — when `p` reaches its target — the overlay shows the frame
-  `cpu` draws for the target, byte for byte, as without animation.
-. *The grid*: the selection frame slides from its tile to the next in
-  150 ms, ease-out, over the grid drawn without a selection; at rest, the
-  frame of `cpu`.
-. *Appearance*: the first frame of an activation fades in over 150 ms. A
+  `cpu` draws for the target, byte for byte, as without animation, once it
+  is drawn; until then, the scene at the target. The loop does not wait for
+  it: a frame of the grid takes some 350 ms to draw on E1 (research).
+. *The grid*: the selection frame and the shadow of the selected tile slide
+  from its tile to the next in 150 ms, ease-out, under and over the tiles
+  drawn without a selection; at rest, the frame of `cpu`.
+. *Appearance*: the first frame of an activation fades in over 150 ms, from
+  the end of its presentation; an `Expose` meanwhile is not answered. A
   quick press, released before the overlay shows, is not animated.
 . *Disappearance*: on a selection — modifier released, `Enter`, a click —
   the chosen window is activated at once, and the overlay then fades out
-  over 150 ms before it is unmapped; `Escape` fades it out too. A new
-  activation during a fade-out cuts it short.
+  over 150 ms before it is unmapped; `Escape` fades it out too. The events
+  read during a fade-out are handled after it; a key press, as of a new
+  activation, cuts it short.
 . *Pacing*: frames of an animation follow a timer at the refresh period of
   the monitor the overlay is on, from RandR; the swap interval stays 0 — an
-  interval of 1 throttles an off-screen window to one swap a second
-  (research).
+  interval of 1 throttles the overlay to one swap a second (research). The
+  layers go to the GPU in the pauses between frames.
+. *While shown*, the switcher takes no snapshots of the active window, and
+  reads the keyboard mapping once.
 
 == Metrics
 
 Frames of an animation are logged at debug level like the frames of
-specification 001, with the kind of the animation, its progress and the
-time since the previous frame.
+specification 001, with the kind of the animation — `carousel`, `grid`,
+`fade-in`, `fade-out` — its progress and the time since the previous frame.
+A frame of a step during a fade is a frame of both.
 
 A1 — frame interval:: The time between two presented frames of one
 animation, P to P.
@@ -94,8 +119,10 @@ step key — 2 s at the author's autorepeat, 33 a second after 500 ms — before
   001, the capture of the window, still gives an absolute error of 0.
 
 | K2
-| Smoothness: A1 p95 ≤ 6.94 ms on E1 for the step, the grid and the fades;
-  at least 18 frames in a 150 ms animation. S2, three runs.
+| Smoothness, on E1 for the step, the grid and the fades: A1 p95 ≤ the
+  refresh period + 0.5 ms, 7.44 ms at 144 Hz; no frame missed — A1 ≤ 1.5
+  periods, 10.4 ms; at least 18 frames in a 150 ms animation. S2, three
+  runs.
 
 | K3
 | Response: A2 p95 ≤ 30 ms on E1 — proposed, to be confirmed with the author
