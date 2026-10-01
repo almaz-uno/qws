@@ -3,7 +3,7 @@
 :toc-title: Contents
 :sectnums:
 :revdate: 2026-10-01
-:status: draft
+:status: implemented
 :issue: 42
 
 == What and why
@@ -155,3 +155,28 @@ shows its picture. New keys make the release a minor one (constitution,
 | `go vet ./...`, `go test ./...` and `make check-specs` pass.
 |===
 
+== Results
+
+2026-10-01, ws1 (Debian 12, Go 1.26.0), unit tests; `DISPLAY` set, so the
+tests of `pkg/carousel` that need X ran rather than skipped.
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | `TestSetHeader`. `TestScenes`: the 24 scenes pass, among them the 18
+  of 001.
+| K2 | `TestScenes` (24 scenes) and `TestGLXPresenterMatchesCPU` pass;
+  `git diff` of `testdata/scenes.json` is empty. `TestParseAnimation` with
+  the defaults.
+| K3 | `TestHoverDuration`.
+| K4 | `TestZoomFactors`.
+| K5 | `TestAppearanceKeys`, `TestAppearanceFlags`, `TestRoundTrip`,
+  `TestTagNames`. `qws config show` prints the four keys at their defaults.
+| K6 | `go vet ./...`, `go test ./...`, `scripts/check-specs.sh`.
+|===
+
+Not seen on a screen: the change was made without touching the author's
+desktop. The factors reach the GLX presenter through the `carousel.Fade` the
+constants went through, and `TestGLXPresenterZoom` of 010 checks a scale
+other than 1 there.

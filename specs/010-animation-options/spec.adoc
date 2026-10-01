@@ -270,5 +270,6 @@ was. `SWEEP=1 HOLD=2 measure.sh run glx <dir>`.
   pauses only for its own (research, "The control") — to be settled by a
   specification of its own, and the hover measured again then.
 . A duration of its own for the hover, should one for all be too slow for
-  it.
-. The zoom factors as keys, should the constants not suit.
+  it — `hover_duration`, specification 014.
+. The zoom factors as keys, should the constants not suit — `overlay_zoom`
+  and `hover_zoom`, specification 014.

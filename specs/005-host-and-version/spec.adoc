@@ -94,4 +94,5 @@ in once specification 004 is merged.
 
 == Open decisions
 
-. A configuration key to hide the header, if it turns out to be in the way.
+. A configuration key to hide the header, if it turns out to be in the way
+  — `appearance.header.enabled`, specification 014.
