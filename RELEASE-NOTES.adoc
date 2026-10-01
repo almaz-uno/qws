@@ -27,6 +27,20 @@ they need glibc 2.36 or newer and the OpenGL and X11 libraries.
   and the hover frame fades and zooms. `show: [fade]`, `hide: [fade]` and
   `hover: none` keep the look of 1.1.0.
 
+=== 1.2.1 — 2026-10-01
+
+*Thumbnails of a second instance*
+(link:specs/018-snapshot-bind-conflicts/spec.adoc[specification 018]):
+
+* A second qws beside the service — a test instance, a second service —
+  captured every window on the CPU again, about 100 ms each, some 10 % of a
+  CPU while idle: on NVIDIA only one client may bind the pixmap of a window
+  as a texture, and the service already does. Such a window is now scaled
+  down in the X server by RENDER, in about 2 ms; the CPU remains the
+  fallback without RENDER or MIT-SHM.
+* A refused binding is logged once per window, with the X error and the
+  request that caused it.
+
 == 1.1.0 — 2026-10-01
 
 *Thumbnails* (link:specs/008-window-snapshots/spec.adoc[specification 008]):
