@@ -81,8 +81,12 @@ type layerCache struct {
 }
 
 // cardKey names a card layer: the card of window index at an integer offset
-// from the selection — or, with a negative index, a layer of the grid
-type cardKey struct{ index, offset int }
+// from the selection, or its hover frame — or, with a negative index, a layer
+// of the grid
+type cardKey struct {
+	index, offset int
+	hover         bool
+}
 
 // Layers of the grid among the card layers
 const (
@@ -94,7 +98,7 @@ const (
 )
 
 // gridLayers are the layers of a scene of the grid
-var gridLayers = []cardKey{{gridTiles, 0}, {gridShadow, 0}, {gridSelection, 0}, {gridHoverShadow, 0}, {gridHover, 0}}
+var gridLayers = []cardKey{{index: gridTiles}, {index: gridShadow}, {index: gridSelection}, {index: gridHoverShadow}, {index: gridHover}}
 
 type cardLayer struct {
 	id     carousel.LayerID // 0: the card is not drawn at that offset
@@ -188,19 +192,32 @@ func (s *Selector) requestRest(cause string) {
 	}
 }
 
-// hoverChanged shows a new hover. On the grid of a presenter that composes —
-// where a frame takes some 480 ms to draw on E1 — it shows at once in a scene
-// of layers, and the frame drawn in the background replaces the scene when it
-// comes; drawn here, each change of the hover held the mouse back by a frame
-// (research). A step that moves ends with the frame of the new hover.
-// Otherwise the frame is drawn at once, as before.
+// hoverChanged shows a new hover. With the effects of hover, on a presenter
+// that composes and holds the layers of the scene, the hover frames move in
+// frames of the loop, and the frame at rest follows them
+// (specs/010-animation-options). Without them, on the grid of such a
+// presenter — where a frame takes some 480 ms to draw on E1 — it shows at
+// once in a scene of layers, and the frame drawn in the background replaces
+// the scene when it comes; drawn here, each change of the hover held the
+// mouse back by a frame (research of 007). A step that moves ends with the
+// frame of the new hover. Otherwise the frame is drawn at once, as before.
 func (s *Selector) hoverChanged(thumbnails []image.Image) {
+	now := time.Now()
+	animated := s.animates() && s.anim.hover.any() && s.sceneReady()
+	s.setHover(now, animated)
+	if animated {
+		s.beginHover(now)
+		s.requestHoverLayers()
+	}
 	switch {
 	case s.step.active:
 		// The frame at rest is still that of the key of the step
 		cause, at := s.rest.cause, s.rest.causeAt
 		s.requestRest(cause)
 		s.rest.causeAt = at
+	case animated:
+		s.requestRest(causeEvent)
+		s.rest.awaited, s.rest.stepEnd = true, false
 	case s.animates() && s.grid() && s.gridReady():
 		s.requestRest(causeEvent)
 		s.rest.awaited, s.rest.stepEnd = true, false
@@ -211,7 +228,7 @@ func (s *Selector) hoverChanged(thumbnails []image.Image) {
 		start := time.Now()
 		items := s.gridItems(start)
 		drawEnd := time.Now()
-		if err := s.animator.PresentScene(baseLayer, items, 1); err != nil {
+		if err := s.animator.PresentScene(baseLayer, items, carousel.Opaque); err != nil {
 			log.Error().Err(err).Msg("Failed to present the scene of the grid")
 		}
 		s.logFrame(start, drawEnd, time.Now())
@@ -220,9 +237,11 @@ func (s *Selector) hoverChanged(thumbnails []image.Image) {
 	}
 }
 
-// cancelStep ends the step in progress without its frame at rest
+// cancelStep ends the step and the hover motion in progress without their
+// frame at rest
 func (s *Selector) cancelStep() {
 	s.step.active = false
+	s.stopHover()
 	s.rest.want = false
 	s.rest.ready = nil
 	s.rest.awaited = false
@@ -305,7 +324,7 @@ func (s *Selector) motionLayers(p, target float64) []cardKey {
 	for k := range s.windows {
 		for n := int(math.Floor(float64(k) - hi)); n <= int(math.Ceil(float64(k)-lo)); n++ {
 			if n >= -5 && n <= 5 {
-				keys = append(keys, cardKey{k, n})
+				keys = append(keys, cardKey{index: k, offset: n})
 			}
 		}
 	}
@@ -313,8 +332,8 @@ func (s *Selector) motionLayers(p, target float64) []cardKey {
 }
 
 // prefetch requests the layers of the next step either way from the
-// selection: of the carousel, the cards it passes; of the grid, all of its
-// layers
+// selection: of the carousel, the cards it passes, and the hover frame of the
+// hovered card; of the grid, all of its layers
 func (s *Selector) prefetch() {
 	if !s.animates() {
 		return
@@ -325,6 +344,31 @@ func (s *Selector) prefetch() {
 	}
 	sel := float64(s.selectedIndex)
 	s.requestLayers(append(s.motionLayers(sel-1, sel), s.motionLayers(sel, sel+1)...))
+	s.requestHoverLayers()
+}
+
+// sceneReady reports whether the animator holds the layers of a scene at rest
+// of the layout shown
+func (s *Selector) sceneReady() bool {
+	if s.grid() {
+		return s.gridReady()
+	}
+	return s.carouselReady()
+}
+
+// carouselReady reports whether the animator holds the base and the card
+// layers of the carousel at rest
+func (s *Selector) carouselReady() bool {
+	if !s.layers.base {
+		return false
+	}
+	sel := float64(s.selectedIndex)
+	for _, key := range s.motionLayers(sel, sel) {
+		if _, ok := s.layers.cards[key]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // gridReady reports whether the animator holds the layers of a scene of the
@@ -343,6 +387,9 @@ func (s *Selector) gridReady() bool {
 
 // drawLayer draws the layer named by key
 func drawLayer(data []carousel.WindowData, key cardKey, cfg carousel.Config) *image.RGBA {
+	if key.hover {
+		return carousel.CarouselHover(data, key.index, key.offset, cfg)
+	}
 	if key.index >= 0 {
 		return carousel.CardLayer(data, key.index, key.offset, cfg)
 	}
@@ -445,7 +492,7 @@ func (s *Selector) uploadIdle() {
 		s.collectRest(r)
 		if s.rest.awaited && s.rest.ready != nil {
 			stepEnd := s.rest.stepEnd
-			start, end := s.presentRest(1)
+			start, end := s.presentRest(carousel.Opaque)
 			if stepEnd {
 				s.logAnimationFrame(&s.step.animationLog, s.config.LayoutMode, 1, true, start, start, end)
 			}
@@ -517,26 +564,24 @@ func (s *Selector) waitFrame(t time.Time) time.Time {
 	return now
 }
 
-// frame presents the next frame of the animations when it is due, at the alpha
-// of the fade if one runs: the scene of the step that moves; at the end of a
-// step, its frame at rest, or while that is drawn, its scene at the target;
-// with a fade alone, the picture shown
+// frame presents the next frame of the animations when it is due, through
+// the fade if one runs: the scene of the step or the hover that moves; at the
+// end of a step or a hover motion, its frame at rest, or while that is drawn,
+// its scene at the target; with a fade alone, the picture shown
 func (s *Selector) frame() {
 	now := s.waitFrame(s.frameDue)
-	alpha := 1.0
-	if s.fade.active {
-		alpha = s.fade.alpha.at(now)
-	}
+	fade := s.fadeAt(now)
+	hovering := s.hover.active && s.hoverMoving(now)
 
 	var err error
 	stepped, atRest := false, false // a frame of the step; its last
 	drawStart, drawEnd := now, now
 	switch {
-	case s.step.active && s.step.pos.moving(now):
-		stepped = true
+	case s.step.active && s.step.pos.moving(now) || hovering:
+		stepped = s.step.active && s.step.pos.moving(now)
 		items := s.sceneItems(now)
 		drawEnd = time.Now()
-		err = s.animator.PresentScene(baseLayer, items, alpha)
+		err = s.animator.PresentScene(baseLayer, items, fade)
 	case s.step.active || s.rest.awaited:
 		stepped = s.step.active
 		if s.step.active {
@@ -545,7 +590,7 @@ func (s *Selector) frame() {
 		s.step.active = false
 		if s.rest.ready != nil {
 			stepped, atRest = s.rest.stepEnd, s.rest.stepEnd
-			drawStart, drawEnd = s.presentRest(alpha)
+			drawStart, drawEnd = s.presentRest(fade)
 			break
 		}
 		// The loop does not wait for the frame at rest — the grid takes some
@@ -556,9 +601,9 @@ func (s *Selector) frame() {
 		}
 		items := s.sceneItems(now)
 		drawEnd = time.Now()
-		err = s.animator.PresentScene(baseLayer, items, alpha)
+		err = s.animator.PresentScene(baseLayer, items, fade)
 	default:
-		err = s.animator.PresentFaded(nil, alpha)
+		err = s.animator.PresentFaded(nil, fade)
 	}
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to present an animation frame")
@@ -568,9 +613,16 @@ func (s *Selector) frame() {
 		s.logAnimationFrame(&s.step.animationLog, s.config.LayoutMode, s.step.pos.progress(now), atRest, drawStart, drawEnd, end)
 	}
 	if s.fade.active {
-		done := !s.fade.alpha.moving(now)
-		s.logAnimationFrame(&s.fade.animationLog, s.fade.kind(), s.fade.alpha.progress(now), done, drawStart, drawEnd, end)
+		done := !s.fade.level.moving(now)
+		s.logAnimationFrame(&s.fade.animationLog, s.fade.kind(), s.fade.level.progress(now), done, drawStart, drawEnd, end)
 		s.fade.active = !done
+	}
+	if s.hover.active {
+		// The frame after the last that moved is at rest: the frame at rest, or
+		// the scene of the levels at their targets
+		s.logAnimationFrame(&s.hover.animationLog, "hover", s.hoverProgress(now), !hovering, drawStart, drawEnd, end)
+		s.hover.active = hovering
+		s.pruneHover(now)
 	}
 
 	// Frames are due at fixed times, a period apart; one that falls behind
@@ -590,43 +642,57 @@ func (s *Selector) sceneItems(now time.Time) []carousel.SceneItem {
 }
 
 // gridItems is the scene of the grid at now: the shadows of the selected and
-// the hovered tile, the tiles, the hover and the selection frame; the
-// selection where it is on its way while a step moves
+// the hovered tiles, the tiles, the hover and the selection frames; the
+// selection where it is on its way while a step moves, the hover frames at
+// their levels — of the tile under the pointer, and of those it left while
+// they go
 func (s *Selector) gridItems(now time.Time) []carousel.SceneItem {
 	x, y, _, _ := carousel.GridTile(len(s.windows), s.selectedIndex, s.config)
 	if s.step.active {
 		x, y = s.step.gx.at(now), s.step.gy.at(now)
 	}
 	// The selected tile is not hovered, as DrawGridLayout draws it
-	hovered := s.hoverIndex >= 0 && s.hoverIndex < len(s.windows) && s.hoverIndex != s.selectedIndex
-	hx, hy, _, _ := carousel.GridTile(len(s.windows), max(s.hoverIndex, 0), s.config)
+	hovers := s.hoverLevels(now)
 	var items []carousel.SceneItem
-	add := func(key cardKey, dx, dy float64) {
+	// add places the layer with its bounds relative to dx, dy, through the
+	// fade f about the centre cx, cy
+	add := func(key cardKey, dx, dy float64, f carousel.Fade, cx, cy float64) {
 		l, ok := s.layers.cards[key]
 		if !ok || l.id == 0 {
 			return
 		}
 		b := l.bounds
-		items = append(items, carousel.SceneItem{A: l.id, Alpha: 1, RectA: carousel.Rect{
-			X: dx + float64(b.Min.X), Y: dy + float64(b.Min.Y), W: float64(b.Dx()), H: float64(b.Dy()),
-		}})
+		r := carousel.Rect{X: dx + float64(b.Min.X), Y: dy + float64(b.Min.Y), W: float64(b.Dx()), H: float64(b.Dy())}
+		items = append(items, carousel.SceneItem{A: l.id, Alpha: f.Alpha, RectA: zoomRect(r, cx, cy, f.Scale)})
 	}
-	add(cardKey{gridShadow, 0}, x, y)
-	if hovered {
-		add(cardKey{gridHoverShadow, 0}, hx, hy)
+	hovered := func(key cardKey) {
+		for _, h := range hovers {
+			hx, hy, w, hh := carousel.GridTile(len(s.windows), h.index, s.config)
+			add(key, hx, hy, s.hoverLook(h.v), hx+w/2, hy+hh/2)
+		}
 	}
-	add(cardKey{gridTiles, 0}, 0, 0)
-	if hovered {
-		add(cardKey{gridHover, 0}, hx, hy)
-	}
-	add(cardKey{gridSelection, 0}, x, y)
+	add(cardKey{index: gridShadow}, x, y, carousel.Opaque, 0, 0)
+	hovered(cardKey{index: gridHoverShadow})
+	add(cardKey{index: gridTiles}, 0, 0, carousel.Opaque, 0, 0)
+	hovered(cardKey{index: gridHover})
+	add(cardKey{index: gridSelection}, x, y, carousel.Opaque, 0, 0)
 	return items
 }
 
 // carouselItems is the scene of the carousel at now: each card as its layers
-// at the integer offsets around its fractional one, cross-faded
+// at the integer offsets around its fractional one, cross-faded; with the
+// effects of hover, the hover frames over their cards at their levels
 func (s *Selector) carouselItems(now time.Time) []carousel.SceneItem {
-	p := s.step.pos.at(now)
+	p := float64(s.selectedIndex)
+	if s.step.active {
+		p = s.step.pos.at(now)
+	}
+	levels := map[int]float64{}
+	if s.anim.hover.any() {
+		for _, h := range s.hoverLevels(now) {
+			levels[h.index] = h.v
+		}
+	}
 	data := s.prepareWindowData()
 	var items []carousel.SceneItem
 	for k := range s.windows {
@@ -637,22 +703,32 @@ func (s *Selector) carouselItems(now time.Time) []carousel.SceneItem {
 		}
 		n0 := math.Floor(o)
 		item := carousel.SceneItem{WeightB: o - n0, Alpha: 1}
-		item.A, item.RectA = s.placeLayer(data, k, int(n0), x, y, scale)
+		item.A, item.RectA = s.placeLayer(data, cardKey{index: k, offset: int(n0)}, x, y, scale)
 		if item.WeightB > 0 {
-			item.B, item.RectB = s.placeLayer(data, k, int(n0)+1, x, y, scale)
+			item.B, item.RectB = s.placeLayer(data, cardKey{index: k, offset: int(n0) + 1}, x, y, scale)
 		}
 		items = append(items, item)
+
+		// The hover frame is drawn over its card, before the cards after it
+		if v, ok := levels[k]; ok {
+			f := s.hoverLook(v)
+			hover := carousel.SceneItem{Alpha: f.Alpha}
+			hover.A, hover.RectA = s.placeLayer(data, cardKey{index: k, offset: int(math.Round(o)), hover: true}, x, y, scale)
+			hover.RectA = zoomRect(hover.RectA, x, y, f.Scale)
+			items = append(items, hover)
+		}
 	}
 	return items
 }
 
-// placeLayer is the layer of card index nearest to the integer offset among
-// those held, placed and scaled for a card whose centre is at x, y with the
-// scale
-func (s *Selector) placeLayer(data []carousel.WindowData, index, offset int, x, y, scale float64) (carousel.LayerID, carousel.Rect) {
+// placeLayer is the layer of the card of key, or its hover frame, nearest to
+// the integer offset of key among those held, placed and scaled for a card
+// whose centre is at x, y with the scale
+func (s *Selector) placeLayer(data []carousel.WindowData, key cardKey, x, y, scale float64) (carousel.LayerID, carousel.Rect) {
+	index, offset := key.index, key.offset
 	for d := 0; d <= 2; d++ {
 		for _, n := range []int{offset + d, offset - d} {
-			layer, ok := s.layers.cards[cardKey{index, n}]
+			layer, ok := s.layers.cards[cardKey{index: index, offset: n, hover: key.hover}]
 			if !ok || layer.id == 0 {
 				continue
 			}
@@ -674,8 +750,9 @@ func (s *Selector) placeLayer(data []carousel.WindowData, index, offset int, x, 
 }
 
 // presentRest presents the frame at rest drawn for the current target and
-// hover, scaled by alpha; it returns when the presentation started and ended
-func (s *Selector) presentRest(alpha float64) (time.Time, time.Time) {
+// hover through the fade f; it returns when the presentation started and
+// ended
+func (s *Selector) presentRest(f carousel.Fade) (time.Time, time.Time) {
 	s.rest.awaited, s.rest.stepEnd = false, false
 	// A frame at rest that came too late to be staged in the pauses is staged
 	// now: presented as a frame it would upload no less
@@ -692,9 +769,9 @@ func (s *Selector) presentRest(alpha float64) (time.Time, time.Time) {
 	presentStart := time.Now()
 	var err error
 	if staged {
-		err = s.animator.PresentStaged(alpha)
+		err = s.animator.PresentStaged(f)
 	} else {
-		err = s.animator.PresentFaded(rest.img, alpha)
+		err = s.animator.PresentFaded(rest.img, f)
 	}
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to present frame")

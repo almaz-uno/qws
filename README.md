@@ -25,6 +25,25 @@ picture:
   and falls back to `cpu`;
 - `cpu` sends the frame to the X server with `PutImage`.
 
+## Animation
+
+With `glx` the switcher animates: a step through the carousel or the grid
+moves, the switcher fades and zooms in and out, the hover frame fades and
+zooms onto the window under the pointer. `appearance.animation` sets it:
+
+```yaml
+appearance:
+  animation:
+    enabled: true          # false: every change at once
+    duration: 150ms        # of every animation
+    step: true             # the selection moves to the next window
+    show: [fade, zoom]     # how the switcher appears: fade, zoom, both, or none
+    hide: [fade, zoom]     # how it disappears
+    hover: [fade, zoom]    # how the hover frame comes and goes
+```
+
+`cpu` changes its picture at once whatever these keys say.
+
 ## Usage
 
 ```bash
@@ -176,7 +195,6 @@ Phase 4 is **complete** ✅
 - Additional keybinding customization
 - Custom window exclusion patterns
 - Theme customization
-- Animation speed configuration
 
 ## Dependencies
 

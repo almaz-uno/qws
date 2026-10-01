@@ -72,13 +72,12 @@ type Animator interface {
 	DropLayers()
 
 	// PresentScene draws the layer base over the whole window, then the items
-	// over it in order, and presents the result with every channel scaled by
-	// alpha
-	PresentScene(base LayerID, items []SceneItem, alpha float64) error
+	// over it in order, and presents the result through the fade f
+	PresentScene(base LayerID, items []SceneItem, f Fade) error
 
 	// PresentFaded presents img — or, when nil, the last frame presented —
-	// with every channel scaled by alpha; at alpha 1 it is Present
-	PresentFaded(img *image.RGBA, alpha float64) error
+	// through the fade f; at Opaque it is Present
+	PresentFaded(img *image.RGBA, f Fade) error
 
 	// StageFrame uploads a part of img, about maxBytes, for PresentStaged:
 	// the frame at rest goes to the GPU in the pauses of an animation, not
@@ -87,10 +86,21 @@ type Animator interface {
 	// is.
 	StageFrame(img *image.RGBA, maxBytes int) (int, bool, error)
 
-	// PresentStaged presents the frame staged in full with every channel
-	// scaled by alpha; at alpha 1 as Present would
-	PresentStaged(alpha float64) error
+	// PresentStaged presents the frame staged in full through the fade f; at
+	// Opaque as Present would
+	PresentStaged(f Fade) error
 }
+
+// Fade is how the overlay shows a frame while it appears or disappears: every
+// channel scaled by Alpha, the frame scaled by Scale about the centre of the
+// window, transparent outside it (specs/007-animation,
+// specs/010-animation-options)
+type Fade struct {
+	Alpha, Scale float64
+}
+
+// Opaque shows a frame as it is
+var Opaque = Fade{Alpha: 1, Scale: 1}
 
 // LayerID names a layer of an Animator; 0 names none
 type LayerID int

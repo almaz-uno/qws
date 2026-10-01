@@ -59,6 +59,30 @@ func CardCenter(windowData []WindowData, index int, offset float64, cfg Config) 
 	return card.x, card.y, card.scale, ok
 }
 
+// CarouselHover is the hover frame of the card of window index at the integer
+// offset from the selection, as Draw3DCarouselWithData draws it over the card,
+// on a transparent image; nil when the card is not drawn at that offset
+// (specs/010-animation-options)
+func CarouselHover(windowData []WindowData, index, offset int, cfg Config) *image.RGBA {
+	card, ok := carouselCard(&windowData[index], index, index-offset, 0,
+		float64(cfg.Width)/2, float64(cfg.Height)/2, cfg)
+	if !ok {
+		return nil
+	}
+	// The outer stroke of the frame reaches 10 pixels beyond the card
+	const margin = 12
+	r := image.Rect(
+		int(math.Floor(card.x-card.finalW/2-margin)), int(math.Floor(card.y-card.finalH/2-margin)),
+		int(math.Ceil(card.x+card.finalW/2+margin)), int(math.Ceil(card.y+card.finalH/2+margin)),
+	)
+	dc := gg.NewContext(r.Dx(), r.Dy())
+	dc.Translate(float64(-r.Min.X), float64(-r.Min.Y))
+	drawHoverIndicator(dc, card.x, card.y, card.finalW, card.finalH, cfg)
+	img := getImageRGBA(dc)
+	img.Rect = r
+	return img
+}
+
 // drawCard draws the card onto a transparent image with bounds r
 func drawCard(windowData []WindowData, index, offset int, r image.Rectangle, cfg Config) *image.RGBA {
 	dc := gg.NewContext(r.Dx(), r.Dy())

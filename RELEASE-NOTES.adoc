@@ -9,6 +9,24 @@ newest come first (link:specs/004-releases/spec.adoc[specification 004]). The
 version of a build is `qws version`. Release files are built on Debian 12:
 they need glibc 2.36 or newer and the OpenGL and X11 libraries.
 
+== 1.1.0 — unreleased
+
+*Animation options* (link:specs/010-animation-options/spec.adoc[specification
+010]), with the `glx` renderer, under `appearance.animation`:
+
+* `enabled: false` turns every animation off; `duration` sets how long each
+  takes, 150 ms by default.
+* `step: false` keeps the selection from moving: it is at the next window
+  in the next frame.
+* `show` and `hide` say how the switcher appears and disappears: `fade`,
+  `zoom` — growing from 0.92 of its size — both, or `none`.
+* `hover` animates the hover frame of the tile or card under the pointer:
+  `fade`, `zoom` — closing in on the tile from 1.05 of its size — both, or
+  `none`, at once as in 1.0.0.
+* New defaults: the switcher fades and zooms as it appears and disappears,
+  and the hover frame fades and zooms. `show: [fade]`, `hide: [fade]` and
+  `hover: none` keep the look of 1.0.0.
+
 == 1.0.0 — 2026-10-01
 
 The first major version, by the author's word once the switcher moves well.
