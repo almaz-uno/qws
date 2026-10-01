@@ -1,0 +1,53 @@
+= 008 — plan
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-01
+
+== Approach
+
+A snapshotter of its own replaces the snapshots of the focus watcher. It
+has its own X connection, so that the event loop of the switcher, which
+reads every event while the switcher is shown, does not take its events;
+and its own GL context, current on a thread of its own, on a pbuffer.
+
+It follows the client windows: `_NET_CLIENT_LIST` on the root, and per
+window its structure (map, unmap, size, destruction) and a DAMAGE object
+reporting the first change after each subtraction. A window that becomes
+viewable, or changes size, has its pixmap named and bound anew; a change
+marks it dirty. A schedule captures each dirty viewable window once its
+last snapshot is `snapshot_interval` old, a window that became viewable
+after 100 ms, and, when the switcher asks at an activation, every dirty
+viewable window at once.
+
+A capture releases and binds the texture of the pixmap, draws the area
+average into a framebuffer of the thumbnail size, and reads it back. The
+thumbnails are kept by window, as the watcher keeps them now.
+
+The focus watcher keeps the MRU order and, where GLX or
+`texture_from_pixmap` is missing, its snapshots of 1.0.0.
+
+== Files
+
+[cols="2,5"]
+|===
+| File | What changes
+
+| `pkg/glx/pixmap_linux.go`
+| New: an offscreen context on a pbuffer; binding a pixmap as a texture,
+  binding it again, releasing it.
+
+| `pkg/snapshot/`
+| New: the snapshotter — the windows it follows, the schedule, the GPU
+  capture with its shader, the thumbnails.
+
+| `pkg/focus/watcher.go`
+| Its snapshots run only when the snapshotter cannot.
+
+| `cmd/qws/root.go`
+| The snapshotter made, its thumbnails given to the switcher, its fresh
+  snapshots asked for at an activation, paused while the switcher is shown.
+
+| `internal/config/config.go`, `config.yaml.example`, `doc/configuration.asciidoc`
+| `snapshot_interval` 1 s by default; `scaling_algorithm` for the CPU path.
+|===

@@ -24,7 +24,8 @@ appearance:
   thumbnail:
     width: 256
     height: 256
-    # Scaling algorithm for thumbnails:
+    # Scaling algorithm for thumbnails taken on the CPU, where the GPU cannot
+    # take them (no GLX or texture_from_pixmap); the GPU averages by area:
     #   - "nearest"      - Fastest, lowest quality (pixelated)
     #   - "bilinear"     - Balanced speed and quality (default, recommended)
     #   - "catmull-rom"  - Highest quality, slowest (smooth, professional look)
@@ -72,7 +73,7 @@ appearance:
     vertical: 20px      # Vertical padding from screen edges (e.g., "5%" or "50px")
 
 behavior:
-  snapshot_interval: 10s
+  snapshot_interval: 1s   # a visible window that changed is captured again at most this often
   show_delay: 0ms
 
 windows:

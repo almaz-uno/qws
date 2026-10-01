@@ -1,0 +1,119 @@
+= 008 — research
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-01
+
+Facts the specification rests on, 2026-10-01, `develop` at `0016519`, E1
+(ws1: RTX 4080 SUPER, picom, two monitors). The probes are outside the
+repository, in `~/.cache/qws-probe-cap2` and `~/.cache/qws-probe-tfp` on ws1.
+
+== The cost of a snapshot today
+
+`CaptureWindow` of `pkg/composite`, step by step, the active window of
+2560×1381, depth 32, to 512×276; medians of 7:
+
+[cols="3,1",options="header"]
+|===
+| Step | ms
+| `NameWindowPixmap` | 0.14
+| a shared memory segment of 14 MB, made and attached | 0.13
+| the server copies the pixmap into it, `ShmGetImage` | 9.23
+| the copy into Go memory | 10.70
+| BGRA to RGBA, pixel by pixel | 13.32
+| scaled by `x/image/draw` BiLinear | 62.43
+| or by CatmullRom, the setting of ws2 | 90.50
+|===
+
+In all 96 ms with BiLinear, 124 ms with CatmullRom. The service of 1.0.0 on
+ws1, `snapshot_interval: 1s`, used 1678 s of CPU in 5 h 14 min: 8.9 % of a
+CPU.
+
+== Which windows have contents
+
+i3 unmaps the windows of hidden workspaces and of hidden tabs; an unmapped
+window has no pixmap in the X server. Of the 30 client windows of ws1 at the
+time, one was viewable. Only viewable windows can be captured; the others
+keep what was taken while they were viewable.
+
+== Scaling in the X server
+
+RENDER scales the named pixmap in the server: halved by bilinear filtering,
+a 2×2 box at that scale, while more than twice the thumbnail, then one
+bilinear pass, `RepeatPad` at the edges; the thumbnail alone comes over a
+segment made once. 0.55–0.93 ms at the median. Against the area average of
+the same capture computed on the CPU, mean absolute difference per channel
+1.16, worst 58 — `x/image/draw` BiLinear 1.05 and 42, CatmullRom 0.96 and
+41. RENDER 0.11 on ws1, filters nearest, bilinear, convolution, fast, good,
+best.
+
+== Scaling on the GPU in qws
+
+`GLX_EXT_texture_from_pixmap` binds the named pixmap as a texture in a GL
+4.6 core context on a pbuffer of 1×1; a fragment shader averages the source
+rectangle of each pixel of the thumbnail, weighting each texel by its
+overlap; `glReadPixels` reads the thumbnail. `GLX_Y_INVERTED_EXT` of the
+FBConfig says which way the rows go: 1 on ws1, read in the shader.
+
+[cols="3,1",options="header"]
+|===
+| Variant | ms, median of 9
+| pixmaps named and bound for each snapshot | 3.86
+| pixmaps kept; the texture released and bound again for each | 0.58
+|===
+
+Against the area average computed on the CPU from a capture right after:
+mean absolute difference 0.00, worst 1 — rounding.
+
+`GLX_EXT_texture_from_pixmap` is offered on ws1 and ws2 (NVIDIA 580) and on
+ws3, whose X server runs on the Intel GPU through Mesa 22.3.6, GL 4.6 core.
+ws1 also has DAMAGE, Composite, RENDER, MIT-SHM, XFIXES and Present.
+
+== Found on the way
+
+* A texture bound to a pixmap has no mipmaps; with the default minifying
+  filter, which uses them, it is incomplete, and `texelFetch` reads black.
+  The texture of a window gets `NEAREST`.
+* The X server takes requests of at most 256 KB without BIG-REQUESTS; the
+  test of K4 uploads its images in strips.
+* The default X error handler of Xlib ends the process. A window can be
+  destroyed between its event and its capture, so the display of the
+  snapshots counts its errors and returns them; other displays keep the
+  handler they had.
+* DAMAGE reports the first change after each subtraction. The subtraction
+  comes before a capture, viewable or not: a hidden window left damaged
+  would never report again.
+* i3 hides a window by unmapping its frame, the window's parent; the
+  window itself stays mapped, unviewable. The snapshotter follows the
+  structure of the frame as well: when it is mapped again, Composite has
+  given the window a new pixmap, and the old one is named no more.
+
+== Measured on E1
+
+The build of the branch as a second instance, idle, beside the two
+services of 1.0.0, 2026-10-01.
+
+*Before, 1.0.0.* The service: 54.98 s of CPU in 608 s, 9.0 %. A probe
+asking the X server for the input focus every 10 ms for 10 minutes: of
+53055 round trips none over 100 ms, 4 over 20 ms, the worst 20.1 ms — the
+stalls of some 400 ms of specification 007 do not hold up requests; they
+held up presentations, swaps and `PutImage`.
+
+*Idle CPU, S2.* 2.35 s in 601 s, 0.39 %, while the active window, VS Code
+with a chat being written, changed every second and was captured 601 times.
+
+*Cost of a snapshot, S1.* With the window's viewability asked for at each
+capture and the texture bound again with a round trip: p50 1.76 ms, p95
+27.6 ms. Of that, at p50 / p95: the round trip for the attributes 0.20 /
+4.55 ms, binding again 0.27 / 9.28 ms, drawing and reading back 1.05 /
+2.36 ms — the tail was the round trips, waiting while the X server copied
+whole windows for the services of 1.0.0. Viewability is now followed from
+the events, and binding again makes no round trip — the test of K4 draws
+the pixmap anew and binds it again, and the thumbnail is the new one:
+p50 2.66 ms, p95 3.92 ms over 33 snapshots of a terminal changing now and
+then, the first of a window 12–20 ms. What remains is the GPU, woken from
+idle for one snapshot: the CPU is free meanwhile.
+
+*Coverage at the start.* The two windows viewable, one on each monitor,
+captured within 15 ms of the start.
+
