@@ -123,6 +123,10 @@ told by git and GitHub, how it was measured — by "Results". Section "Layout"
 says that `make check-specs` checks the form of the directory and lists what
 it checks.
 
+Found while this change was merged (section "Results"): "Relation to issues"
+gets a step — a pull request whose specification is not yet `implemented` is
+opened as a draft and marked ready with the commit that writes its results.
+
 == Existing specifications
 
 `:status:` of 001, 002, 004, 005, 006, 007 and 008 becomes `implemented`.
@@ -222,3 +226,14 @@ specification of its own".
 | K5 | Sections "Specifications", "Verifiability" and "Stack and layout" of
   the constitution; "Layout" and "Rules" of `specs/README.adoc`.
 |===
+
+Found along the way: pull request #23 was merged at `2d11248` (14:21:13
+UTC), 43 s before this section reached the branch in `e21ea22`. K4 cites
+runs of the pull request itself, so its results could only follow its checks,
+and in between a green pull request looked ready while the specification said
+`draft`; release 1.1.0 carries 009 so. The check cannot see it — the form was
+right, the truth was not. A draft pull request closes the window
+mechanically: GitHub does not merge it, and it is marked ready with the
+commit that writes the results (`specs/README.adoc`, "Relation to issues").
+These results and that rule reach `develop` by a pull request of their own
+from the same branch.
