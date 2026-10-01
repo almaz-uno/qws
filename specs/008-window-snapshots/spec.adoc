@@ -163,10 +163,13 @@ viewable, refused twice in a run of S1 while i3 switched workspaces; such a
 window is captured again a settle later, up to three times, not on the
 CPU.
 
+The stalls of the X server, counted for 10 minutes by round trips before
+and after the services ran 1.1.0: none over 100 ms either way (research,
+"After the services were replaced"). The service of 1.1.0 spent 0.28 % of a
+CPU in a minute without an activation.
+
 == Open decisions
 
 . Live thumbnails — a specification of its own.
 . A window never viewable in a session has no snapshot but its placeholder,
   as now.
-. The stalls of the X server on E1 (section "Acceptance criteria") are still
-  to be counted, after the services are replaced.
