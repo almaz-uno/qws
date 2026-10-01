@@ -10,6 +10,8 @@ import (
 	"sync"
 
 	"github.com/fogleman/gg"
+	"golang.org/x/image/font"
+	"golang.org/x/image/math/fixed"
 )
 
 const (
@@ -990,7 +992,7 @@ func drawGridTile(dc *gg.Context, win *WindowData, x, y, w, h float64, isSelecte
 			setColor(dc, cfg.TextColor, 1.0)
 
 			// Truncate title if too long
-			title := truncateTitle(win.Title, titleMaxWidth, dc, cfg.FontSize)
+			title := truncateTitle(win.Title, titleMaxWidth, fontFace)
 			dc.DrawStringAnchored(title, w/2, titleY+8, 0.5, 0)
 		}
 	}
@@ -1021,25 +1023,45 @@ func drawGridTile(dc *gg.Context, win *WindowData, x, y, w, h float64, isSelecte
 	dc.Pop()
 }
 
-// truncateTitle truncates title to fit within maxWidth
-func truncateTitle(title string, maxWidth float64, dc *gg.Context, fontSize int) string {
+// truncateTitle truncates title to fit within maxWidth, as measured by
+// MeasureString of a gg.Context with the face: the title, or else the longest
+// of its prefixes that fits with "..." after it.
+//
+// MeasureString sums the advances of the runes and the kerning of each pair
+// in 26.6 fixed point and takes the whole pixels of the sum. The sum for a
+// prefix with the dots is therefore the sum for the prefix, the kerning to the
+// first dot and the sum for the dots: each rune is measured once rather than
+// once for each prefix tried (specs/019-grid-speed).
+func truncateTitle(title string, maxWidth float64, face font.Face) string {
 	runes := []rune(title)
 	if len(runes) == 0 {
 		return title
 	}
+	// width is the width MeasureString gives for a sum of advances
+	width := func(advance fixed.Int26_6) float64 { return float64(advance >> 6) }
+
+	// sums[k] is the advance of runes[:k]
+	sums := make([]fixed.Int26_6, len(runes)+1)
+	for k, c := range runes {
+		sums[k+1] = sums[k]
+		if k > 0 {
+			sums[k+1] += face.Kern(runes[k-1], c)
+		}
+		advance, _ := face.GlyphAdvance(c)
+		sums[k+1] += advance
+	}
 
 	// Measure full title
-	w, _ := dc.MeasureString(title)
-	if w <= maxWidth {
+	if width(sums[len(runes)]) <= maxWidth {
 		return title
 	}
 
-	// Binary search for optimal length
+	// The longest prefix that fits with the dots
+	dot, _ := face.GlyphAdvance('.')
+	dots := 3*dot + 2*face.Kern('.', '.')
 	for length := len(runes) - 1; length > 0; length-- {
-		truncated := string(runes[:length]) + "..."
-		w, _ := dc.MeasureString(truncated)
-		if w <= maxWidth {
-			return truncated
+		if width(sums[length]+face.Kern(runes[length-1], '.')+dots) <= maxWidth {
+			return string(runes[:length]) + "..."
 		}
 	}
 

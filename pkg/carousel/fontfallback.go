@@ -32,6 +32,17 @@ type MultiFallbackFace struct {
 	faces   []font.Face
 	fonts   []*truetype.Font // For checking glyph presence via Index()
 	primary font.Face        // First face for metrics
+
+	// advances keeps what GlyphAdvance returned for a rune: truetype loads
+	// and hints the glyph for each call, and the grid measures every title
+	// on every frame (specs/019-grid-speed)
+	advances map[rune]glyphAdvance
+}
+
+// glyphAdvance is a result of GlyphAdvance
+type glyphAdvance struct {
+	advance fixed.Int26_6
+	ok      bool
 }
 
 // NewMultiFallbackFace creates a new multi-fallback font face from font file paths.
@@ -254,6 +265,19 @@ func (m *MultiFallbackFace) GlyphBounds(r rune) (
 
 // GlyphAdvance returns the advance width for the given rune
 func (m *MultiFallbackFace) GlyphAdvance(r rune) (advance fixed.Int26_6, ok bool) {
+	if a, found := m.advances[r]; found {
+		return a.advance, a.ok
+	}
+	advance, ok = m.glyphAdvance(r)
+	if m.advances == nil {
+		m.advances = make(map[rune]glyphAdvance)
+	}
+	m.advances[r] = glyphAdvance{advance, ok}
+	return advance, ok
+}
+
+// glyphAdvance is GlyphAdvance without the memory
+func (m *MultiFallbackFace) glyphAdvance(r rune) (advance fixed.Int26_6, ok bool) {
 	for i, face := range m.faces {
 		// Check if glyph exists using Index()
 		if m.fonts[i].Index(r) == 0 {
