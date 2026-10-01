@@ -1,0 +1,190 @@
+= 018 — snapshots of windows another client binds
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-01
+:issue: 48
+:status: implemented
+
+== What and why
+
+Specification 008 binds the pixmap of each viewable window as a texture
+(`GLX_EXT_texture_from_pixmap`) and keeps it bound while the window keeps
+its pixmap. A second instance of qws beside the service — a test instance, a
+measurement run, a second service — gets every binding refused on ws1: X
+error 11, BadAlloc, on `glXCreatePixmap` (request 152.22, GLX being
+extension 152 there), then 161, GLXBadPixmap, on `glXBindTexImageEXT`
+(152.16). Every snapshot of that instance then falls back to the CPU path of
+1.0.0, 97–111 ms each, the cost 008 removed; an idle second instance spends
+some 10 % of a CPU. Its log said "X error 161", the second error, a
+consequence of the first, without the request.
+
+The cause, confirmed by a probe (research): the X server of ws1, NVIDIA's
+GLX, lets one GLX pixmap exist on a pixmap's storage at a time — a second
+`glXCreatePixmap` on it, from the same client or another, with the same
+FBConfig or another, through the same pixmap or another name Composite gave
+the window, gets BadAlloc until the first is destroyed. GLX documents it:
+"BadAlloc is generated if there is already a GLXFBConfig associated with
+pixmap". The service holds the GLX pixmap of every viewable client window;
+picom holds those of the frames of i3, the top-level windows, which are
+other pixmaps, so it does not conflict with the service.
+
+The change: between the GPU and the CPU, the window's pixmap is scaled in
+the X server by RENDER — measured in 008 at 0.55–0.93 ms (research of 008,
+"Scaling in the X server") — and the error of a refused binding names its
+request.
+
+The specification is a delta to `develop` at `f90abc7` (1.2.0). Unchanged:
+which windows are captured and when (008); a window whose pixmap the GPU
+binds, captured as before; thumbnails of at most 512×512; without GLX or
+`texture_from_pixmap` the snapshots of 1.0.0; the configuration — no key,
+variable or flag changes.
+
+== Decisions
+
+Asked for, 2026-10-01:
+
+* a RENDER path when the GPU will not bind a window — BadAlloc,
+  GLXBadPixmap, or no FBConfig of its depth: the pixmap halved by bilinear
+  filtering, a 2×2 box at exactly ½, while more than twice the thumbnail,
+  then one bilinear pass, `RepeatPad` on the pictures, into a pixmap of the
+  thumbnail's size, read back with MIT-SHM `ShmGetImage` into a segment made
+  once and reused;
+* the CPU path only when RENDER fails too;
+* the request in the error of `BindPixmap`: "X error 11 on request 152.22".
+
+Made on the way, 2026-10-01, for the author to confirm:
+
+* *The GPU is tried again when the pixmap is named anew, not at each
+  capture.* A window the GPU would not bind is taken by RENDER until its
+  pixmap is named anew — it becomes viewable again or changes size, as at
+  every return to its workspace under i3 — and the GPU is then tried first
+  again. The client holding the GLX pixmap holds it, as qws and picom do,
+  for as long as the window keeps that pixmap, so a retry before then fails
+  unless that client has ended; and each failed attempt costs two round
+  trips and its X errors. What it costs not to retry: an instance that lost
+  a window to another — a service restarted beside a test instance — keeps
+  it on RENDER after the other ends, until the window is named anew. RENDER
+  takes no more wall time than the GPU — S1 p50 1.64 ms (K2) against
+  2.66 ms of 008 — but its work is done by the X server.
+* *Any refused binding goes to RENDER*, whatever its error, as does a depth
+  no FBConfig binds.
+* *Each side scaled on its own.* A side is halved while more than twice its
+  side of the thumbnail, and the last pass scales from the window's own
+  extent at that scale, not from the halved pixmap, which an odd side pads
+  by a pixel; the prototype of 008 scaled both sides by one factor taken
+  from the width. On the windows of ws1, 0.47–1.57 per channel from the area
+  average against the prototype's 0.94–3.06 (research).
+* *The first X error of the binding is told*, with its request; those after
+  it in the same call are its consequences.
+
+== Behavior
+
+. *RENDER.* A window whose pixmap `BindPixmap` refuses keeps the pixmap
+  named, and its snapshots are scaled from it in the X server by RENDER:
+  each side halved — a bilinear sample at the corner of four pixels — while
+  more than twice the thumbnail's, then one bilinear pass to the thumbnail's
+  size, the pictures padded at their edges. The thumbnail, of the size of
+  008, is read back over a shared memory segment of 1 MB made when the
+  snapshotter starts; its alpha is ignored, as on the GPU and the CPU.
+. *Retried on the GPU* when the pixmap is named anew — a map, an unmap, a
+  change of size (008, "Found on the way") — and not before.
+. *The CPU*, as in 008, when RENDER fails for a window, and for every such
+  window without RENDER, MIT-SHM or the format `a8r8g8b8`, or with an X
+  server whose images are not LSBFirst.
+. `appearance.thumbnail.scaling_algorithm` keeps applying to the CPU path
+  only; RENDER filters as above.
+. *Log*, at debug level: a refused binding once per naming, "Pixmap not
+  bound on the GPU until named anew", with the error; the record "Snapshot"
+  of 008 with the path `render`; "Snapshot failed, taken on the CPU", with
+  the path that failed, instead of "Snapshot on the GPU failed, taken on the
+  CPU". Without RENDER, at info level, once: "RENDER unavailable, windows
+  the GPU will not bind are captured on the CPU".
+. *The error of `glx.BindPixmap`*: "glx: binding pixmap 0x…: X error 11 on
+  request 152.22" — the first X error of the call, with the major and minor
+  code of its request.
+
+== Metrics
+
+S1 — cost of a snapshot:: As in 008: `ms` of the record "Snapshot", per
+path. The first snapshot of a window, which names its pixmap and tries the
+GPU, is counted apart.
+
+Run R:: The build as a second instance on E1 beside the service of 1.2.0
+and picom, idle, for 30 s: `QWS_LOG_FORMAT=json qws -v -m Alt -k F12`
+stopped by SIGINT (`timeout -s INT 30`), its log at debug level, its CPU
+time from `times` of the shell that ran it. R-before runs the build of
+`f90abc7`, R-after that of this change.
+
+== Acceptance criteria
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| Error: the refused bindings of R-after are logged as "X error 11 on
+  request 152.22".
+
+| K2
+| Path and cost: in R-after every snapshot of a window the GPU refused is
+  taken by RENDER, none on the CPU; S1 by RENDER p95 ≤ 10 ms, a tenth of the
+  CPU path's, for windows of 2556×1357 and 2556×1392.
+
+| K3
+| Quality: `TestRenderThumbnail` — a pixmap scaled by RENDER is within a
+  mean of 1.2 per channel of the area average computed on the CPU, on an
+  image about as hard to scale as the windows of E1, and comes out as it is
+  when no larger than a thumbnail; depths 24 and 32. Skipped without an X
+  display with RENDER and MIT-SHM.
+
+| K4
+| No retry within a pixmap's lifetime: in R-after, one record "Pixmap not
+  bound" per window and naming of its pixmap, however many snapshots
+  follow.
+
+| K5
+| Unchanged: `TestGPUThumbnail`, `TestFallback`, `TestSchedule`,
+  `TestNewAndClose` pass.
+
+| K6
+| `go vet ./...`, `go test ./...` and `make check-specs` pass.
+|===
+
+== Results
+
+2026-10-01, E1 (ws1); the runs and the probe in `research.adoc`.
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | R-after: three refusals, one per window, each "glx: binding pixmap
+  0x…: X error 11 on request 152.22"; R-before logged "X error 161".
+| K2 | R-after: 32 of 33 snapshots by RENDER, none on the CPU; the 33rd, of
+  a window the service did not hold then, on the GPU. S1 by RENDER, 29
+  snapshots after the first of each window: p50 1.64 ms, p95 6.36 ms, the
+  longest 10.75 ms; the first of a window 1.76–5.90 ms. R-before: 29 of 30
+  on the CPU, p50 102.97 ms, p95 108.27 ms. CPU time in 30 s: 0.30 s, 1.0 %
+  of a CPU, start included, against 2.97 s, 9.9 %. The bound of 10 ms was
+  set after the first run: 008 had the median of RENDER in a loop only. The
+  tail is the X server busy: a bare round trip just before the passes took
+  up to 4.7 ms at times, the passes and the read-back 0.46–1.74 ms but for
+  four spikes of 4.7–6.2 ms (research).
+| K3 | `TestRenderThumbnail` on E1: means 0.04–0.95 per channel, the pixmap of
+  300×200 exact; each of four wrong variants tried fails it (research).
+| K4 | R-after: three records "Pixmap not bound" for three windows; the
+  active one was captured 29 times more by RENDER without another attempt.
+| K5 | The four tests pass on E1; `TestNewAndClose`, itself a second
+  instance beside the service, now logs its snapshots by RENDER.
+| K6 | `go vet ./...`, `go test ./...` and `make check-specs` on E1.
+|===
+
+== Open decisions
+
+. A retry on the GPU within a pixmap's lifetime — say once a minute —
+  should an instance be seen keeping windows on RENDER after the client that
+  held them has ended.
+. Mesa: whether its GLX refuses a second GLX pixmap of a storage as NVIDIA's
+  does, and so whether the RENDER path is ever taken on ws3, is not known;
+  ws2 and ws3 were not tried.

@@ -3,7 +3,10 @@
 // change, at most once an interval: its pixmap, named through Composite, is
 // bound as a texture (GLX_EXT_texture_from_pixmap) in a GL context of the
 // package's own, averaged by area on the GPU to at most 512×512, and read
-// back. Windows the window manager unmaps keep their last thumbnail.
+// back. A pixmap the GPU will not bind — another client holds a GLX pixmap of
+// the window — is scaled in the X server by RENDER instead
+// (specs/018-snapshot-bind-conflicts). Windows the window manager unmaps keep
+// their last thumbnail.
 package snapshot
 
 import (
@@ -54,6 +57,7 @@ type Snapshotter struct {
 	frames  map[xproto.Window]xproto.Window // frame of the window manager → its client
 	off     *glx.Offscreen
 	gpu     *gpu
+	render  *xrender // nil without RENDER or MIT-SHM
 	cpu     *composite.Capturer
 }
 
@@ -61,6 +65,7 @@ type Snapshotter struct {
 type window struct {
 	id       xproto.Window
 	frame    xproto.Window // its parent, when not the root
+	visual   xproto.Visualid
 	damage   damage.Damage
 	schedule schedule
 
@@ -69,7 +74,9 @@ type window struct {
 	mapped, frameMapped bool
 
 	// The pixmap bound as a texture; stale after a map, an unmap or a
-	// change of size, when Composite gives the window a new pixmap
+	// change of size, when Composite gives the window a new pixmap. Named but
+	// not bound, when the GPU would not bind it: taken by RENDER until named
+	// anew
 	stale         bool
 	retried       int // captures retried since the last that worked
 	pixmap        xproto.Pixmap
@@ -87,14 +94,18 @@ var errNotViewable = errors.New("window not viewable")
 // retries bounds the captures retried a settle later after errNotViewable
 const retries = 3
 
+// errNotBound: the GPU would not bind the window's pixmap — another client
+// holds a GLX pixmap of the window, or no FBConfig has its depth
+var errNotBound = errors.New("pixmap not bound on the GPU")
+
 // newOffscreen is the GL context of the snapshots; a variable, so that a test
 // can make it fail
 var newOffscreen = glx.NewOffscreen
 
 // New starts the snapshotter. It fails without Composite, DAMAGE, GLX 4.6 or
 // GLX_EXT_texture_from_pixmap; the caller then keeps the snapshots of 1.0.0.
-// scaling is the algorithm of pkg/composite, for windows of a depth the GPU
-// cannot bind.
+// scaling is the algorithm of pkg/composite, for the windows neither the GPU
+// nor RENDER can take.
 func New(interval time.Duration, scaling string) (*Snapshotter, error) {
 	conn, err := xgb.NewConn()
 	if err != nil {
@@ -238,6 +249,12 @@ func (s *Snapshotter) run(ready chan<- error) {
 	}
 	defer g.close()
 	s.off, s.gpu = off, g
+	if x, err := newXRender(s.conn, s.root); err != nil {
+		log.Info().Err(err).Msg("RENDER unavailable, windows the GPU will not bind are captured on the CPU")
+	} else {
+		defer x.close()
+		s.render = x
+	}
 
 	s.reconcile()
 	ready <- nil
@@ -398,6 +415,7 @@ func (s *Snapshotter) follow(id xproto.Window, now time.Time) {
 	w := &window{id: id, stale: true}
 	if attrs, err := xproto.GetWindowAttributes(s.conn, id).Reply(); err == nil {
 		w.mapped = attrs.MapState != xproto.MapStateUnmapped
+		w.visual = attrs.Visual
 	}
 	if d, err := damage.NewDamageId(s.conn); err == nil {
 		if damage.CreateChecked(s.conn, d, xproto.Drawable(id), damage.ReportLevelNonEmpty).Check() == nil {
@@ -488,8 +506,12 @@ func (s *Snapshotter) capture(w *window, cause string) {
 		return
 	}
 	w.retried = 0
+	if errors.Is(err, errNotBound) && s.render != nil {
+		path = "render"
+		img, err = s.render.thumbnail(w.pixmap, w.visual, w.width, w.height)
+	}
 	if err != nil {
-		log.Debug().Err(err).Uint32("window", uint32(w.id)).Msg("Snapshot on the GPU failed, taken on the CPU")
+		log.Debug().Err(err).Uint32("window", uint32(w.id)).Str("path", path).Msg("Snapshot failed, taken on the CPU")
 		path = "cpu"
 		var cimg image.Image
 		if cimg, err = s.cpu.CaptureWindow(w.id, maxSide, maxSide); err == nil {
@@ -513,7 +535,10 @@ func (s *Snapshotter) capture(w *window, cause string) {
 }
 
 // captureGPU averages the window's pixmap on the GPU, naming and binding it
-// anew when it is stale
+// anew when it is stale. A pixmap the GPU would not bind stays named, for
+// RENDER, and is bound again only once named anew: the client holding a GLX
+// pixmap of the window holds it, as qws does, while the window keeps its
+// pixmap (specs/018-snapshot-bind-conflicts).
 func (s *Snapshotter) captureGPU(w *window) (*image.RGBA, error) {
 	if w.texture == 0 {
 		w.texture = newWindowTexture()
@@ -521,7 +546,8 @@ func (s *Snapshotter) captureGPU(w *window) (*image.RGBA, error) {
 	gl.ActiveTexture(gl.TEXTURE0)
 	gl.BindTexture(gl.TEXTURE_2D, w.texture)
 
-	if w.stale || w.bound == nil {
+	switch {
+	case w.stale:
 		s.release(w)
 		geom, err := xproto.GetGeometry(s.conn, xproto.Drawable(w.id)).Reply()
 		if err != nil {
@@ -534,15 +560,17 @@ func (s *Snapshotter) captureGPU(w *window) (*image.RGBA, error) {
 		if err := xcomposite.NameWindowPixmapChecked(s.conn, w.id, pixmap).Check(); err != nil {
 			return nil, fmt.Errorf("%w: %v", errNotViewable, err)
 		}
-		w.pixmap = pixmap
+		w.pixmap, w.stale = pixmap, false
 		w.width, w.height, w.depth = int(geom.Width), int(geom.Height), int(geom.Depth)
 		bound, err := s.off.BindPixmap(uint32(pixmap), w.depth)
 		if err != nil {
-			s.release(w)
-			return nil, err
+			log.Debug().Err(err).Uint32("window", uint32(w.id)).Msg("Pixmap not bound on the GPU until named anew")
+			return nil, errNotBound
 		}
-		w.bound, w.stale = bound, false
-	} else {
+		w.bound = bound
+	case w.bound == nil:
+		return nil, errNotBound
+	default:
 		w.bound.Rebind()
 	}
 	return s.gpu.thumbnail(w.width, w.height, w.bound.YInverted), nil

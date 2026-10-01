@@ -46,14 +46,19 @@ typedef struct {
 
 // X errors on the display of the snapshots are counted, not fatal: a window
 // can be destroyed between its event and its capture, and the default
-// handler of Xlib would end the process
+// handler of Xlib would end the process. The first since the count was reset
+// is kept with its request: the errors after it are often its consequences.
 static Display *gOffDpy = 0;
-static int gOffErr = 0;
+static int gOffErr = 0, gOffMajor = 0, gOffMinor = 0;
 static int (*gPrevHandler)(Display*, XErrorEvent*) = 0;
 static int gInstalled = 0;
 static int offErrorHandler(Display *dpy, XErrorEvent *ev) {
 	if (dpy == gOffDpy) {
-		gOffErr = ev->error_code;
+		if (!gOffErr) {
+			gOffErr = ev->error_code;
+			gOffMajor = ev->request_code;
+			gOffMinor = ev->minor_code;
+		}
 		return 0;
 	}
 	return gPrevHandler ? gPrevHandler(dpy, ev) : 0;
@@ -171,8 +176,8 @@ static GLXFBConfig offPixmapConfig(Display *dpy, int depth, int *yInverted) {
 }
 
 // offBindPixmap binds the pixmap to the texture bound to GL_TEXTURE_2D; 0 and
-// an X error code on failure
-static GLXPixmap offBindPixmap(Display *dpy, offBindProc bind, unsigned long pixmap, int depth, int *yInverted, int *xerr) {
+// the first X error with the major and minor code of its request on failure
+static GLXPixmap offBindPixmap(Display *dpy, offBindProc bind, unsigned long pixmap, int depth, int *yInverted, int *xerr, int *xmajor, int *xminor) {
 	*xerr = 0;
 	GLXFBConfig fbc = offPixmapConfig(dpy, depth, yInverted);
 	if (!fbc) {
@@ -189,6 +194,8 @@ static GLXPixmap offBindPixmap(Display *dpy, offBindProc bind, unsigned long pix
 	XSync(dpy, False);
 	if (gOffErr) {
 		*xerr = gOffErr;
+		*xmajor = gOffMajor;
+		*xminor = gOffMinor;
 		if (gp) glXDestroyPixmap(dpy, gp);
 		XSync(dpy, False);
 		return 0;
@@ -264,13 +271,17 @@ type TexturePixmap struct {
 }
 
 // BindPixmap binds the pixmap, of the depth, to the texture bound to
-// GL_TEXTURE_2D of the active unit
+// GL_TEXTURE_2D of the active unit. It fails while another client holds a GLX
+// pixmap of the same storage — BadAlloc on glXCreatePixmap on NVIDIA
+// (specs/018-snapshot-bind-conflicts); an X error is told with the major and
+// minor code of its request.
 func (o *Offscreen) BindPixmap(pixmap uint32, depth int) (*TexturePixmap, error) {
-	var yInverted, xerr C.int
-	gp := C.offBindPixmap(o.dpy, o.bind, C.ulong(pixmap), C.int(depth), &yInverted, &xerr)
+	var yInverted, xerr, xmajor, xminor C.int
+	gp := C.offBindPixmap(o.dpy, o.bind, C.ulong(pixmap), C.int(depth), &yInverted, &xerr, &xmajor, &xminor)
 	if gp == 0 {
 		if xerr != 0 {
-			return nil, fmt.Errorf("glx: binding pixmap 0x%x: X error %d", pixmap, int(xerr))
+			return nil, fmt.Errorf("glx: binding pixmap 0x%x: X error %d on request %d.%d",
+				pixmap, int(xerr), int(xmajor), int(xminor))
 		}
 		return nil, fmt.Errorf("glx: no FBConfig to bind a pixmap of depth %d", depth)
 	}
