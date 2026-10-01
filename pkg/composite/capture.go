@@ -17,9 +17,9 @@ import (
 type ScalingAlgorithm string
 
 const (
-	ScalingNearest     ScalingAlgorithm = "nearest"      // Fast, low quality
-	ScalingBiLinear    ScalingAlgorithm = "bilinear"     // Balanced (default)
-	ScalingCatmullRom  ScalingAlgorithm = "catmull-rom"  // Slow, high quality
+	ScalingNearest    ScalingAlgorithm = "nearest"     // Fast, low quality
+	ScalingBiLinear   ScalingAlgorithm = "bilinear"    // Balanced (default)
+	ScalingCatmullRom ScalingAlgorithm = "catmull-rom" // Slow, high quality
 )
 
 // Capturer captures window thumbnails using XComposite extension.
