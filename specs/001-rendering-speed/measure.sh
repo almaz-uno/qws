@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Session S1 of specs/001-rendering-speed: drives a measuring qws instance with
-# xdotool and summarises its frame timings and profiles.
+# xdotool and summarises its frame timings and profiles. With HOLD=2 it is
+# session S2 of specs/007-animation: each activation ends with a step key
+# held for 2 s, as the author's autorepeat gives it — a press, then
+# REPEAT_RATE presses a second after REPEAT_DELAY ms — and then, instead of
+# Escape, with steps back to the first window, the one focused, and the
+# modifier released: an activation that leaves the focus where it was.
 #
 #   measure.sh run <renderer> <outdir>   one run of S1, renderer cpu or glx
 #   measure.sh summary <outdir>          summary of a finished run
@@ -19,6 +24,16 @@ set -euo pipefail
 ACTIVATIONS=${ACTIVATIONS:-20}
 STEPS=${STEPS:-23}
 KEY=${KEY:-F11}
+LAYOUT=${LAYOUT:-}
+HOLD=${HOLD:-0}
+REPEAT_DELAY=${REPEAT_DELAY:-500}
+REPEAT_RATE=${REPEAT_RATE:-33}
+
+# Presses of the held key: the first, and the repeats after the delay
+held=0
+if ((HOLD > 0)); then
+	held=$((1 + (HOLD * 1000 - REPEAT_DELAY) * REPEAT_RATE / 1000))
+fi
 
 root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 qws=${QWS:-$root/qws}
@@ -53,6 +68,20 @@ wait_frames() {
 	return 1
 }
 
+# Waits until activation $3 is ready for keys, for 5 s at most: the log has
+# $2 frames — the first, and the frame of the Expose that mapping causes — or,
+# where the overlay fades in, the fade-in of the activation is at rest
+wait_ready() {
+	local i
+	for ((i = 0; i < 500; i++)); do
+		(($(frame_count "$1") >= $2)) && return 0
+		grep -qE '"kind":"fade-in","animation":[0-9]+,"activation":'"$3"',.*"at_rest":true' "$1" && return 0
+		sleep 0.01
+	done
+	echo "activation $3 not ready in 5 s" >&2
+	return 1
+}
+
 warm_up() {
 	local w
 	for w in $(focus_order | tac); do
@@ -70,15 +99,18 @@ run() {
 		echo "commit: $(git -C "$root" rev-parse --short HEAD)$(git -C "$root" diff --quiet HEAD || echo ' (dirty)')"
 		echo "binary: $qws"
 		echo "renderer: $renderer"
+		echo "layout: ${LAYOUT:-configured}"
 		echo "i3 windows: $(focus_order | wc -l)"
 		echo "activations: $ACTIVATIONS, steps: $STEPS"
+		echo "held: ${HOLD}s, $held keys"
+		echo "keys per activation: $((STEPS + held))"
 	} >"$out/meta"
 	cp "$qws" "$out/qws"
 
 	# Both names of the variable: the dotted one is what Viper reads without a
 	# key replacer, the other what it reads with one (002-config-names)
 	env 'QWS_LOG.FORMAT=json' QWS_LOG_FORMAT=json "$out/qws" -v -r "$renderer" -m Alt -k "$KEY" \
-		--behavior-show-delay 0 \
+		--behavior-show-delay 0 ${LAYOUT:+--appearance-layout "$LAYOUT"} \
 		--cpuprofile "$out/cpu.prof" --memprofile "$out/mem.prof" \
 		2>"$log" &
 	pid=$!
@@ -89,16 +121,38 @@ run() {
 	warm_up
 
 	for ((a = 1; a <= ACTIVATIONS; a++)); do
-		# The first frame, then the frame of the Expose that mapping causes
 		n=$(frame_count "$log")
 		xdotool keydown alt key "$KEY"
-		wait_frames "$log" $((n + 2)) || true
+		wait_ready "$log" $((n + 2)) "$a" || true
 		for ((s = 1; s <= STEPS; s++)); do
 			n=$(frame_count "$log")
 			xdotool key Right
 			wait_frames "$log" $((n + 1)) || true
 		done
-		xdotool key Escape keyup alt
+		if ((held > 0)); then
+			xdotool key Right
+			sleep "$(awk -v d="$REPEAT_DELAY" 'BEGIN { print d / 1000 }')"
+			if ((held > 1)); then
+				# shellcheck disable=SC2046
+				xdotool key --delay $((1000 / REPEAT_RATE)) $(yes Right | head -n $((held - 1)))
+			fi
+			# The step of the last key ends in 150 ms, on the window the keys
+			# lead to from the first frame (K5 of specs/007-animation)
+			sleep 0.5
+			read -r first sel n < <(jq -rs --argjson a "$a" '
+				map(select(.message == "Frame" and .activation == $a))
+				| "\(first | .selected) \(last | .selected) \(last | .windows)"' "$log")
+			echo "activation $a: at $sel, want $(((first + STEPS + held) % n))" >>"$out/k5"
+			back=$(((n - sel) % n))
+			if ((back > 0)); then
+				# shellcheck disable=SC2046
+				xdotool key --delay 200 $(yes Right | head -n "$back")
+			fi
+			sleep 0.4
+			xdotool keyup alt
+		else
+			xdotool key Escape keyup alt
+		fi
 		sleep 0.3
 		kill -0 "$pid"
 	done
@@ -128,7 +182,7 @@ k3() {
 		for ((a = 1; a <= 3; a++)); do
 			n=$(frame_count "$log")
 			xdotool keydown alt key "$KEY"
-			wait_frames "$log" $((n + 2)) || true
+			wait_ready "$log" $((n + 2)) "$a" || true
 			read -r file win w h < <(jq -r --argjson a "$a" \
 				'select(.message == "Frame dumped" and .activation == $a) | "\(.file) \(.window) \(.width) \(.height)"' "$log")
 			printf '%s, activation %d: ' "$renderer" "$a"
@@ -189,19 +243,62 @@ summary() {
 
 	# glFinish runs only while timings are logged, and NVIDIA busy-waits in it:
 	# its samples are not CPU work of a frame
-	n=$(frames 'select(.cause != "refresh") | .cause' | wc -l)
-	cpu=$(go tool pprof -top -cum -unit=ms -ignore='_Cfunc_glowFinish' "$out/qws" "$out/cpu.prof" 2>/dev/null |
-		awk -v f="$render_fn" '$NF == f { sub(/ms$/, "", $4); print $4 }')
-	alloc=$(go tool pprof -sample_index=alloc_space -top -cum -unit=B "$out/qws" "$out/mem.prof" 2>/dev/null |
-		awk -v f="$render_fn" '$NF == f { sub(/B$/, "", $4); print $4 }')
-	awk -v n="$n" -v cpu="${cpu:-0}" -v alloc="${alloc:-0}" 'BEGIN {
-		printf "M3 frames=%d render_cpu_ms=%s cpu_ms_per_frame=%.2f alloc_mb_per_frame=%.2f\n",
-			n, cpu, cpu / n, alloc / n / 1048576 }'
+	if [[ -f $out/cpu.prof && -f $out/mem.prof ]]; then
+		n=$(frames 'select(.cause != "refresh") | .cause' | wc -l)
+		cpu=$(go tool pprof -top -cum -unit=ms -ignore='_Cfunc_glowFinish' "$out/qws" "$out/cpu.prof" 2>/dev/null |
+			awk -v f="$render_fn" '$NF == f { sub(/ms$/, "", $4); print $4 }')
+		alloc=$(go tool pprof -sample_index=alloc_space -top -cum -unit=B "$out/qws" "$out/mem.prof" 2>/dev/null |
+			awk -v f="$render_fn" '$NF == f { sub(/B$/, "", $4); print $4 }')
+		awk -v n="$n" -v cpu="${cpu:-0}" -v alloc="${alloc:-0}" 'BEGIN {
+			printf "M3 frames=%d render_cpu_ms=%s cpu_ms_per_frame=%.2f alloc_mb_per_frame=%.2f\n",
+				n, cpu, cpu / n, alloc / n / 1048576 }'
+	fi
+
+	grep -q '"message":"Animation frame"' "$out/log.json" && animations "$out"
+	return 0
+}
+
+# Metrics A1–A3 and criteria K2, K4, K5 of specs/007-animation
+animations() {
+	local out=$1 kind keys
+	anim() { jq -r "select(.message == \"Animation frame\") | $1" "$out/log.json"; }
+	keys=$(sed -n 's/^keys per activation: //p' "$out/meta")
+
+	for kind in $(anim .kind | sort -u); do
+		printf 'A1 %-5s interval   ' "$kind"
+		anim "select(.kind == \"$kind\" and .interval_ms) | .interval_ms" | pct
+		printf 'A1 %-5s missed     ' "$kind"
+		anim "select(.kind == \"$kind\" and .interval_ms) | .interval_ms > 1.5 * .period_ms" |
+			awk '{ n++; m += ($1 == "true") } END { printf "%d of %d intervals above 1.5 periods\n", m, n }'
+	done
+	printf 'A2 response        '
+	anim 'select(.response_ms and (.kind == "carousel" or .kind == "grid")) | .response_ms' | pct
+	for kind in $(anim .kind | sort -u); do
+		printf 'A3 %-8s duration ' "$kind"
+		anim "select(.kind == \"$kind\" and .at_rest and .retargets == 0) | .duration_ms" | pct
+		printf 'K2 %-8s frames   ' "$kind"
+		jq -rs --arg kind "$kind" 'map(select(.message == "Animation frame" and .kind == $kind))
+			| group_by([.activation, .animation])[]
+			| select(all(.retargets == 0) and any(.at_rest)) | length' "$out/log.json" | pct
+	done
+	printf 'K4 period          '
+	anim 'select(.at_rest) | .period_ms' | pct
+	printf 'K6 activation      '
+	jq -r 'select(.message == "Window activated") | .since_choice_ms' "$out/log.json" | pct
+	if [[ -f $out/k5 ]]; then
+		# The step of the last held key: at rest since its key, and where the
+		# keys lead
+		printf 'K5 at rest         '
+		jq -rs 'map(select(.message == "Animation frame" and .at_rest and .retargets > 0))
+			| group_by(.activation)[] | last | .since_key_ms' "$out/log.json" | pct
+		awk '{ n++; sub(/,$/, "", $4) } $4 != $6 { bad++; print "K5 " $0 }
+			END { printf "K5 selection       %d of %d activations off\n", bad, n }' "$out/k5"
+	fi
 }
 
 case ${1:-} in
 run) run "$2" "$3" ;;
 summary) summary "$2" ;;
 k3) k3 "$2" ;;
-*) sed -n '2,16p' "$0" >&2; exit 2 ;;
+*) sed -n '2,21p' "$0" >&2; exit 2 ;;
 esac
