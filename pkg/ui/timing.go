@@ -92,7 +92,8 @@ func (s *Selector) logFrame(drawStart, drawEnd, end time.Time) {
 		Int("activation", t.activation).
 		Str("renderer", s.appearance.Renderer).
 		Str("layout", s.config.LayoutMode).
-		Int("windows", len(s.windows))
+		Int("windows", len(s.windows)).
+		Int("selected", s.selectedIndex)
 	if cause == causeActivation {
 		e = e.Bool("cold", t.activation == 1).
 			Dur("list_ms", t.list).
@@ -103,6 +104,46 @@ func (s *Selector) logFrame(drawStart, drawEnd, end time.Time) {
 		Dur("total_ms", end.Sub(start)).
 		Dur("activation_ms", end.Sub(t.activated)).
 		Msg("Frame")
+}
+
+// logAnimationFrame logs a frame of an animation: its progress, the time
+// since the previous frame, for the first frame after the event that set its
+// target the time since that event, and for its last frame, at rest, its
+// duration (metrics A1–A3 of specs/007-animation)
+func (s *Selector) logAnimationFrame(a *animationLog, kind string, progress float64, atRest bool, drawStart, drawEnd, end time.Time) {
+	e := log.Debug()
+	if e.Enabled() {
+		e = e.Str("kind", kind).
+			Int("animation", a.id).
+			Int("activation", s.timing.activation).
+			Int("retargets", a.retargets).
+			Float64("progress", progress).
+			Dur("draw_ms", drawEnd.Sub(drawStart)).
+			Dur("present_ms", end.Sub(drawEnd)).
+			Dur("t_ms", end.Sub(s.timing.activated)).
+			Dur("period_ms", s.period).
+			Int("uploaded_kb", s.uploaded/1024)
+		if !a.lastP.IsZero() {
+			e = e.Dur("interval_ms", end.Sub(a.lastP))
+		}
+		if a.fresh {
+			e = e.Dur("response_ms", end.Sub(a.cause))
+		}
+		if atRest {
+			// The frame at rest ends the animation: A3, and the time since the
+			// event that set its target (K5 of specs/007-animation)
+			e = e.Bool("at_rest", true).
+				Dur("duration_ms", end.Sub(a.first)).
+				Dur("since_key_ms", end.Sub(a.cause)).
+				Int("selected", s.selectedIndex)
+		}
+		e.Msg("Animation frame")
+	}
+	a.fresh = false
+	a.lastP = end
+	if a.first.IsZero() {
+		a.first = end
+	}
 }
 
 // logRefresh logs a refresh presented between presentStart and end
