@@ -1,0 +1,139 @@
+= 018 — research
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-01
+
+Facts the specification rests on, 2026-10-01, `develop` at `f90abc7`
+(1.2.0), E1: ws1, NVIDIA GeForce RTX 4080 SUPER, driver 580.105.08, Xorg
+21.1.7, pixman 0.42.2, picom 9.1 `--backend glx --vsync`, i3. GLX is
+extension 152 there, its errors from 158; RENDER 139, MIT-SHM 130. The
+service of the author ran 1.2.0. The probe is outside the repository, in
+`~/.cache/qws-probe-bind` on ws1.
+
+== The refusal
+
+The log of a second instance, R-before (spec, "Metrics"): for every
+viewable window but one, "Snapshot on the GPU failed, taken on the CPU",
+"glx: binding pixmap 0x…: X error 161". With the first error of the call
+kept and its request (this change): 11 on 152.22 — BadAlloc on
+`glXCreatePixmap`. The handler of `pkg/glx` kept the last error: the
+`glXBindTexImageEXT` (vendor private, 152.16) that follows on the GLX pixmap
+never made gets 161, GLXBadPixmap.
+
+`bindprobe` (`bindprobe.c`, built with `gcc -O2 -o bindprobe bindprobe.c
+$(pkg-config --cflags --libs gl x11 xcomposite)`) calls `glXCreatePixmap`
+from up to two Xlib connections, with the FBConfigs that bind the depth as a
+2D texture, chosen as `pkg/glx` chooses — 12 for depth 24, 3 for depth 32:
+
+[cols="3,5",options="header"]
+|===
+| Pixmap | Outcome
+
+| Its own, 64×64, depth 24, never shown
+| The first: created. The same client again, with the same FBConfig or the
+  second: 11 on 152.22. Another client, either FBConfig: 11 on 152.22. Once
+  the first is destroyed, the other client: created.
+
+| Its own window, 64×64, depth 32 in an override-redirect parent of depth 24
+  at −4000,−4000, off every monitor: the X server redirects it on its own;
+  each client names its pixmap, two names of one storage
+| As above: the first created, every other attempt 11 on 152.22 — through
+  the other name as well — until the first is destroyed.
+
+| A terminal, 2556×1357, depth 32, a client window the service holds
+| Every attempt: 11 on 152.22.
+
+| Its frame, the top-level window of i3, which picom holds
+| Every attempt: 11 on 152.22.
+|===
+
+One GLX pixmap at a time on a storage, whoever names it and with whatever
+FBConfig. The reference page of `glXCreatePixmap` says so: "BadAlloc is
+generated if there is already a GLXFBConfig associated with pixmap"
+(https://registry.khronos.org/OpenGL-Refpages/gl2.1/xhtml/glXCreatePixmap.xml).
+
+The service and picom do not collide: a client window of ws1 has visual
+0x82 and its frame 0x23, both of depth 32; a child whose visual differs from
+its parent's is redirected by the X server on its own, with a pixmap of its
+own. picom binds the frames, the top-level windows; qws binds the client
+windows. Two instances of qws bind the same ones.
+
+In R-before and R-after one window, a terminal of 2556×1392, was bound on
+the GPU by the second instance: the service held no GLX pixmap of it then.
+In a first run of R-before, at 22:06, every window was refused; a
+measurement run of 1.2.0 went on from 22:18 to 22:21 between them, and a
+window the service lost to it is bound again by the service only at its next
+capture ("Found on the way") — likely, not shown.
+
+== Scaling in the X server
+
+The path of this change is the prototype of 008 (`~/.cache/qws-probe-cap2`)
+but for one thing: each side is scaled on its own, the last pass from the
+window's own extent at the scale of the halvings — W/2^k^ — not from the
+width of the halved pixmap, which a halving of an odd side pads by a pixel;
+the prototype scaled both sides by the ratio of the widths.
+
+*It computes what it is meant to.* The same halvings and pass computed in
+floating point on the CPU, against the thumbnail of RENDER: mean absolute
+difference per channel 0.004–0.019, worst 1, on the image of K3; on an image
+with a channel of noise, 0.07–0.26, worst 2, the thumbnail of RENDER darker
+by 0.24 at most — the X server rounds down.
+
+*Against the area average, on the windows of E1*, the four viewable at the
+time — in memory, the pixmap named and read whole, nothing written:
+
+[cols="3,1,1,1,1",options="header"]
+|===
+| Window | RENDER | prototype | `x/image/draw` BiLinear | worst, RENDER
+
+| terminal, 2556×1357 | 0.47 | 0.94 | 0.31 | 56
+| Claude, 2556×1357 | 1.57 | 3.06 | 1.23 | 64
+| terminal, 2556×1392 | 0.98 | 1.58 | 0.66 | 56
+| terminal, 2556×1392 | 1.31 | 2.17 | 0.94 | 56
+|===
+
+The mean absolute difference per channel from the exact area average;
+"prototype", the one factor of the prototype computed on the CPU. 008
+measured the prototype at 1.16 on the active window then.
+
+*The image of K3.* `windowImage` of `xrender_test.go`: lines of text of
+random lengths, a third of them blank — glyphs of two to four strokes a
+pixel wide in cells of 10×20 — on a light page, beside a darker panel and
+under a bar with a gradient. `x/image/draw` BiLinear is 0.25–0.87 from the
+area average on it, against 0.31–1.23 on the windows above; RENDER
+0.43–0.95. A denser page — lines of random lengths up to the whole width,
+none blank — gave RENDER 1.8–2.2 and BiLinear 1.5–1.7: harder than the
+windows.
+
+*The bound of K3, 1.2*, lies above what the path gives on that image and
+below what each wrong variant tried gives on at least one size, each found
+by the test with the code changed:
+
+[cols="3,1,3",options="header"]
+|===
+| Variant | Largest mean | Over 1.2 at
+
+| this change | 0.95 | —
+| one factor for both sides, the prototype's | 1.92 | 2556×1357, 511×700
+| the extent rounded up at each halving | 1.51 | 2560×1381, 2556×1357
+| sampled at the corners of pixels, half a pixel off | 3.92 | 1500×900, 2560×1381, 2556×1357
+| red and blue swapped | 6.96 | every size, 300×200 included
+|===
+
+The means over six sizes and two depths; a pixmap no larger than a
+thumbnail, 300×200, comes out exact but for the swap.
+
+== Found on the way
+
+* Any second instance captured on the CPU since 1.1.0 — a test instance, a
+  measurement run of `measure.sh`, a second service: some 100 ms of a CPU
+  per window changed, at most once a `snapshot_interval` each.
+* The tests of `pkg/snapshot` that start a snapshotter run as such an
+  instance beside the service: `TestNewAndClose` took its snapshots on the
+  CPU, now by RENDER.
+* A second instance can win the binding of a window from the service: if
+  it names the pixmap first after a map or a change of size, the service is
+  the one refused. 1.2.0 then tries again at each capture — on the CPU
+  meanwhile — and binds it once the other has ended; this change takes it
+  by RENDER until the window is named anew.

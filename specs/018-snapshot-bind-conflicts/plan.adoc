@@ -1,0 +1,51 @@
+= 018 — plan
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-01
+
+== Approach
+
+`captureGPU` names the pixmap of a stale window and tries to bind it, as
+now; when the binding is refused, the pixmap stays named and the window
+not stale, with no texture bound, and every capture until it is named anew
+reports "not bound" without trying. `capture` then takes the window by
+RENDER, and on the CPU only when RENDER is missing or fails.
+
+RENDER is set up on the snapshotter's own connection when its loop starts,
+beside the GL context: the picture format of every visual, the format
+`a8r8g8b8`, and a shared memory segment for a thumbnail of 512×512, attached
+to the X server and removed at once, so that it goes with the process. A
+capture makes a picture of the window's pixmap with the format of its
+visual — kept from `GetWindowAttributes` when the window is first followed —
+and one pixmap and picture of `a8r8g8b8` per pass; sets the transform and
+the filter of the source of each pass and composites it; reads the last
+pixmap back with `ShmGetImage`; checks the passes, whose errors have come by
+then; frees what it made.
+
+`pkg/glx` keeps the first X error of a call with its request, instead of
+the last alone.
+
+== Files
+
+[cols="2,5"]
+|===
+| File | What changes
+
+| `pkg/glx/pixmap_linux.go`
+| The error handler keeps the first error and its request; `BindPixmap`
+  tells them.
+
+| `pkg/snapshot/xrender.go`
+| New: the RENDER path — the formats, the segment, the passes.
+
+| `pkg/snapshot/xrender_test.go`
+| New: `TestRenderThumbnail` (K3).
+
+| `pkg/snapshot/snapshot.go`
+| The pixmap kept named when the GPU refuses it; the path chosen; the
+  visual of a window kept; RENDER set up in the loop.
+
+| `config.yaml.example`
+| The comment of `scaling_algorithm` names RENDER beside the GPU.
+|===
