@@ -1,0 +1,157 @@
+= 014 — keys for the header, the hover's duration and the zooms
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-01
+:status: draft
+:issue: 42
+
+== What and why
+
+Three things of the picture are constants of qws that earlier
+specifications left open as keys:
+
+* the header of specification 005 — the hostname and the version at the top
+  left of the overlay — is always drawn; 005 leaves open "a configuration key
+  to hide the header, if it turns out to be in the way";
+* the hover frame of specification 010 moves in the duration of every
+  animation; 010 leaves open "a duration of its own for the hover, should
+  one for all be too slow for it";
+* the zoom of the appearance and the disappearance starts from 0.92 of the
+  size of the overlay, that of the hover frame from 1.05 of its size, both
+  constants of `pkg/ui`; 010 leaves open "the zoom factors as keys, should
+  the constants not suit".
+
+The change makes them four keys whose defaults are the constants of today.
+They are one specification because they are alike: a constant becomes a
+key, the constant its default, and a configuration without the keys is read
+as before.
+
+The specification is a delta to `develop` at `f90abc7` (1.2.0). Unchanged:
+with the defaults, the picture of both renderers byte for byte — the frames
+of `cpu`, those of `glx` at rest — and the animations of `glx`; every other
+key; how keys are read from the file, the environment and the flags.
+
+== Decisions
+
+Made on the way, 2026-10-01, for the author to confirm:
+
+* *The header is a section of its own*, `appearance.header.enabled`, as
+  `window_background.enabled` and `animation.enabled`: the header is a part
+  of the picture, not of the animation. Off, it hides the hostname and the
+  version together — one key for the one header — and the grid takes the
+  whole window, as before 005.
+* *The selector applies it*: with the header off it gives the renderer no
+  hostname and no version, and the renderer already draws no header without
+  them (005, "Behavior"). The frame is then that of the scenes of
+  specification 001, which have no header, so no scene of its own is added:
+  its digest would repeat theirs.
+* *`hover_duration` defaults to 0, "that of `duration`"*. A default of
+  150 ms would detach the hover from `duration` in a configuration that sets
+  only `duration`, and change its animation; 0 keeps it. Here 0 does not mean
+  "at once", as it does for `duration`: the hover at once is `hover: none`,
+  a key of 010. `enabled: false` and `duration: 0` still stop every motion,
+  the hover's too: they turn the animation off as a whole (010).
+* *One factor for the overlay, one for the hover*, `overlay_zoom` and
+  `hover_zoom`, as there were two constants: the appearance starts from the
+  factor the disappearance ends at. A factor of their own for `show` and
+  `hide` was not asked for.
+* *A factor is a positive number*: above 1 the overlay closes in, below 1
+  the hover frame grows out of its tile — the way 010 decided against for
+  the hover, left to the user. Anything else — 0, a negative number, NaN,
+  infinity — gives a warning and the default is used: at 0 the present pass
+  of `glx` would divide by the scale.
+  A negative `hover_duration` gives a warning and is 0, as a negative
+  `duration` of 010 is. Both are checked where 010 checks its keys, when the
+  selector is created.
+
+Two decisions of 010, made for the author to confirm, are thereby replaced:
+"one duration for every animation" and "the factors are constants, not
+keys".
+
+== Behavior
+
+=== Keys
+
+[cols="2,1,5"]
+|===
+| Key | Default | Meaning
+
+| `appearance.header.enabled`
+| `true`
+| The header of specification 005. `false`: no hostname and no version are
+  drawn, and the grid lays its tiles over the whole window.
+
+| `appearance.animation.hover_duration`
+| `0s`
+| The time of the hover animation; `0`: that of `duration`.
+
+| `appearance.animation.overlay_zoom`
+| `0.92`
+| The scale of its size the overlay zooms from as it appears, with `zoom` in
+  `show`, and to as it disappears, with `zoom` in `hide`.
+
+| `appearance.animation.hover_zoom`
+| `1.05`
+| The scale of its size the hover frame zooms from as it comes, and to as it
+  goes, with `zoom` in `hover`.
+|===
+
+Environment variables and flags are named as in specification 002:
+`QWS_APPEARANCE_HEADER_ENABLED`, `--appearance-header-enabled`,
+`QWS_APPEARANCE_ANIMATION_HOVER_DURATION`,
+`--appearance-animation-hover-duration` and so on.
+
+`appearance.animation.duration` becomes the time of every animation but the
+hover's when `hover_duration` is set; the step, the appearance and the
+disappearance keep it.
+
+=== Existing configurations
+
+No key, environment variable or flag is renamed or removed, and no default
+changes. A configuration without the four keys is read as by 1.2.0 and
+shows its picture. New keys make the release a minor one (constitution,
+"Releases and versions").
+
+== Acceptance criteria
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| The header hidden: with `appearance.header.enabled: false` the selector
+  gives the renderer neither the hostname nor the version, with `true` both
+  (`TestSetHeader` in `pkg/ui`); a frame without them is that of
+  specification 001 — its scenes in `TestScenes`.
+
+| K2
+| The defaults keep the picture: `TestScenes` and
+  `TestGLXPresenterMatchesCPU` pass with `pkg/carousel/testdata/scenes.json`
+  unchanged; the defaults give the durations and the factors of 1.2.0 —
+  150 ms for the step, the fades and the hover, 0.92 and 1.05
+  (`TestParseAnimation`).
+
+| K3
+| Hover duration: at 0 the hover takes `duration`; at 80 ms its own, while
+  the step and the fades keep `duration`; a negative one gives one warning
+  and is that of `duration`; with `enabled: false` or `duration: 0` nothing
+  moves; the levels of the hover move in its duration
+  (`TestHoverDuration` in `pkg/ui`).
+
+| K4
+| Zoom factors: 0.5 and 1.5 are the scales the overlay and the hover frame
+  start from, and the disappearance is at 0.75 half way; 0, −1, NaN and
+  infinity give the defaults and a warning per key (`TestZoomFactors` in
+  `pkg/ui`).
+
+| K5
+| Sources: the defaults, each key from a file and from its `QWS_` variable
+  over the file (`TestAppearanceKeys` in `internal/config`), and from its
+  flag (`TestAppearanceFlags` in `cmd/qws`); the round trip of K3 of 002
+  with the new keys (`TestRoundTrip`, `TestTagNames`).
+
+| K6
+| `go vet ./...`, `go test ./...` and `make check-specs` pass.
+|===
+
