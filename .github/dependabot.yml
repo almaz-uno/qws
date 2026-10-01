@@ -1,4 +1,4 @@
-# Dependency updates (specs/011-dependency-updates): once a month Dependabot
+# Dependency updates (specs/012-dependency-updates): once a month Dependabot
 # proposes the new versions of the Go modules and of the actions of the
 # workflows, one pull request per ecosystem into develop, checked by workflow
 # test as any other. Security updates do not wait for the month.

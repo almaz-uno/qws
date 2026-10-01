@@ -1,4 +1,4 @@
-= 011 — dependency updates proposed by Dependabot
+= 012 — dependency updates proposed by Dependabot
 :toc: left
 :toc-title: Contents
 :sectnums:
@@ -122,8 +122,8 @@ own, outside the groups, with the same commit message.
   `"enabled":true`.
 
 | K4
-| `make check-specs` passes on the branch: the check of specifications
-  001–011.
+| `make check-specs` passes on the branch and in workflow `test` on the
+  pull request, which checks its merge with `develop`.
 |===
 
 K2 can only be met after the merge: Dependabot reads its configuration from
