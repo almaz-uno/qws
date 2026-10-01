@@ -1,0 +1,17 @@
+= 008 — tasks
+:toc: left
+:toc-title: Contents
+:revdate: 2026-10-01
+
+. [x] T1. Before: the idle CPU of 1.0.0 and the stalls of the X server over
+  10 minutes on E1 (research).
+. [x] T2. `pkg/glx`: the offscreen context and the binding of pixmaps; the
+  test of K4.
+. [x] T3. `pkg/snapshot`: the windows followed, the schedule — unit tests of
+  the schedule — and the capture.
+. [x] T4. Into qws: the snapshotter, the fresh snapshots of an activation,
+  the pause, the fallback with its test (K6); the configuration and its
+  documentation.
+. [x] T5. After: K1, K2, K3, K5 on E1 (section "Results"); the stalls once
+  the services run the new version.
+. [x] T6. Results; release notes, the chapter of 1.1.0.
