@@ -9,6 +9,48 @@ newest come first (link:specs/004-releases/spec.adoc[specification 004]). The
 version of a build is `qws version`. Release files are built on Debian 12:
 they need glibc 2.36 or newer and the OpenGL and X11 libraries.
 
+== 1.3.0 — 2026-10-01
+
+*Faster to open* (link:specs/003-window-list/spec.adoc[specification 003]):
+
+* qws keeps a model of the windows — their names, states, workspaces, icons,
+  classes and hints — up to date from the events of the X server, and the
+  switcher reads the list from it as it opens, after a single round trip:
+  under a millisecond instead of 150–180 ms for 35 windows. On ws1 the first
+  frame came some 120 ms after the key instead of some 345 ms.
+* Of the icons a window offers, only the one shown is read; the icon of the
+  class of a window without one is looked up once per class.
+* Should the model fail to start, the list is collected as the switcher
+  opens, as before.
+
+*Appearance keys* (link:specs/014-appearance-keys/spec.adoc[specification
+014]); with their defaults, the picture and the animations are those of
+1.2.1:
+
+* `appearance.header.enabled: false` hides the hostname and the version at
+  the top left of the switcher; the grid then takes the whole window.
+* `appearance.animation.hover_duration` sets the time of the hover
+  animation; `0s`, the default, keeps that of `duration`.
+* `appearance.animation.overlay_zoom`, 0.92 by default, is the scale of its
+  size the switcher zooms from as it appears and to as it disappears;
+  `appearance.animation.hover_zoom`, 1.05, that of the hover frame. A factor
+  that is not a positive number gives a warning, and the default is used.
+
+*Joined configuration keys are no longer read*
+(link:specs/015-no-joined-keys/spec.adoc[specification 015]), the one
+incompatible change, released in a minor version by the author's decision:
+
+* A key written joined, as the builds before 0.1.0 wrote them —
+  `snapshotinterval` for `snapshot_interval` — no longer applies: the key it
+  stands for takes its default unless something else sets it, and qws logs
+  a warning naming the key to use, which `qws config show` prints too. For
+  example, `workspacemodifier: Super` gave `Super` under 1.2.1 and gives
+  `Ctrl` now.
+* A file written by `qws config init` of any release is read as before.
+
+The documents under `doc/` are in English
+(link:specs/017-english-documents/spec.adoc[specification 017]).
+
 == 1.2.0 — 2026-10-01
 
 *Animation options* (link:specs/010-animation-options/spec.adoc[specification
