@@ -8,8 +8,10 @@
 # modifier released: an activation that leaves the focus where it was.
 # With SWEEP=1 as well it is session S3 of specs/010-animation-options: before
 # the held key the pointer sweeps across the middle of the overlay, 40 moves
-# 60 ms apart, and is then put on the centre of the focused window, so that
-# focus, which follows the mouse on ws1, stays where it was.
+# 60 ms apart, diagonally — from 10 % to 90 % of its width and from 42 % to
+# 58 % of its height, so that it crosses the tiles of the grid rather than the
+# gap between two rows — and is then put on the centre of the focused window,
+# so that focus, which follows the mouse on ws1, stays where it was.
 #
 #   measure.sh run <renderer> <outdir>   one run of S1, renderer cpu or glx
 #   measure.sh summary <outdir>          summary of a finished run
@@ -94,15 +96,15 @@ focused_centre() {
 		| "\(.x + (.width / 2 | floor)) \(.y + (.height / 2 | floor))"'
 }
 
-# Sweeps the pointer across the middle of the overlay, as the log of $1 last
-# placed it, and puts it on the centre of the focused window
+# Sweeps the pointer diagonally across the middle of the overlay, as the log of
+# $1 last placed it, and puts it on the centre of the focused window
 sweep() {
 	local x y w h fx fy i
 	read -r x y w h < <(jq -rs 'map(select(.message == "Monitor changed, recreating selector window"))
 		| last | "\(.x) \(.y) \(.width) \(.height)"' "$1")
 	read -r fx fy < <(focused_centre)
 	for ((i = 0; i < 40; i++)); do
-		xdotool mousemove $((x + w / 10 + i * (w * 8 / 10) / 39)) $((y + h / 2))
+		xdotool mousemove $((x + w / 10 + i * (w * 8 / 10) / 39)) $((y + h * 42 / 100 + i * (h * 16 / 100) / 39))
 		sleep 0.06
 	done
 	xdotool mousemove "$fx" "$fy"

@@ -1,0 +1,109 @@
+= 010 — research
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-01
+
+== Conditions
+
+E1 is ws1, as in 007: NVIDIA GeForce RTX 4080 SUPER, driver 580.105.08,
+one monitor, DP-0, 2560×1440 at 144 Hz — a period of 6.94 ms; i3 with a
+compositor; 32 i3 windows, 33 in the switcher; `renderer: glx`, the
+author's configuration otherwise. The instance measured is a third one, on
+Alt+F11, beside the two services of the author.
+
+Unlike the runs of 007, the services ran 1.1.0 — the build of specification
+008, installed at 17:28, which captures every visible window through the GPU
+when its contents change. 007 measured beside services of 1.0.0.
+
+The runs are `specs/001-rendering-speed/measure.sh run glx <dir>` with
+`HOLD=2`, the layout in `LAYOUT`, `SWEEP=1` for S3, the keys of the
+animation in `QWS_APPEARANCE_ANIMATION_*`, and `QWS=/usr/local/bin/qws.v1.0.0`
+for the control; 20 activations, 10 for the runs of K4, K5 and K8. The
+binary of this change is the build of `c777b19`: the runs before that
+commit are of the same code, uncommitted, and the runs after it differ only
+by the sweep of `measure.sh`. The logs and summaries are in
+`~/.cache/qws-010-runs/20261001-1843/` on ws1, not in the repository.
+
+== Runs
+
+A1 — p50 / p95 of the interval in ms, and the share of intervals above 1.5
+periods; A3 — p50 / p95 of the duration in ms; frames — p50 per animation.
+
+[cols="2,2,3,3,1",options="header"]
+|===
+| Run | Kind | A1 | A3 | Frames
+
+.3+| S2, defaults, 18:43
+| carousel | 6.94 / 8.80, 1.6 % | 152.6 / 153.8 | 23
+| fade-in | 6.95 / 11.08, 7.3 % | 147.2 / 151.0 | 23
+| fade-out | 6.95 / 11.04, 5.5 % | 145.2 / 147.6 | 22
+
+.4+| S3, carousel, 18:56
+| carousel | 6.94 / 8.49, 1.4 % | 152.6 / 153.5 | 23
+| hover | 6.91 / 8.87, 1.9 % | 152.7 / 154.6 | 23
+| fade-in | 6.93 / 15.80, 12.1 % | 147.3 / 156.0 | 23
+| fade-out | 6.96 / 10.03, 3.6 % | 145.3 / 147.8 | 22
+
+.4+| S3, grid, 19:22
+| grid | 6.94 / 11.33, 7.4 % | 489.1 / 509.1 ^1^ | 24
+| hover | 6.94 / 11.49, 9.8 % | 152.5 / 156.9 | 23
+| fade-in | 6.93 / 7.89, 0 % | 147.1 / 148.4 | 23
+| fade-out | 6.93 / 9.42, 1.7 % | 145.3 / 145.8 | 22
+
+.3+| S2, `duration: 300ms`, 19:06
+| carousel | 6.94 / 8.13, 0.7 % | 305.3 / 306.2 | 45
+| fade-in | 6.94 / 9.15, 4.2 % | 299.7 / 300.2 | 45
+| fade-out | 6.88 / 8.09, 0 % | 298.2 / 299.7 | 44
+
+| S2, `enabled: false`, 19:02
+| carousel | 48.4 / 75.1 ^2^ | — | 2
+
+| S2, `duration: 0`, 19:04
+| carousel | 48.8 / 77.3 ^2^ | — | 2
+
+.2+| S2, `step: false`, `show: none`, `hide: [zoom]`, 19:09
+| carousel | 49.3 / 78.0 ^2^ | — | 2
+| fade-out | 6.99 / 11.26, 10.5 % | 145.8 / 149.4 | 22
+|===
+
+^1^ The duration of a step of the grid ends with its frame at rest, drawn on
+the CPU in some 490 ms, as in 007; its motion ends at 150 ms.
+
+^2^ A step that does not move has two frames: the scene at its target, at
+progress 1, and the frame at rest some 50 ms later, when drawn. Their
+interval is the time of that drawing, not a frame late for its vertical
+blank.
+
+The first S3 with the grid, at 18:48, swept the pointer along the middle of
+the overlay and changed no hover: with 33 windows the middle falls in the gap
+between two rows of tiles. The sweep is diagonal since; the carousel, whose
+cards span the middle, was swept at 18:56 before the change.
+
+== The control
+
+The intervals above are longer than in 007, where the step of the carousel
+had a p95 of 7.09–7.10 ms and 0.45–0.51 % of its intervals missed. Two runs
+of S2 back to back tell whether this change or the conditions made them so:
+
+[cols="2,3,3,3",options="header"]
+|===
+| Run | carousel | fade-in | fade-out
+
+| 1.0.0, 19:12
+| 8.46, 1.35 %
+| 13.38, 7.8 %
+| 9.75, 2.9 %
+
+| this change, 19:17
+| 8.42, 1.10 %
+| 15.12, 9.8 %
+| 8.87, 1.4 %
+|===
+
+A1 p95 in ms and the share missed. 1.0.0 measures as this change does: the
+conditions moved, not the frames. The fade-in is the least steady — its p95
+ranges from 7.89 to 15.80 ms over the five runs of this change at 150 ms, as the uploads
+of the activation fall on its frames or not. What in the conditions costs
+the frames — the snapshots of 008 in the two services, the stalls of the X
+server seen in 007, or else — is not established here.
