@@ -70,17 +70,18 @@ func drawCard(windowData []WindowData, index, offset int, r image.Rectangle, cfg
 	return img
 }
 
-// GridTiles is the tiles of the grid, none selected, tile hover hovered, as
+// GridTiles is the tiles of the grid, none selected or hovered, as
 // DrawGridLayout draws them, on a transparent image; nil without tiles. Over
-// CarouselBase, with GridShadow under it and GridSelection over it at a tile,
-// it is the grid with that tile selected — but for the frame of the tile
-// under the selection frame (specs/007-animation).
-func GridTiles(windowData []WindowData, hover int, cfg Config) *image.RGBA {
+// CarouselBase, with the GridShadow of a tile under it and its GridSelection
+// or GridHover over it, it is the grid with that tile selected or hovered —
+// but for the frame of the tile under the frame over it
+// (specs/007-animation).
+func GridTiles(windowData []WindowData, cfg Config) *image.RGBA {
 	dc := gg.NewContext(cfg.Width, cfg.Height)
 	g := layoutGrid(len(windowData), headerBand(cfg), cfg)
 	for i := range windowData {
 		x, y := g.tile(i)
-		drawGridTile(dc, &windowData[i], x, y, g.tileW, g.tileH, false, i == hover, cfg)
+		drawGridTile(dc, &windowData[i], x, y, g.tileW, g.tileH, false, false, cfg)
 	}
 	img := getImageRGBA(dc)
 	b := opaqueBounds(img)
@@ -90,11 +91,11 @@ func GridTiles(windowData []WindowData, hover int, cfg Config) *image.RGBA {
 	return crop(img, b)
 }
 
-// GridShadow is the shadow of a selected grid tile of size w×h, on a
+// GridShadow is the shadow of a grid tile of size w×h at the offset o —
+// cfg.ShadowOffset for the selected tile, half of it for the hovered — on a
 // transparent image whose bounds are relative to the tile's top-left corner
-func GridShadow(w, h float64, cfg Config) *image.RGBA {
+func GridShadow(w, h, o float64, cfg Config) *image.RGBA {
 	const margin = 2
-	o := cfg.ShadowOffset
 	r := image.Rect(int(math.Floor(o))-margin, int(math.Floor(o))-margin,
 		int(math.Ceil(o+w))+margin, int(math.Ceil(o+h))+margin)
 	dc := gg.NewContext(r.Dx(), r.Dy())
@@ -113,6 +114,19 @@ func GridTile(n, i int, cfg Config) (x, y, w, h float64) {
 	g := layoutGrid(n, headerBand(cfg), cfg)
 	x, y = g.tile(i)
 	return x, y, g.tileW, g.tileH
+}
+
+// GridHover is the hover frame of a grid tile of size w×h, on a transparent
+// image whose bounds are relative to the tile's top-left corner
+func GridHover(w, h float64) *image.RGBA {
+	const margin = 4
+	r := image.Rect(-margin, -margin, int(math.Ceil(w))+margin, int(math.Ceil(h))+margin)
+	dc := gg.NewContext(r.Dx(), r.Dy())
+	dc.Translate(margin, margin)
+	drawGridHover(dc, w, h)
+	img := getImageRGBA(dc)
+	img.Rect = r
+	return img
 }
 
 // GridSelection is the selection frame of a grid tile of size w×h, on a

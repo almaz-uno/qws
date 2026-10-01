@@ -118,13 +118,6 @@ func (p *glxPresenter) HasLayer(id LayerID) bool {
 	return ok
 }
 
-func (p *glxPresenter) DropLayer(id LayerID) {
-	if l, ok := p.scene.layers[id]; ok {
-		gl.DeleteTextures(1, &l.texture)
-		delete(p.scene.layers, id)
-	}
-}
-
 func (p *glxPresenter) DropLayers() {
 	for id, l := range p.scene.layers {
 		gl.DeleteTextures(1, &l.texture)

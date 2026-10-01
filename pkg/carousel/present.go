@@ -68,9 +68,6 @@ type Animator interface {
 	// HasLayer reports whether the layer id is set
 	HasLayer(id LayerID) bool
 
-	// DropLayer forgets the layer id
-	DropLayer(id LayerID)
-
 	// DropLayers forgets all layers
 	DropLayers()
 

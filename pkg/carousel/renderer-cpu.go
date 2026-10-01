@@ -818,6 +818,15 @@ func drawGridSelection(dc *gg.Context, w, h float64, cfg Config) {
 	dc.Stroke()
 }
 
+// drawGridHover draws the hover frame of a tile of size w×h whose top-left
+// corner is the origin: an orange-yellow tint
+func drawGridHover(dc *gg.Context, w, h float64) {
+	dc.SetRGBA(1.0, 0.7, 0.2, 0.6)
+	dc.SetLineWidth(3)
+	dc.DrawRoundedRectangle(-1, -1, w+2, h+2, 9)
+	dc.Stroke()
+}
+
 // gridLayout is where DrawGridLayout puts its tiles
 type gridLayout struct {
 	cols                                    int
@@ -1000,11 +1009,7 @@ func drawGridTile(dc *gg.Context, win *WindowData, x, y, w, h float64, isSelecte
 	if isSelected {
 		drawGridSelection(dc, w, h, cfg)
 	} else if isHovered {
-		// Hover effect - orange/yellow tint
-		dc.SetRGBA(1.0, 0.7, 0.2, 0.6)
-		dc.SetLineWidth(3)
-		dc.DrawRoundedRectangle(-1, -1, w+2, h+2, 9)
-		dc.Stroke()
+		drawGridHover(dc, w, h)
 	} else {
 		// Normal frame
 		setColor(dc, cfg.InactiveFrame, 0.3)

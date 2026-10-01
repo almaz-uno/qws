@@ -609,10 +609,7 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 			newHoverIndex := s.getWindowIndexAtPosition(int(e.EventX), int(e.EventY))
 			if newHoverIndex != s.hoverIndex {
 				s.hoverIndex = newHoverIndex
-				// A moving step ends with the hover redrawn
-				if !s.step.active {
-					s.render(thumbnails)
-				}
+				s.hoverChanged(thumbnails)
 			}
 
 		case xproto.ButtonPressEvent:

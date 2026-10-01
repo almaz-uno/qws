@@ -61,10 +61,11 @@ func TestLayers(t *testing.T) {
 		t.Error("an empty selection frame")
 	}
 
-	// The grid of layers: the base, the shadow of the selected tile, the
-	// tiles, its selection frame — the grid with the tile selected but for
-	// the frame of the tile under the selection frame, and the edges of the
-	// layers placed at the nearest pixel here
+	// The grid of layers: the base, the shadows of the selected and the
+	// hovered tile, the tiles, the hover and the selection frame — the grid
+	// with the tiles selected and hovered but for the frames of the tiles
+	// under the frames over them, and the edges of the layers placed at the
+	// nearest pixel here
 	for _, name := range []string{"grid-e1-header", "grid-24-middle-hover"} {
 		for _, s := range scenes() {
 			if s.name == name {
@@ -73,19 +74,28 @@ func TestLayers(t *testing.T) {
 		}
 		cfg := sceneConfig(sc, []string{goFont})
 		x, y, w, h := GridTile(len(sc.windows), sc.selected, cfg)
-		ix, iy := int(math.Round(x)), int(math.Round(y))
-		place := func(img *image.RGBA) (image.Rectangle, *image.RGBA) {
-			return img.Rect.Add(image.Pt(ix, iy)), img
+		o := cfg.ShadowOffset
+		type placed struct {
+			img  *image.RGBA
+			x, y float64
 		}
+		layers := []placed{{GridShadow(w, h, o, cfg), x, y}}
+		var hx, hy float64
+		hovered := sc.hover >= 0 && sc.hover != sc.selected
+		if hovered {
+			hx, hy, _, _ = GridTile(len(sc.windows), sc.hover, cfg)
+			layers = append(layers, placed{GridShadow(w, h, o/2, cfg), hx, hy})
+		}
+		layers = append(layers, placed{GridTiles(sc.windows, cfg), 0, 0})
+		if hovered {
+			layers = append(layers, placed{GridHover(w, h), hx, hy})
+		}
+		layers = append(layers, placed{GridSelection(w, h, cfg), x, y})
+
 		got := CarouselBase(cfg)
-		for _, layer := range []*image.RGBA{GridShadow(w, h, cfg), nil, GridSelection(w, h, cfg)} {
-			if layer == nil {
-				tiles := GridTiles(sc.windows, sc.hover, cfg)
-				draw.Draw(got, tiles.Rect, tiles, tiles.Rect.Min, draw.Over)
-				continue
-			}
-			r, img := place(layer)
-			draw.Draw(got, r, img, img.Rect.Min, draw.Over)
+		for _, l := range layers {
+			r := l.img.Rect.Add(image.Pt(int(math.Round(l.x)), int(math.Round(l.y))))
+			draw.Draw(got, r, l.img, l.img.Rect.Min, draw.Over)
 		}
 		want := DrawGridLayout(sc.windows, sc.selected, sc.hover, cfg)
 		// Near the edge of a rectangle: within d of its border
@@ -94,9 +104,12 @@ func TestLayers(t *testing.T) {
 			outer := fx > x-d && fx < x+w+d && fy > y-d && fy < y+h+d
 			return outer && !inner
 		}
-		o := cfg.ShadowOffset
-		ring := 0 // pixels on the frame of the selected tile, or the edge of its shadow
-		far := 0
+		// The frame, and the shadow, whose rounded corners leave its
+		// rectangle by up to 2.3 pixels
+		edge := func(fx, fy, x, y, o float64) bool {
+			return near(fx, fy, x, y, w, h, 5) || near(fx, fy, x+o, y+o, w, h, 3)
+		}
+		ring, far := 0, 0
 		for py := 0; py < cfg.Height; py++ {
 			for px := 0; px < cfg.Width; px++ {
 				i := got.PixOffset(px, py)
@@ -108,7 +121,7 @@ func TestLayers(t *testing.T) {
 					continue
 				}
 				fx, fy := float64(px)+0.5, float64(py)+0.5
-				if near(fx, fy, x, y, w, h, 5) || near(fx, fy, x+o, y+o, w, h, 2) {
+				if edge(fx, fy, x, y, o) || hovered && edge(fx, fy, hx, hy, o/2) {
 					ring++
 				} else {
 					far++
@@ -116,9 +129,9 @@ func TestLayers(t *testing.T) {
 			}
 		}
 		if far > 0 {
-			t.Errorf("%s: %d pixels off the frame of the selected tile differ", name, far)
+			t.Errorf("%s: %d pixels off the frames of the selected and hovered tiles differ", name, far)
 		}
-		t.Logf("%s: %d pixels on the frame of the selected tile or the edge of its shadow differ", name, ring)
+		t.Logf("%s: %d pixels on the frames of the selected and hovered tiles or the edges of their shadows differ", name, ring)
 	}
 }
 
