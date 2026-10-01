@@ -4,8 +4,8 @@
 :toclevels: 2
 :revdate: 2026-09-30
 
-Every minor release is a chapter, its patches are subsections, the newest
-come first (link:specs/004-releases/spec.adoc[specification 004]). The
+Every minor or major release is a chapter, its patches are subsections, the
+newest come first (link:specs/004-releases/spec.adoc[specification 004]). The
 version of a build is `qws version`. Release files are built on Debian 12:
 they need glibc 2.36 or newer and the OpenGL and X11 libraries.
 
