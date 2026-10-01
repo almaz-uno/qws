@@ -3,7 +3,7 @@
 :toc-title: Contents
 :sectnums:
 :revdate: 2026-10-01
-:status: in progress; implemented (T2–T7), S2 run; K3 and K9 with the author
+:status: implemented 2026-10-01, merged (#18); K9 given by the author, K2 met but for 0.5 % of frames (section "Results")
 :issue: 17
 
 == What and why
@@ -160,8 +160,45 @@ step key — 2 s at the author's autorepeat, 33 a second after 500 ms — before
 | `go vet ./...` and `go test ./...` pass.
 |===
 
+== Results
+
+2026-10-01, E1 at 144 Hz; the runs of S2 and the tries in `research.adoc`.
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | `TestGLXPresenterMatchesCPU`: the frame at rest, presented as a frame
+  and staged in pieces with frames presented between them, is the `cpu`
+  frame byte for byte for every scene of Σ. `measure.sh k3` after the
+  fade-in: absolute error 0 for `cpu` and `glx`, three activations each.
+| K2 | Met at p95, not in full. Carousel, three runs: A1 p95 7.09–7.10 ms
+  against 7.44; 23 frames a step. Grid: p95 7.27 ms, 24 frames. Fades: p95
+  7.00–7.10 ms, 22–23 frames. Missed — above 1.5 periods: 0.45–0.51 % of
+  the intervals of the carousel, most after a pause that uploaded; 3.7 %
+  in the grid; 0–2 of some 430 in a fade; and the stalls of the X server
+  of E1, outside qws.
+| K3 | A2 p95 6.98–7.00 ms against the 30 ms proposed; the author took the
+  build as it measured.
+| K4 | Steps 152.6 ms at p50; fade-in 147.4 ms, fade-out 143.9–145.5 ms —
+  within 150 ms and one period.
+| K5 | Carousel: at rest 152.7–152.9 ms after the last key at p95, on the
+  window the keys lead to in all 60 activations. Grid: 920 ms — its frame
+  at rest takes some 480 ms to draw.
+| K6 | The chosen window activated 1.0–1.9 ms after the event that chose it
+  in the carousel runs; once 5.17 ms in the grid run.
+| K7 | M2 of `cpu`, p50 / p95: 69.95 / 84.30 ms against 68.25 / 85.64 ms on
+  `develop`; the digests of Σ unchanged.
+| K8 | `TestMotion`.
+| K9 | The author tried the build on ws1, 2026-10-01: the carousel good, the
+  hover of the grid lagging — fixed — then "very good"; merged as #18.
+| K10 | `go vet ./...`, `go test -race ./...`.
+|===
+
 == Open decisions
 
-. The target of K3, after the first measurement.
 . A configuration key to turn the animation off.
+. Faster drawing of the grid, to the same bytes, for its frame at rest and
+  its K5 — a specification of its own, after 1.0.0 (author, 2026-10-01).
+. Uploads from a GL context of their own, for the frames K2 still misses.
 . Whether the hover glow and the appearance also zoom, not only fade.
