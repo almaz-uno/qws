@@ -219,8 +219,7 @@ was. `SWEEP=1 HOLD=2 measure.sh run glx <dir>`.
   and `config.Default()` set to them in this change.
 
 | K11
-| `go vet ./...` and `go test ./...` pass; so does `make check-specs` once
-  specification 009 is merged.
+| `go vet ./...`, `go test ./...` and `make check-specs` pass.
 |===
 
 == Results
@@ -258,8 +257,8 @@ was. `SWEEP=1 HOLD=2 measure.sh run glx <dir>`.
   of the hover was cut from 1.1 to 1.05, fade and zoom together tried, and
   chosen with fade and zoom for the appearance and the disappearance as the
   defaults, set in `config.Default()`.
-| K11 | `go vet ./...` and `go test ./...` locally and in workflow `test`;
-  `make check-specs` is not on `develop` yet.
+| K11 | `go vet ./...`, `go test ./...` and `make check-specs`, locally and
+  in workflow `test`, after `develop` with 1.1.0 was merged in.
 |===
 
 == Open decisions
