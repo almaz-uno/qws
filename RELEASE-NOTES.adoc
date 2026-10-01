@@ -2,12 +2,41 @@
 :toc: left
 :toc-title: Contents
 :toclevels: 2
-:revdate: 2026-09-30
+:revdate: 2026-10-01
 
 Every minor or major release is a chapter, its patches are subsections, the
 newest come first (link:specs/004-releases/spec.adoc[specification 004]). The
 version of a build is `qws version`. Release files are built on Debian 12:
 they need glibc 2.36 or newer and the OpenGL and X11 libraries.
+
+== 1.0.0 — 2026-10-01
+
+The first major version, by the author's word once the switcher moves well.
+Nothing is incompatible with 0.1.0: the configuration, the keys, the flags
+and the environment variables are read as before.
+
+*Animation* (link:specs/007-animation/spec.adoc[specification 007]), with
+the `glx` renderer:
+
+* A step through the carousel or the grid moves in 150 ms, easing out, a
+  frame every refresh of the monitor the switcher is on. A key pressed
+  mid-way sets a new target and the motion turns towards it, so a held key
+  glides rather than queues.
+* At rest the switcher shows exactly the picture of `cpu`, as before.
+* The switcher fades in when it appears and fades out when it goes; the
+  chosen window is activated first, so the fade costs no time.
+* In the grid the hover follows the mouse at once; it used to lag by a
+  frame drawn for every tile the pointer crossed.
+* `cpu` changes its picture at once, as before.
+
+On the author's desktop at 144 Hz a step shows 23 frames, the interval
+between frames is 7.1 ms at p95, and about one frame in two hundred misses
+a refresh. The grid still takes about half a second to draw its exact
+picture on the CPU: its motion is on time, the exact picture follows.
+
+*Smaller changes*: no thumbnail snapshots are taken while the switcher is
+shown, and the keyboard mapping is read once per activation, not on every
+key — both used to hold the X server up while the switcher was on screen.
 
 == 0.1.0 — 2026-09-30
 
