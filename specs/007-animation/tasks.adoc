@@ -3,8 +3,8 @@
 :toc-title: Contents
 :revdate: 2026-10-01
 
-. [ ] T1. Frame records of animations, session S2 and its summary; a run on
-  `develop` code as the reference. Done but the reference run, with T8.
+. [x] T1. Frame records of animations, session S2 and its summary; a run on
+  `develop` code as the reference — S1 on `cpu` and `glx`, with T8.
 . [x] T2. The motion (`pkg/ui/motion.go`) with the tests of K8.
 . [x] T3. Layers: the base, card layers at integer offsets, the selection
   layer.
@@ -15,9 +15,10 @@
   K2–K5 on S2 in T8.
 . [x] T6. The grid: the selection frame sliding.
 . [x] T7. The fades; K6 in a try, 0.68 ms.
-. [ ] T8. Three runs of S2; K3 confirmed with the author; the author's
+. [x] T8. Three runs of S2; K3 confirmed with the author; the author's
   review, K9. The runs done (research, "Runs of S2"): K2 short of "no
   frame missed", 0.45–0.51 % of intervals in the carousel; K3 and K9 with
   the author. K9, first look: the carousel good; the hover of the grid
   lagged behind the mouse — shown through layers since.
-. [ ] T9. The results, the release notes of 1.0.0.
+. [x] T9. The results, the release notes of 1.0.0; the tag with the
+  author.
