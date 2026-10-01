@@ -25,7 +25,9 @@ appearance:
     width: 256
     height: 256
     # Scaling algorithm for thumbnails taken on the CPU, where the GPU cannot
-    # take them (no GLX or texture_from_pixmap); the GPU averages by area:
+    # take them (no GLX or texture_from_pixmap) — or, for a window the GPU will
+    # not bind, where RENDER cannot either; the GPU averages by area, RENDER
+    # halves and filters bilinearly:
     #   - "nearest"      - Fastest, lowest quality (pixelated)
     #   - "bilinear"     - Balanced speed and quality (default, recommended)
     #   - "catmull-rom"  - Highest quality, slowest (smooth, professional look)
