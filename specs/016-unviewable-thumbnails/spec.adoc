@@ -1,0 +1,151 @@
+= 016 — thumbnails of windows never viewable
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-01
+:status: draft
+:issue: 44
+
+== What and why
+
+Specification 008 leaves open: "A window never viewable in a session has no
+snapshot but its placeholder, as now." i3 unmaps the frames of hidden
+workspaces and hidden tabs, and an unviewable window has no contents in the
+X server; so after qws starts, every window on a hidden workspace shows its
+placeholder until it is shown once. That is the case after every restart of
+the service — an upgrade, `systemctl --user restart` — and after a login,
+for the windows a session places on workspaces it does not show.
+
+Asked on 2026-10-01: what can be done without breaking anything, given the
+open question "Window contents" of the constitution — whether qws may log
+window contents, write them to disk or send them anywhere. If the only real
+way is to keep thumbnails on disk across restarts, it is not to be
+implemented, but researched and laid out for the author.
+
+The specification is a delta to `develop` at `f90abc7` (1.2.0). It is a
+draft: nothing is implemented, and the program is unchanged.
+
+== What the X server allows
+
+From the research:
+
+* An unviewable window has no pixmap: Composite gives a window one only
+  while it is realized and destroys it when it is not, and
+  `NameWindowPixmap` fails with `Match` for a window not viewable. What a
+  window showed before qws started is gone with its pixmap; no client, a
+  compositor neither, gets more.
+* `backing-store` `Always` would keep contents of unmapped windows, but Xorg
+  serves it as `WhenMapped`; an implementation was a patch of RHEL 6 alone.
+  It would also be an attribute qws sets on other clients' windows.
+* Only the window manager makes a window viewable, and a window shown to be
+  captured is shown to the user.
+* An X client may leave pixmaps in the server when it exits
+  (`SetCloseDownMode` `RetainPermanent`), named in a property of the root
+  window for the next client to read and free — the way root pixmaps work.
+  They live until that client frees them or the session ends.
+
+Within one run of qws and in its memory alone, nothing more can be had: the
+contents of a window never viewable do not exist until it is shown. Any
+thumbnail of such a window is one taken before qws started, kept between
+runs.
+
+== Options
+
+[cols="1,4,4,4"]
+|===
+| | What it gives | What it needs | What it risks
+
+| A. As now
+| The placeholder until the window is shown once.
+| Nothing.
+| Nothing.
+
+| B. Thumbnails kept in the X server
+| On start, the thumbnails the previous qws kept of the windows still in
+  `_NET_CLIENT_LIST`, matched by window ID: after a restart of the service,
+  not after a login. Nothing is written to disk.
+| The constitution amended: "qws keeps no state of its own between runs".
+  An answer to "Window contents" for thumbnails kept in the X server after
+  qws exits.
+| Up to 1 MiB of the X server's memory per window — some 16 MiB on ws1 —
+  left while no qws runs, until the next frees them or the session ends;
+  more if a crash loses the property that names them. A thumbnail as old as
+  the window's last view; the picture of a window destroyed meanwhile shown
+  for a new one given its ID, until its first snapshot. Each instance keeps
+  its own — ws1 runs two. A pixmap is readable by any X client that knows
+  its ID, as the windows themselves are.
+
+| C. Thumbnails on disk
+| Thumbnails after a login too.
+| The rule on "Window contents": contents written to disk, by file mode and
+  place. A way to match a window of a new session to a picture of an old
+  one — window IDs do not outlive the X server — by class and title.
+| Pictures of closed and private windows on disk; a picture shown for
+  another window of the same title; a picture of another day.
+
+| D. Show the window to capture it
+| A current thumbnail.
+| Showing each hidden workspace at start, through i3, or mapping i3's frames.
+| Seen by the user; the focus and the workspaces move; i3's frames mapped by
+  another client. Breaks the desktop: rejected.
+
+| E. `backing-store` `Always`
+| Nothing on Xorg: `Always` is `WhenMapped`.
+| Setting an attribute of every client window.
+| Changes other clients' windows for no effect: rejected.
+|===
+
+Recommended: A. If thumbnails are to outlive a restart of the service, B
+is the way that keeps them off the disk, once the constitution allows it; it
+is a specification of its own with that amendment. C is not recommended
+until the constitution has a rule on window contents, and is the costliest
+then.
+
+== Decisions
+
+None. Nothing is implemented: the one way within memory, B, keeps state
+between runs, which the constitution does not allow; C is excluded by the
+question asked.
+
+== Acceptance criteria
+
+Of option B, should it be chosen; with A there is nothing to check.
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| After `systemctl --user restart` of the service on E1, a window on a
+  hidden workspace that had a thumbnail before shows it in the first
+  activation. Manual scenario: i3, picom, `glx`; the card of the window shows
+  its thumbnail, not its placeholder.
+
+| K2
+| The pixmaps the previous qws kept are freed once read: after the start,
+  `xrestop` lists no client of qws's that has exited.
+
+| K3
+| The thumbnail of a window no longer in `_NET_CLIENT_LIST` is freed, not
+  shown, and a thumbnail of before is replaced by the window's first
+  snapshot. Test in `pkg/snapshot` with an X display, skipped without one.
+
+| K4
+| Memory: at most one thumbnail per window of `_NET_CLIENT_LIST` is kept,
+  each at most 512×512.
+
+| K5
+| `go vet ./...`, `go test ./...` and `make check-specs` pass.
+|===
+
+== Open decisions
+
+. Which option: A, B, or C once the constitution has a rule on window
+  contents.
+. For B: the amendment of "qws keeps no state of its own between runs", and
+  the answer to "Window contents" for the X server; then a specification of
+  its own.
+. Found on the way (research): a window that changed within
+  `snapshot_interval` before it was hidden keeps an older thumbnail than its
+  pixmap could give. A change of its own, if wanted; it does not concern
+  windows never viewable.
