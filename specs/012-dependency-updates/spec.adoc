@@ -3,7 +3,7 @@
 :toc-title: Contents
 :sectnums:
 :revdate: 2026-10-01
-:status: draft
+:status: implemented
 :issue: 32
 
 == What and why
@@ -129,6 +129,34 @@ own, outside the groups, with the same commit message.
 K2 can only be met after the merge: Dependabot reads its configuration from
 the default branch alone. Its result reaches `develop` by a pull request of
 its own from the same branch.
+
+== Results
+
+2026-10-01, ws1 (Debian 12, bash 5.2.15) and GitHub.
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | `check-jsonschema` 0.38.2 with the schema fetched on 2026-10-01 exits
+  0 at `162b718`; the same file with `interval: fortnightly` fails, so the
+  check is not vacuous. GitHub validates the file on the pull request too:
+  check "Dependabot config file validation" at `162b718`, "All changes look
+  good".
+| K2 | After the merge, by a pull request of its own.
+| K3 | After `gh api -X PUT` of both on 2026-10-01: `vulnerability-alerts`
+  answers 204, `automated-security-fixes` answers
+  `{"enabled":true,"paused":false}`.
+| K4 | `make check-specs` at `162b718` exits 0, and so does
+  `scripts/check-specs.sh` on a copy of `specs/` with `011-snapshot-pause`
+  of branch `issue/qws#30-snapshot-pause` added. Workflow `test` on
+  `162b718`: run 36910598256 (push) and 36910603730 (pull request) passed.
+|===
+
+Found along the way: this specification was 011 when it was committed
+(`41ad2bb`), and so was `011-snapshot-pause` of issue #30, whose branch was
+pushed minutes earlier. Work on #30 started first, so the number is its; this
+one became 012 (`162b718`).
 
 == Open decisions
 
