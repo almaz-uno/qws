@@ -9,7 +9,7 @@ newest come first (link:specs/004-releases/spec.adoc[specification 004]). The
 version of a build is `qws version`. Release files are built on Debian 12:
 they need glibc 2.36 or newer and the OpenGL and X11 libraries.
 
-== 1.2.0 — unreleased
+== 1.2.0 — 2026-10-01
 
 *Animation options* (link:specs/010-animation-options/spec.adoc[specification
 010]), with the `glx` renderer, under `appearance.animation`:

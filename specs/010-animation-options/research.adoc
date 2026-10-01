@@ -126,10 +126,11 @@ again after it), names what moved:
 |===
 
 Without the services the frames are those of 007, to the hundredth of a
-millisecond. The services of 1.1.0 capture the visible windows through the
-GPU when their contents change — the switcher of the third instance among
-them, a frame each refresh — and their captures take the GPU and the X
-server from the frames. Each service pauses its own captures while its own
+millisecond. The services of 1.1.0 capture the windows of
+`_NET_CLIENT_LIST` through the GPU when their contents change — not the
+switcher, which the window manager does not manage, but the windows that
+change while it is shown, a terminal that prints, an editor — and their
+captures take the GPU and the X server from the frames. Each service pauses its own captures while its own
 switcher is shown (007), not while another's is: in use, the snapshots of
 `qws-workspace.service` run while `qws.service` shows its switcher, and the
 other way round. The hover was measured with the services running only.
