@@ -129,6 +129,66 @@ func TestJoinedKeys(t *testing.T) {
 	}
 }
 
+// Criteria of specs/010-animation-options
+
+// TestAnimationDefaults checks K1: the defaults the author chose
+func TestAnimationDefaults(t *testing.T) {
+	want := Animation{
+		Enabled: true, Duration: 150 * time.Millisecond, Step: true,
+		Show: []string{"fade", "zoom"}, Hide: []string{"fade", "zoom"}, Hover: []string{"fade", "zoom"},
+	}
+	if got := Default().Appearance.Animation; !reflect.DeepEqual(got, want) {
+		t.Errorf("defaults %+v, want %+v", got, want)
+	}
+
+	clearEnvironment(t)
+	cfg, _, err := Load(writeFile(t, "appearance:\n  layout: grid\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Appearance.Animation; !reflect.DeepEqual(got, want) {
+		t.Errorf("a file without the keys reads %+v, want %+v", got, want)
+	}
+}
+
+// TestAnimationSources checks K2: an effect list is read from a YAML list, a
+// single name and names joined by commas; the keys from the environment over
+// the file
+func TestAnimationSources(t *testing.T) {
+	clearEnvironment(t)
+	cfg, _, err := Load(writeFile(t, "appearance:\n  animation:\n"+
+		"    enabled: false\n    duration: 80ms\n    step: false\n"+
+		"    show: [fade, zoom]\n    hide: zoom\n    hover: fade,zoom\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Animation{
+		Enabled: false, Duration: 80 * time.Millisecond, Step: false,
+		Show: []string{"fade", "zoom"}, Hide: []string{"zoom"}, Hover: []string{"fade", "zoom"},
+	}
+	if got := cfg.Appearance.Animation; !reflect.DeepEqual(got, want) {
+		t.Errorf("file: %+v, want %+v", got, want)
+	}
+
+	t.Setenv("QWS_APPEARANCE_ANIMATION_ENABLED", "true")
+	t.Setenv("QWS_APPEARANCE_ANIMATION_DURATION", "300ms")
+	t.Setenv("QWS_APPEARANCE_ANIMATION_STEP", "true")
+	t.Setenv("QWS_APPEARANCE_ANIMATION_SHOW", "zoom")
+	t.Setenv("QWS_APPEARANCE_ANIMATION_HIDE", "fade,zoom")
+	t.Setenv("QWS_APPEARANCE_ANIMATION_HOVER", "none")
+	cfg, _, err = Load(writeFile(t, "appearance:\n  animation:\n    show: [fade]\n    hover: [fade]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = Animation{
+		Enabled: true, Duration: 300 * time.Millisecond, Step: true,
+		Show: []string{"zoom"}, Hide: []string{"fade", "zoom"}, Hover: []string{"none"},
+	}
+	if got := cfg.Appearance.Animation; !reflect.DeepEqual(got, want) {
+		t.Errorf("environment: %+v, want %+v", got, want)
+	}
+}
+
 // changedConfig is a configuration with every field different from its
 // default
 func changedConfig(t *testing.T) *Config {
@@ -150,6 +210,10 @@ func changedConfig(t *testing.T) *Config {
 			},
 			WindowBackground: WindowBackground{Enabled: false, Opacity: 0.5, BorderRadius: 7},
 			WindowPadding:    WindowPadding{Horizontal: "5%", Vertical: "6%"},
+			Animation: Animation{
+				Enabled: false, Duration: 300 * time.Millisecond, Step: false,
+				Show: []string{"zoom"}, Hide: []string{"fade"}, Hover: []string{},
+			},
 		},
 		Behavior: Behavior{SnapshotInterval: 1500 * time.Millisecond, ShowDelay: 20 * time.Millisecond},
 		Windows:  Windows{Workspace: "current", IgnoreSkipTaskbar: true, SortMinimizedLast: true},

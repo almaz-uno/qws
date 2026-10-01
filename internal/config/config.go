@@ -44,6 +44,18 @@ type Appearance struct {
 	Colors           Colors           `mapstructure:"colors" yaml:"colors"`
 	WindowBackground WindowBackground `mapstructure:"window_background" yaml:"window_background"`
 	WindowPadding    WindowPadding    `mapstructure:"window_padding" yaml:"window_padding"`
+	Animation        Animation        `mapstructure:"animation" yaml:"animation"`
+}
+
+// Animation contains the animations of the glx renderer (specs/007-animation,
+// specs/010-animation-options); cpu changes its picture at once
+type Animation struct {
+	Enabled  bool          `mapstructure:"enabled" yaml:"enabled"`   // false: every change at once
+	Duration time.Duration `mapstructure:"duration" yaml:"duration"` // Of every animation; 0: at once
+	Step     bool          `mapstructure:"step" yaml:"step"`         // The selection moves to its target
+	Show     []string      `mapstructure:"show" yaml:"show"`         // Effects of the appearance: fade, zoom
+	Hide     []string      `mapstructure:"hide" yaml:"hide"`         // Effects of the disappearance
+	Hover    []string      `mapstructure:"hover" yaml:"hover"`       // Effects of the hover frame
 }
 
 // Thumbnail contains thumbnail size configuration
@@ -216,6 +228,14 @@ func Default() *Config {
 			WindowPadding: WindowPadding{
 				Horizontal: "20px",
 				Vertical:   "20px",
+			},
+			Animation: Animation{
+				Enabled:  true,
+				Duration: 150 * time.Millisecond,
+				Step:     true,
+				Show:     []string{"fade", "zoom"},
+				Hide:     []string{"fade", "zoom"},
+				Hover:    []string{"fade", "zoom"},
 			},
 		},
 		Behavior: Behavior{
@@ -415,6 +435,13 @@ func setDefaults(v *viper.Viper, cfg *Config) {
 	v.SetDefault("appearance.window_background.border_radius", cfg.Appearance.WindowBackground.BorderRadius)
 	v.SetDefault("appearance.window_padding.horizontal", cfg.Appearance.WindowPadding.Horizontal)
 	v.SetDefault("appearance.window_padding.vertical", cfg.Appearance.WindowPadding.Vertical)
+
+	v.SetDefault("appearance.animation.enabled", cfg.Appearance.Animation.Enabled)
+	v.SetDefault("appearance.animation.duration", cfg.Appearance.Animation.Duration)
+	v.SetDefault("appearance.animation.step", cfg.Appearance.Animation.Step)
+	v.SetDefault("appearance.animation.show", cfg.Appearance.Animation.Show)
+	v.SetDefault("appearance.animation.hide", cfg.Appearance.Animation.Hide)
+	v.SetDefault("appearance.animation.hover", cfg.Appearance.Animation.Hover)
 
 	v.SetDefault("behavior.snapshot_interval", cfg.Behavior.SnapshotInterval)
 	v.SetDefault("behavior.show_delay", cfg.Behavior.ShowDelay)

@@ -536,6 +536,48 @@ log:
 | `#cccccc`
 | Light theme inactive frame color
 
+| `appearance.animation.enabled`
+| `--appearance-animation-enabled`
+| `QWS_APPEARANCE_ANIMATION_ENABLED`
+| `bool`
+| `true`
+| Animations of the `glx` renderer; `false`: every change shows at once. `cpu` changes its picture at once whatever these keys say (specification `010-animation-options`)
+
+| `appearance.animation.duration`
+| `--appearance-animation-duration`
+| `QWS_APPEARANCE_ANIMATION_DURATION`
+| `duration`
+| `150ms`
+| Time of every animation, along ease-out cubic; `0` is as `enabled: false`
+
+| `appearance.animation.step`
+| `--appearance-animation-step`
+| `QWS_APPEARANCE_ANIMATION_STEP`
+| `bool`
+| `true`
+| The selection moves: the carousel turns to the next card, the selection frame of the grid slides; `false`: the selection is at its target in the next frame
+
+| `appearance.animation.show`
+| `--appearance-animation-show`
+| `QWS_APPEARANCE_ANIMATION_SHOW`
+| `[]string`
+| `[fade, zoom]`
+| How the switcher appears: `fade` (alpha from 0), `zoom` (from 0.92 of its size), both, or `none` / `[]` at once. A YAML list, one name, or names joined by commas
+
+| `appearance.animation.hide`
+| `--appearance-animation-hide`
+| `QWS_APPEARANCE_ANIMATION_HIDE`
+| `[]string`
+| `[fade, zoom]`
+| How the switcher disappears, after the chosen window is activated: as `show`, in reverse. With none, the switcher is unmapped before the activation
+
+| `appearance.animation.hover`
+| `--appearance-animation-hover`
+| `QWS_APPEARANCE_ANIMATION_HOVER`
+| `[]string`
+| `[fade, zoom]`
+| How the hover frame comes to the tile or card under the pointer and goes from the one it left: `fade`, `zoom` (closing in from 1.05 of its size), both, or none — at once
+
 | `behavior.snapshot_interval`
 | `--behavior-snapshot-interval`
 | `QWS_BEHAVIOR_SNAPSHOT_INTERVAL`
@@ -689,6 +731,10 @@ export QWS_KEYBINDINGS_KEY=grave
 export QWS_APPEARANCE_THUMBNAIL_WIDTH=192
 export QWS_APPEARANCE_COLORS_THEME=dark
 export QWS_APPEARANCE_COLORS_DARK_SELECTION_FRAME="#ff6b6b"
+
+# Set animation: fade in without the zoom, a quicker step
+export QWS_APPEARANCE_ANIMATION_SHOW=fade
+export QWS_APPEARANCE_ANIMATION_DURATION=100ms
 
 # Set behavior
 export QWS_BEHAVIOR_SNAPSHOT_INTERVAL=5s

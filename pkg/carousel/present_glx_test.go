@@ -2,6 +2,7 @@ package carousel
 
 import (
 	"image"
+	"image/color"
 	"image/draw"
 	"os"
 	"path/filepath"
@@ -119,7 +120,7 @@ func checkLayerScene(t *testing.T, p *glxPresenter, sc scene, fonts []string) {
 	}
 	defer p.DropLayers()
 	r := Rect{float64(card.Rect.Min.X), float64(card.Rect.Min.Y), float64(card.Rect.Dx()), float64(card.Rect.Dy())}
-	if err := p.drawScene(1, []SceneItem{{A: 2, RectA: r, Alpha: 1}}, 1); err != nil {
+	if err := p.drawScene(1, []SceneItem{{A: 2, RectA: r, Alpha: 1}}, Opaque); err != nil {
 		t.Fatal(err)
 	}
 	got := p.readBack()
@@ -147,7 +148,7 @@ func checkStaged(t *testing.T, p *glxPresenter, sc scene, fonts []string, frame 
 			t.Fatal(err)
 		}
 	}
-	if err := p.drawStaged(1); err != nil {
+	if err := p.drawStaged(Opaque); err != nil {
 		t.Fatal(err)
 	}
 	if n := differentPixels(p.readBack(), frame); n != 0 {
@@ -194,4 +195,70 @@ func compositing(conn *xgb.Conn) bool {
 	}
 	owner, err := xproto.GetSelectionOwner(conn, atom.Atom).Reply()
 	return err == nil && owner.Owner != 0
+}
+
+// TestGLXPresenterZoom checks K6 of specs/010-animation-options: a frame
+// presented at the scale of the zoom of the appearance keeps the pixel at the
+// centre of the window and is transparent in its corners — drawn as a frame
+// and as the base of a scene. At scale 1 the frame is copied byte for byte,
+// which TestGLXPresenterMatchesCPU checks.
+func TestGLXPresenterZoom(t *testing.T) {
+	conn, err := xgb.NewConn()
+	if err != nil {
+		t.Skipf("no X display: %v", err)
+	}
+	defer conn.Close()
+	if !compositing(conn) {
+		t.Skip("no compositing manager: the pixels of an off-screen window are undefined")
+	}
+	presenter, err := newGLXPresenter()
+	if err != nil {
+		t.Skipf("no GLX: %v", err)
+	}
+	defer presenter.Close()
+	p := presenter.(*glxPresenter)
+
+	const width, height = 200, 100
+	root := xproto.Setup(conn).DefaultScreen(conn).Root
+	w, err := NewWindowAt(conn, root, -width-100, 0, width, height, p.VisualID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	if err := w.Show(); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Bind(w); err != nil {
+		t.Fatal(err)
+	}
+
+	frame := image.NewRGBA(image.Rect(0, 0, width, height))
+	draw.Draw(frame, frame.Rect, image.NewUniform(color.RGBA{200, 100, 50, 255}), image.Point{}, draw.Src)
+	zoom := Fade{Alpha: 1, Scale: 0.92}
+	check := func(how string) {
+		got := p.readBack()
+		if c := got.RGBAAt(width/2, height/2); c != (color.RGBA{200, 100, 50, 255}) {
+			t.Errorf("%s: centre %v, want the frame's", how, c)
+		}
+		for _, pt := range []image.Point{{0, 0}, {width - 1, 0}, {0, height - 1}, {width - 1, height - 1}} {
+			if c := got.RGBAAt(pt.X, pt.Y); c != (color.RGBA{}) {
+				t.Errorf("%s: corner %v is %v, want transparent", how, pt, c)
+			}
+		}
+	}
+
+	if err := p.draw(frame); err != nil {
+		t.Fatal(err)
+	}
+	p.drawTexture(p.texture, zoom)
+	check("frame")
+
+	if err := p.SetLayer(1, frame); err != nil {
+		t.Fatal(err)
+	}
+	defer p.DropLayers()
+	if err := p.drawScene(1, nil, zoom); err != nil {
+		t.Fatal(err)
+	}
+	check("scene")
 }

@@ -100,6 +100,12 @@ func init() {
 	rootCmd.PersistentFlags().Float64("appearance-window-background-border-radius", defaultCfg.Appearance.WindowBackground.BorderRadius, "window background corner radius in pixels")
 	rootCmd.PersistentFlags().String("appearance-window-padding-horizontal", defaultCfg.Appearance.WindowPadding.Horizontal, "horizontal padding from screen edges (e.g., \"5%\" or \"50px\")")
 	rootCmd.PersistentFlags().String("appearance-window-padding-vertical", defaultCfg.Appearance.WindowPadding.Vertical, "vertical padding from screen edges (e.g., \"5%\" or \"50px\")")
+	rootCmd.PersistentFlags().Bool("appearance-animation-enabled", defaultCfg.Appearance.Animation.Enabled, "animate the switcher (glx renderer); false: every change at once")
+	rootCmd.PersistentFlags().Duration("appearance-animation-duration", defaultCfg.Appearance.Animation.Duration, "duration of every animation (0 = at once)")
+	rootCmd.PersistentFlags().Bool("appearance-animation-step", defaultCfg.Appearance.Animation.Step, "animate the step of the selection")
+	rootCmd.PersistentFlags().StringSlice("appearance-animation-show", defaultCfg.Appearance.Animation.Show, "effects of the appearance (fade, zoom, none)")
+	rootCmd.PersistentFlags().StringSlice("appearance-animation-hide", defaultCfg.Appearance.Animation.Hide, "effects of the disappearance (fade, zoom, none)")
+	rootCmd.PersistentFlags().StringSlice("appearance-animation-hover", defaultCfg.Appearance.Animation.Hover, "effects of the hover frame (fade, zoom, none)")
 
 	// Behavior
 	rootCmd.PersistentFlags().Duration("behavior-snapshot-interval", defaultCfg.Behavior.SnapshotInterval, "background thumbnail refresh interval")
@@ -257,6 +263,24 @@ func applyFlags() {
 	}
 	if rootCmd.PersistentFlags().Changed("appearance-window-padding-vertical") {
 		cfg.Appearance.WindowPadding.Vertical, _ = rootCmd.PersistentFlags().GetString("appearance-window-padding-vertical")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-animation-enabled") {
+		cfg.Appearance.Animation.Enabled, _ = rootCmd.PersistentFlags().GetBool("appearance-animation-enabled")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-animation-duration") {
+		cfg.Appearance.Animation.Duration, _ = rootCmd.PersistentFlags().GetDuration("appearance-animation-duration")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-animation-step") {
+		cfg.Appearance.Animation.Step, _ = rootCmd.PersistentFlags().GetBool("appearance-animation-step")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-animation-show") {
+		cfg.Appearance.Animation.Show, _ = rootCmd.PersistentFlags().GetStringSlice("appearance-animation-show")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-animation-hide") {
+		cfg.Appearance.Animation.Hide, _ = rootCmd.PersistentFlags().GetStringSlice("appearance-animation-hide")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-animation-hover") {
+		cfg.Appearance.Animation.Hover, _ = rootCmd.PersistentFlags().GetStringSlice("appearance-animation-hover")
 	}
 
 	// Behavior

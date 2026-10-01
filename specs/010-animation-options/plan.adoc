@@ -1,0 +1,76 @@
+= 010 — plan
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-01
+
+== Approach
+
+*Keys.* `config.Animation` under `config.Appearance`, with its defaults, flags
+and documentation. The selector turns it into the durations of its motions
+and the effects of the appearance, the disappearance and the hover, once,
+when it is created; names it does not know are reported there, as the
+keybindings are.
+
+*Durations.* A motion carries its duration; at 0 it is at its target at
+once. A motion turned off keeps its path through the loop: a step at
+duration 0 is a step whose first frame is at rest — the scene at the target,
+then the frame at rest — so the grid does not fall back to the frame drawn
+on the spot.
+
+*The fade of the overlay* becomes `carousel.Fade{Alpha, Scale}`, passed
+wherever an alpha was. The GLX presenter scales about the centre of the
+window: the present pass, at a scale other than 1, samples the frame
+through a linear sampler at the point the scale maps the fragment to, and
+is transparent outside the frame; at 1 it fetches texels as now, so the
+frame at rest is untouched. The scene scales the corners of its quads in
+the vertex shader. The motion of the fade becomes a level from 0 to 1;
+`show` and `hide` map it to the alpha and the scale.
+
+*The hover* becomes a level per tile or card, in a map: 1 for the hovered,
+0 for the rest, moved by a motion of the hover's duration — 0 without
+`hover`. The grid draws the hover shadow and frame of every tile with a
+level above 0, at the alpha and the scale the effects give. The carousel
+gets a hover layer per card and offset — the frame `drawHoverIndicator`
+draws, on a transparent image — drawn in the background like the card
+layers and placed after its card, in the z-order of the carousel, only
+while `hover` is set. A hover motion runs in the loop like a step: frames at
+the refresh period, then the frame at rest.
+
+== Files
+
+[cols="2,5"]
+|===
+| File | What changes
+
+| `internal/config/config.go`, `cmd/qws/root.go`
+| The keys, their defaults, flags and environment variables.
+
+| `pkg/ui/motion.go`
+| The duration of a motion.
+
+| `pkg/ui/effects.go`
+| New: the effects of the keys, their validation, and the alpha and the
+  scale they give a level.
+
+| `pkg/ui/fade.go`, `pkg/ui/selector.go`
+| The appearance and the disappearance by `show` and `hide`; the overlay
+  unmapped before the activation when nothing fades it out.
+
+| `pkg/ui/hover.go`, `pkg/ui/animation.go`
+| The levels of the hover; the hover in the scenes of the grid and the
+  carousel; the hover motion in the loop.
+
+| `pkg/carousel/present.go`, `present_glx.go`, `present_glx_scene.go`
+| `Fade` with the scale; the scaled present pass and scene.
+
+| `pkg/carousel/layers.go`
+| The hover layer of a card of the carousel.
+
+| `specs/001-rendering-speed/measure.sh`
+| Session S3: the sweep of the pointer.
+
+| `README.md`, `doc/configuration.asciidoc`, `config.yaml.example`,
+  `RELEASE-NOTES.adoc`
+| The keys.
+|===

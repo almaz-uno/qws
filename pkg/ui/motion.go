@@ -2,15 +2,15 @@ package ui
 
 import "time"
 
-// animationDuration is the time every animation of specs/007-animation takes
-const animationDuration = 150 * time.Millisecond
-
-// motion is a value that moves from where it is to its target in
-// animationDuration along ease-out cubic. A new target restarts the time from
-// the value it has then, so the value is continuous (specs/007-animation).
+// motion is a value that moves from where it is to its target in its
+// duration along ease-out cubic. A new target restarts the time from the
+// value it has then, so the value is continuous (specs/007-animation). At a
+// duration of 0 the value is at its target at once
+// (specs/010-animation-options).
 type motion struct {
 	from, to float64
 	start    time.Time // zero while the value is at rest
+	d        time.Duration
 }
 
 // rest puts the value at v, not moving
@@ -36,10 +36,10 @@ func (m *motion) at(now time.Time) float64 {
 
 // progress is how far the motion is at now, from 0 to 1
 func (m *motion) progress(now time.Time) float64 {
-	if m.start.IsZero() {
+	if m.start.IsZero() || m.d <= 0 {
 		return 1
 	}
-	u := float64(now.Sub(m.start)) / float64(animationDuration)
+	u := float64(now.Sub(m.start)) / float64(m.d)
 	switch {
 	case u <= 0:
 		return 0

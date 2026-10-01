@@ -62,6 +62,8 @@ type Selector struct {
 	layers              layerCache                      // Layers the animator holds
 	period              time.Duration                   // Frame period of the monitor of the overlay
 	fade                fadeAnimation                   // The appearance or disappearance in progress
+	hover               hoverAnimation                  // The levels of the hover frames
+	anim                animationOptions                // The animations of the configuration (specs/010-animation-options)
 	frameDue            time.Time                       // When the next frame of an animation is due
 	uploaded            int                             // Bytes uploaded in the pause before that frame
 	animations          int                             // Animations so far, for the frame records
@@ -217,6 +219,21 @@ func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, window
 	if a, ok := presenter.(carousel.Animator); ok {
 		s.animator = a
 	}
+	anim, warnings := parseAnimation(appearance.Animation)
+	for _, w := range warnings {
+		log.Warn().Msg(w)
+	}
+	s.anim = anim
+	s.step.pos.d, s.step.gx.d, s.step.gy.d = anim.step, anim.step, anim.step
+	s.fade.level.d = anim.duration
+	log.Debug().
+		Bool("composes", s.animator != nil).
+		Dur("duration", anim.duration).
+		Dur("step", anim.step).
+		Interface("show", anim.show).
+		Interface("hide", anim.hide).
+		Interface("hover", anim.hover).
+		Msg("Animations")
 
 	// Apply initial workspace filtering based on configuration
 	if initialWorkspaceOpt == "current" {
@@ -451,8 +468,9 @@ func (s *Selector) Show() (*x11.WindowInfo, error) {
 		return nil, nil
 	}
 
-	// Initial render, faded in when the presenter composes
-	s.fade.pending = s.animator != nil
+	// Initial render, shown by the effects of show when the presenter
+	// composes
+	s.fade.pending = s.animator != nil && s.anim.show.any()
 	s.render(thumbnails)
 	s.prefetch()
 
@@ -462,7 +480,9 @@ func (s *Selector) Show() (*x11.WindowInfo, error) {
 
 	// The overlay stays for FadeOut when it fades out: after the chosen window
 	// is activated
-	if s.animator == nil {
+	if !s.fadesOut() {
+		// An appearance cut short ends with the overlay
+		s.fade.active = false
 		s.hide()
 	}
 
@@ -495,8 +515,8 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 	for {
 		var event xgb.Event
 		switch {
-		case s.step.active || s.fade.active:
-			// A step or a fade is moving: frames between the events
+		case s.step.active || s.fade.active || s.hover.active:
+			// A step, a fade or the hover is moving: frames between the events
 			if event, _ = s.conn.PollForEvent(); event == nil {
 				s.frame()
 				continue
@@ -591,9 +611,9 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 			enterKeycode = s.keysymToKeycode(0xFF0D)
 
 		case xproto.ExposeEvent:
-			// A moving step or fade presents a frame soon anyway, and so does a
-			// step whose frame at rest is on its way
-			if e.Window == s.window.GetWindowID() && !s.step.active && !s.fade.active && !s.rest.awaited {
+			// A moving step, fade or hover presents a frame soon anyway, and so
+			// does one whose frame at rest is on its way
+			if e.Window == s.window.GetWindowID() && !s.step.active && !s.fade.active && !s.hover.active && !s.rest.awaited {
 				s.refresh(thumbnails)
 			}
 
@@ -681,14 +701,14 @@ func (s *Selector) render(thumbnails []image.Image) {
 	drawEnd := time.Now()
 
 	// The first frame of an activation starts its appearance; while a fade
-	// runs, a frame drawn in full is presented at its alpha
+	// runs, a frame drawn in full is presented through it
 	appears := s.fade.pending
 	if appears {
 		s.beginFade(false, drawEnd, s.timing.start)
 	}
 	var err error
 	if s.fade.active {
-		err = s.animator.PresentFaded(img, s.fade.alpha.at(drawEnd))
+		err = s.animator.PresentFaded(img, s.fadeAt(drawEnd))
 	} else {
 		err = s.presenter.Present(img)
 	}
@@ -698,12 +718,12 @@ func (s *Selector) render(thumbnails []image.Image) {
 	end := time.Now()
 	if appears {
 		// The appearance runs from the end of its first frame, which uploads
-		// a whole frame; the alpha of that frame stays
-		s.fade.alpha.start = end.Add(-s.period)
+		// a whole frame; the level of that frame stays
+		s.fade.level.start = end.Add(-s.period)
 	}
 	s.dumpFrame(img)
 	if s.fade.active {
-		s.logAnimationFrame(&s.fade.animationLog, s.fade.kind(), s.fade.alpha.progress(drawEnd), false, drawStart, drawEnd, end)
+		s.logAnimationFrame(&s.fade.animationLog, s.fade.kind(), s.fade.level.progress(drawEnd), false, drawStart, drawEnd, end)
 		s.frameDue = drawEnd.Add(s.period)
 	}
 	s.logFrame(drawStart, drawEnd, end)

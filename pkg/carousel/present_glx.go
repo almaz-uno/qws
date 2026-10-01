@@ -25,15 +25,29 @@ void main() {
 }` + "\x00"
 
 	// alpha is 1 but for the fades of specs/007-animation, and a texel times
-	// 1.0 is the texel
+	// 1.0 is the texel. scale is 1 but for the zoom of
+	// specs/010-animation-options: the fragment then samples the frame, through
+	// a linear sampler, at the point the scale about the centre maps it to, and
+	// is transparent outside the frame.
 	presentFragmentShader = `#version 460 core
 uniform sampler2D frame;
 uniform float alpha;
+uniform float scale;
 out vec4 color;
 void main() {
 	ivec2 size = textureSize(frame, 0);
-	ivec2 p = ivec2(gl_FragCoord.xy);
-	color = texelFetch(frame, ivec2(p.x, size.y - 1 - p.y), 0) * alpha;
+	if (scale == 1.0) {
+		ivec2 p = ivec2(gl_FragCoord.xy);
+		color = texelFetch(frame, ivec2(p.x, size.y - 1 - p.y), 0) * alpha;
+		return;
+	}
+	vec2 c = vec2(size) * 0.5;
+	vec2 q = c + (gl_FragCoord.xy - c) / scale;
+	if (q.x < 0.0 || q.y < 0.0 || q.x > float(size.x) || q.y > float(size.y)) {
+		color = vec4(0.0);
+		return;
+	}
+	color = texture(frame, vec2(q.x, float(size.y) - q.y) / vec2(size)) * alpha;
 }` + "\x00"
 )
 
@@ -49,7 +63,9 @@ type glxPresenter struct {
 	presented bool        // the texture holds the last frame of the bound window
 	last      *image.RGBA // that frame
 	program   uint32
-	alpha     int32 // location of the alpha of program
+	alpha     int32  // location of the alpha of program
+	scale     int32  // location of its scale
+	linear    uint32 // sampler of the frame while it is zoomed
 	vao       uint32
 	texture   uint32
 	pbo       uint32 // pixel unpack buffer the frames are uploaded through
@@ -125,7 +141,14 @@ func (p *glxPresenter) init() error {
 	gl.UseProgram(p.program)
 	gl.Uniform1i(gl.GetUniformLocation(p.program, gl.Str("frame\x00")), 0)
 	p.alpha = gl.GetUniformLocation(p.program, gl.Str("alpha\x00"))
+	p.scale = gl.GetUniformLocation(p.program, gl.Str("scale\x00"))
 	gl.Uniform1f(p.alpha, 1)
+	gl.Uniform1f(p.scale, 1)
+	gl.GenSamplers(1, &p.linear)
+	gl.SamplerParameteri(p.linear, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+	gl.SamplerParameteri(p.linear, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+	gl.SamplerParameteri(p.linear, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+	gl.SamplerParameteri(p.linear, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
 	if err := p.initScene(); err != nil {
 		return err
 	}
@@ -170,19 +193,24 @@ func (p *glxPresenter) Refresh() (bool, error) {
 	if !p.presented {
 		return false, nil
 	}
-	p.drawTexture(p.texture, 1)
+	p.drawTexture(p.texture, Opaque)
 	p.swap()
 	return true, nil
 }
 
-// drawTexture copies a texture of the window size to the back buffer with its
-// channels scaled by alpha, without blending
-func (p *glxPresenter) drawTexture(texture uint32, alpha float32) {
+// drawTexture copies a texture of the window size to the back buffer through
+// the fade f, without blending
+func (p *glxPresenter) drawTexture(texture uint32, f Fade) {
 	gl.Disable(gl.BLEND)
 	gl.UseProgram(p.program)
-	gl.Uniform1f(p.alpha, alpha)
+	gl.Uniform1f(p.alpha, float32(f.Alpha))
+	gl.Uniform1f(p.scale, float32(f.Scale))
 	gl.ActiveTexture(gl.TEXTURE0)
 	gl.BindTexture(gl.TEXTURE_2D, texture)
+	if f.Scale != 1 {
+		gl.BindSampler(0, p.linear)
+		defer gl.BindSampler(0, 0)
+	}
 	gl.DrawArrays(gl.TRIANGLES, 0, 3)
 }
 
@@ -213,7 +241,7 @@ func (p *glxPresenter) draw(img *image.RGBA) error {
 		}
 	}
 	p.last = img
-	p.drawTexture(p.texture, 1)
+	p.drawTexture(p.texture, Opaque)
 	return nil
 }
 
@@ -304,8 +332,8 @@ func (p *glxPresenter) StageFrame(img *image.RGBA, maxBytes int) (int, bool, err
 	return uploaded, true, nil
 }
 
-func (p *glxPresenter) PresentStaged(alpha float64) error {
-	if err := p.drawStaged(alpha); err != nil {
+func (p *glxPresenter) PresentStaged(f Fade) error {
+	if err := p.drawStaged(f); err != nil {
 		return err
 	}
 	p.presented = true
@@ -314,14 +342,14 @@ func (p *glxPresenter) PresentStaged(alpha float64) error {
 }
 
 // drawStaged makes the frame staged in full the frame of the texture and draws
-// it into the back buffer, scaled by alpha
-func (p *glxPresenter) drawStaged(alpha float64) error {
+// it into the back buffer through the fade f
+func (p *glxPresenter) drawStaged(f Fade) error {
 	if p.staged == nil || p.stageNext < p.stageEnd {
 		return fmt.Errorf("no frame staged in full")
 	}
 	p.texture, p.stage = p.stage, p.texture
 	p.last, p.staged = p.staged, nil
-	p.drawTexture(p.texture, float32(alpha))
+	p.drawTexture(p.texture, f)
 	return nil
 }
 
@@ -331,6 +359,7 @@ func (p *glxPresenter) Close() {
 		gl.DeleteBuffers(1, &p.pbo)
 		gl.DeleteTextures(1, &p.texture)
 		gl.DeleteTextures(1, &p.stage)
+		gl.DeleteSamplers(1, &p.linear)
 		gl.DeleteVertexArrays(1, &p.vao)
 		gl.DeleteProgram(p.program)
 		p.ready = false

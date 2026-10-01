@@ -6,6 +6,12 @@
 # REPEAT_RATE presses a second after REPEAT_DELAY ms — and then, instead of
 # Escape, with steps back to the first window, the one focused, and the
 # modifier released: an activation that leaves the focus where it was.
+# With SWEEP=1 as well it is session S3 of specs/010-animation-options: before
+# the held key the pointer sweeps across the middle of the overlay, 40 moves
+# 60 ms apart, diagonally — from 10 % to 90 % of its width and from 42 % to
+# 58 % of its height, so that it crosses the tiles of the grid rather than the
+# gap between two rows — and is then put on the centre of the focused window,
+# so that focus, which follows the mouse on ws1, stays where it was.
 #
 #   measure.sh run <renderer> <outdir>   one run of S1, renderer cpu or glx
 #   measure.sh summary <outdir>          summary of a finished run
@@ -26,6 +32,7 @@ STEPS=${STEPS:-23}
 KEY=${KEY:-F11}
 LAYOUT=${LAYOUT:-}
 HOLD=${HOLD:-0}
+SWEEP=${SWEEP:-0}
 REPEAT_DELAY=${REPEAT_DELAY:-500}
 REPEAT_RATE=${REPEAT_RATE:-33}
 
@@ -82,6 +89,27 @@ wait_ready() {
 	return 1
 }
 
+# Centre of the focused i3 window, "x y"
+focused_centre() {
+	i3-msg -t get_tree | jq -r '
+		.. | objects | select(.focused == true) | .rect
+		| "\(.x + (.width / 2 | floor)) \(.y + (.height / 2 | floor))"'
+}
+
+# Sweeps the pointer diagonally across the middle of the overlay, as the log of
+# $1 last placed it, and puts it on the centre of the focused window
+sweep() {
+	local x y w h fx fy i
+	read -r x y w h < <(jq -rs 'map(select(.message == "Monitor changed, recreating selector window"))
+		| last | "\(.x) \(.y) \(.width) \(.height)"' "$1")
+	read -r fx fy < <(focused_centre)
+	for ((i = 0; i < 40; i++)); do
+		xdotool mousemove $((x + w / 10 + i * (w * 8 / 10) / 39)) $((y + h * 42 / 100 + i * (h * 16 / 100) / 39))
+		sleep 0.06
+	done
+	xdotool mousemove "$fx" "$fy"
+}
+
 warm_up() {
 	local w
 	for w in $(focus_order | tac); do
@@ -103,6 +131,7 @@ run() {
 		echo "i3 windows: $(focus_order | wc -l)"
 		echo "activations: $ACTIVATIONS, steps: $STEPS"
 		echo "held: ${HOLD}s, $held keys"
+		echo "sweep: $SWEEP"
 		echo "keys per activation: $((STEPS + held))"
 	} >"$out/meta"
 	cp "$qws" "$out/qws"
@@ -129,6 +158,9 @@ run() {
 			xdotool key Right
 			wait_frames "$log" $((n + 1)) || true
 		done
+		if ((SWEEP > 0)); then
+			sweep "$log"
+		fi
 		if ((held > 0)); then
 			xdotool key Right
 			sleep "$(awk -v d="$REPEAT_DELAY" 'BEGIN { print d / 1000 }')"

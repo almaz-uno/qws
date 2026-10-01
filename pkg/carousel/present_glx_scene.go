@@ -13,14 +13,23 @@ import (
 // fragment samples each layer where the layer's rectangle maps it, and
 // nothing outside.
 const (
+	// pos is where a corner lies in the frame; the zoom of
+	// specs/010-animation-options scales the frame about the centre of the
+	// window, so the corner is drawn where the scale takes it
 	sceneVertexShader = `#version 460 core
 uniform vec4 quad;
 uniform vec2 viewport;
+uniform float scale;
 out vec2 pos;
 void main() {
 	vec2 corner = vec2(gl_VertexID & 1, (gl_VertexID >> 1) & 1);
 	pos = quad.xy + corner * quad.zw;
-	gl_Position = vec4(pos.x / viewport.x * 2.0 - 1.0, 1.0 - pos.y / viewport.y * 2.0, 0.0, 1.0);
+	vec2 at = pos;
+	if (scale != 1.0) {
+		vec2 c = viewport * 0.5;
+		at = c + (pos - c) * scale;
+	}
+	gl_Position = vec4(at.x / viewport.x * 2.0 - 1.0, 1.0 - at.y / viewport.y * 2.0, 0.0, 1.0);
 }` + "\x00"
 
 	sceneFragmentShader = `#version 460 core
@@ -54,9 +63,9 @@ type layerTexture struct {
 
 // sceneState is the part of the GLX presenter that draws scenes
 type sceneState struct {
-	program                                 uint32
-	quad, viewport, rectA, rectB, weight, a int32
-	layers                                  map[LayerID]layerTexture
+	program                                        uint32
+	quad, viewport, rectA, rectB, weight, a, scale int32
+	layers                                         map[LayerID]layerTexture
 }
 
 func (p *glxPresenter) initScene() error {
@@ -72,7 +81,7 @@ func (p *glxPresenter) initScene() error {
 	uniform := func(name string) int32 { return gl.GetUniformLocation(program, gl.Str(name+"\x00")) }
 	s.quad, s.viewport = uniform("quad"), uniform("viewport")
 	s.rectA, s.rectB = uniform("rectA"), uniform("rectB")
-	s.weight, s.a = uniform("weightB"), uniform("alpha")
+	s.weight, s.a, s.scale = uniform("weightB"), uniform("alpha"), uniform("scale")
 	s.layers = map[LayerID]layerTexture{}
 	gl.UseProgram(p.program)
 	return nil
@@ -125,27 +134,28 @@ func (p *glxPresenter) DropLayers() {
 	}
 }
 
-func (p *glxPresenter) PresentScene(base LayerID, items []SceneItem, alpha float64) error {
-	if err := p.drawScene(base, items, alpha); err != nil {
+func (p *glxPresenter) PresentScene(base LayerID, items []SceneItem, f Fade) error {
+	if err := p.drawScene(base, items, f); err != nil {
 		return err
 	}
 	p.swap()
 	return nil
 }
 
-// drawScene draws a scene into the back buffer, scaled by alpha
-func (p *glxPresenter) drawScene(base LayerID, items []SceneItem, alpha float64) error {
+// drawScene draws a scene into the back buffer through the fade f
+func (p *glxPresenter) drawScene(base LayerID, items []SceneItem, f Fade) error {
 	b, ok := p.scene.layers[base]
 	if !ok || b.bounds.Dx() != p.width || b.bounds.Dy() != p.height {
 		return fmt.Errorf("base layer %d is not a frame of the window", base)
 	}
-	p.drawTexture(b.texture, float32(alpha))
+	p.drawTexture(b.texture, f)
 
 	s := &p.scene
 	gl.Enable(gl.BLEND)
 	gl.BlendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
 	gl.UseProgram(s.program)
 	gl.Uniform2f(s.viewport, float32(p.width), float32(p.height))
+	gl.Uniform1f(s.scale, float32(f.Scale))
 	for _, it := range items {
 		ra, ta := p.layerRect(it.A, it.RectA)
 		rb, tb := p.layerRect(it.B, it.RectB)
@@ -161,7 +171,7 @@ func (p *glxPresenter) drawScene(base LayerID, items []SceneItem, alpha float64)
 		gl.Uniform4f(s.rectA, float32(ra.X), float32(ra.Y), float32(ra.W), float32(ra.H))
 		gl.Uniform4f(s.rectB, float32(rb.X), float32(rb.Y), float32(rb.W), float32(rb.H))
 		gl.Uniform1f(s.weight, float32(it.WeightB))
-		gl.Uniform1f(s.a, float32(it.Alpha*alpha))
+		gl.Uniform1f(s.a, float32(it.Alpha*f.Alpha))
 		gl.DrawArrays(gl.TRIANGLE_STRIP, 0, 4)
 	}
 	gl.ActiveTexture(gl.TEXTURE0)
@@ -179,7 +189,7 @@ func (p *glxPresenter) layerRect(id LayerID, r Rect) (Rect, uint32) {
 	return r, l.texture
 }
 
-func (p *glxPresenter) PresentFaded(img *image.RGBA, alpha float64) error {
+func (p *glxPresenter) PresentFaded(img *image.RGBA, f Fade) error {
 	if img != nil {
 		if err := p.draw(img); err != nil {
 			return err
@@ -189,7 +199,7 @@ func (p *glxPresenter) PresentFaded(img *image.RGBA, alpha float64) error {
 	if !p.presented {
 		return fmt.Errorf("no frame to fade")
 	}
-	p.drawTexture(p.texture, float32(alpha))
+	p.drawTexture(p.texture, f)
 	p.swap()
 	return nil
 }
