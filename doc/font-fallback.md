@@ -2,35 +2,35 @@
 
 ## Overview
 
-Реализована поддержка множественных fallback шрифтов на уровне глифов (символов) для `qws`.
+`qws` supports multiple fallback fonts at the level of glyphs (characters).
 
-## Архитектура
+## Architecture
 
 ### MultiFallbackFace
 
-Новый тип `MultiFallbackFace` в [pkg/carousel/fontfallback.go](pkg/carousel/fontfallback.go) реализует интерфейс `font.Face` из `golang.org/x/image/font` и обеспечивает:
+The new type `MultiFallbackFace` in [pkg/carousel/fontfallback.go](pkg/carousel/fontfallback.go) implements the `font.Face` interface of `golang.org/x/image/font` and provides:
 
-1. **Glyph-level fallback** — автоматический подбор шрифта для каждого символа
-2. **Множественные fallback** — поддержка цепочки из нескольких шрифтов
-3. **Pure Go** — работает без CGo, используя только `golang.org/x/image` и `golang/freetype`
+1. **Glyph-level fallback** — a font is chosen automatically for every character
+2. **Multiple fallbacks** — a chain of several fonts is supported
+3. **Pure Go** — works without CGo, using only `golang.org/x/image` and `golang/freetype`
 
-### Принцип работы
+### How it works
 
 ```
-Текст: "Hello 世界 🎨"
+Text: "Hello 世界 🎨"
   ↓
-'H' → проверяем в primary font → найден → используем primary
-'世' → проверяем в primary font → не найден → проверяем в fallback #1 → найден
-'🎨' → primary → fallback #1 → fallback #2 → используем последний
+'H' → look in the primary font → found → use the primary
+'世' → look in the primary font → not found → look in fallback #1 → found
+'🎨' → primary → fallback #1 → fallback #2 → use the last one
 ```
 
-### Метрики шрифтов
+### Font metrics
 
-Метрики (высота строки, базовая линия) берутся из **основного (primary) шрифта** для согласованности отображения.
+The metrics (line height, baseline) are taken from the **primary font**, so that the text is displayed consistently.
 
-Кернинг применяется только если оба символа из одного шрифта.
+Kerning is applied only if both characters come from the same font.
 
-## Конфигурация
+## Configuration
 
 ```yaml
 appearance:
@@ -42,15 +42,15 @@ appearance:
     size: 14
 ```
 
-### Командная строка
+### Command line
 
 ```bash
 qws --appearance-font-paths=/path/to/font1.ttf,/path/to/font2.ttf
 ```
 
-## Использование
+## Usage
 
-Класс автоматически используется в [pkg/carousel/renderer.go](pkg/carousel/renderer.go) при рендеринге текста:
+The type is used automatically in [pkg/carousel/renderer.go](pkg/carousel/renderer.go) when text is rendered:
 
 ```go
 fallbackFace := NewMultiFallbackFace(cfg.FontPaths, fontSize)
@@ -63,23 +63,23 @@ dc.SetFontFace(fallbackFace)
 dc.DrawString(text, x, y)
 ```
 
-## Тестирование
+## Testing
 
-Тесты находятся в [pkg/carousel/fontfallback_test.go](pkg/carousel/fontfallback_test.go):
+The tests are in [pkg/carousel/fontfallback_test.go](pkg/carousel/fontfallback_test.go):
 
 ```bash
 go test ./pkg/carousel/...
 ```
 
-## Ограничения
+## Limitations
 
-1. **Не fontconfig** — требуются полные пути к файлам шрифтов, системные имена типа "Noto Sans" не поддерживаются (можно добавить через `fc-match`)
-2. **Производительность** — для каждого глифа проверяется несколько шрифтов, но это быстро для небольших текстов
-3. **Сложные языки** — нет поддержки лигатур и сложной обработки (арабский, деванагари и т.д.)
+1. **Not fontconfig** — full paths to font files are required; system names such as "Noto Sans" are not supported (they could be added through `fc-match`)
+2. **Performance** — several fonts are checked for every glyph, but this is fast for short texts
+3. **Complex scripts** — no support for ligatures or complex shaping (Arabic, Devanagari, etc.)
 
-## Будущие улучшения
+## Future improvements
 
-- [ ] Кеширование результатов поиска глифов
-- [ ] Поддержка системных имён шрифтов через `fc-match`
-- [ ] Автоматическое определение шрифтов для CJK/Emoji
-- [ ] Метрики на основе используемого шрифта (не только primary)
+- [ ] Caching of glyph lookup results
+- [ ] Support for system font names through `fc-match`
+- [ ] Automatic choice of fonts for CJK/Emoji
+- [ ] Metrics based on the font in use (not only the primary)

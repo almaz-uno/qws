@@ -1794,9 +1794,9 @@ func keysymToKeycode(conn *xgb.Conn, setup *xproto.SetupInfo, keysym uint32) xpr
 }
 ----
 
-==== Альтернатива: использование xgbutil
+==== Alternative: using xgbutil
 
-Библиотека `github.com/BurntSushi/xgbutil` упрощает работу с keysym:
+The `github.com/BurntSushi/xgbutil` library simplifies working with keysyms:
 
 [source,go]
 ----
@@ -2079,7 +2079,7 @@ protected:
     void paintEvent(QPaintEvent *) override {
         QPainter painter(this);
         painter.setRenderHint(QPainter::Antialiasing);
-        // Рисование карусели
+        // Drawing the carousel
     }
 };
 ----
@@ -2135,7 +2135,7 @@ func createSwitcherWindow() *gtk.Window {
     win.SetPosition(gtk.WIN_POS_CENTER_ALWAYS)
     win.SetDecorated(false)
 
-    // Прозрачность
+    // Transparency
     screen, _ := win.GetScreen()
     visual, _ := screen.GetRGBAVisual()
     win.SetVisual(visual)
