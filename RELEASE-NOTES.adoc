@@ -29,13 +29,17 @@ they need glibc 2.36 or newer and the OpenGL and X11 libraries.
 
 === 1.2.1 — unreleased
 
-*Smoother beside a second qws* (link:specs/011-snapshot-pause/spec.adoc[specification
-011]): every qws stops capturing windows while the switcher of any qws on the
-display is shown, not only its own. Two services, as on Alt+Tab and on
-Alt+grave, no longer take the frames of each other's switcher — on the
-author's desktop a step missed 1.1 % of its frames instead of 0.5 %, a
-fade-in about one in ten. While paused, the capture loop also no longer
-spins on a CPU.
+*Snapshots out of the switcher's way* (link:specs/011-snapshot-pause/spec.adoc[specification
+011]):
+
+* While the switcher is shown, the capture of windows waits instead of
+  spinning on a CPU, as it did in 1.1.0 and 1.2.0 whenever a window changed
+  meanwhile.
+* Every qws stops capturing windows while the switcher of any qws on the
+  display is shown, not only its own: a second instance — a second service,
+  a trial build — no longer takes the frames of the first one's switcher.
+  Beside one, a step used to miss 1.1 % of its frames instead of 0.5 %, a
+  fade-in about one in ten.
 
 == 1.1.0 — 2026-10-01
 

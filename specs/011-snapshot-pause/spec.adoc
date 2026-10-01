@@ -3,7 +3,7 @@
 :toc-title: Contents
 :sectnums:
 :revdate: 2026-10-01
-:status: draft
+:status: implemented
 :issue: 30
 
 == What and why
@@ -11,14 +11,20 @@
 Since 1.1.0 every qws instance captures the visible windows through the GPU
 when their contents change (specification 008), and pauses those captures
 while its own switcher is shown (007). It does not pause for the switcher of
-another instance — and the author runs two, `qws.service` on Alt+Tab and
-`qws-workspace.service` on Alt+grave. While one shows its switcher, the
-other captures the windows that change meanwhile, a terminal that prints,
-an editor, and takes the GPU and the X server from the frames: on E1 the
-step of the carousel misses 1.10 % of its frames instead of 0.51 %, the
-fade-in 9.8 % instead of 0.45 % (specification 010, research, "The
-control"). The author asked (2026-10-01) that the snapshots pause while any
-switcher is shown.
+another instance. While one shows its switcher, another captures the windows
+that change meanwhile, a terminal that prints, an editor, and takes the GPU
+and the X server from the frames: on E1, beside the two services the author
+ran then, the step of the carousel missed 1.10 % of its frames instead of
+0.51 %, the fade-in 9.8 % instead of 0.45 % (specification 010, research,
+"The control"). The author asked (2026-10-01) that the snapshots pause while
+any switcher is shown.
+
+The same evening the author removed the second service,
+`qws-workspace.service`; one instance remains. A second one still comes and
+goes — a trial build, a measurement, the second service back — and the
+pause is for it. For the one instance alone the change brings the fix found
+on the way: while its own switcher is shown, its snapshotter spun on a CPU
+for every window that came due.
 
 The specification is a delta to `develop` at `f90abc7` (1.2.0). Unchanged:
 what is captured and when, but for the pause; the capture at an activation,
@@ -28,7 +34,8 @@ CPU of the focus watcher, without GLX; the configuration.
 == Decisions
 
 Author, 2026-10-01: snapshots pause while the switcher of any qws instance
-is shown.
+is shown. The author removed `qws-workspace.service` at 21:49 the same day,
+on purpose.
 
 Made on the way, 2026-10-01, for the author to confirm:
 
@@ -126,7 +133,36 @@ logging in JSON — so that their snapshots can be read.
 | `go vet ./...`, `go test ./...` and `make check-specs` pass.
 |===
 
+== Results
+
+2026-10-01, E1; the runs in `research.adoc`.
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | `TestSwitchers` on ws1.
+| K2 | Met: of 521 snapshots on change of the two instances, none fell
+  strictly within the some 1240 s the measured switcher was shown, to the
+  second the logs give.
+| K3 | Not met. A1 p95 of the step 8.09 ms, of the fade-in 7.91 and of the
+  fade-out 8.01, against 7.44; 1.67 % of the step's intervals missed,
+  against 0.6 %. The misses come in bursts, in 9 of the 20 activations of S4
+  and 6 of the 20 of S3 with the carousel; outside them the step misses
+  0.15 % — a fifth of 010 with nothing beside it — at
+  a p95 of 7.92 ms. Beside the services of 1.1.0, 010 measured 8.42 ms and
+  1.10 %, the fade-in 15.12 ms and 9.8 %.
+| K4 | Not met at its threshold: the hover at 7.91 ms in the grid and 7.97
+  in the carousel, against 11.49 and 8.87 in 010; missed 0.23 % and 1.0 %.
+| K5 | `TestWait`.
+| K6 | `go vet ./...`, `go test ./...`, `make check-specs`, locally and in
+  workflow `test`.
+|===
+
 == Open decisions
 
+. K3 and K4 on an idle ws1: the bursts of missed frames and the p95 of
+  7.92 ms against 7.09 (research, "Frames") are not explained, and the
+  other sessions running at the time are the first suspects.
 . The snapshots on the CPU of the focus watcher, for the switcher of
   another instance.
