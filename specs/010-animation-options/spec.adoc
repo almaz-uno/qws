@@ -1,0 +1,228 @@
+= 010 — animation options
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-01
+:status: draft
+:issue: 27
+
+== What and why
+
+Specification 007 animated the switcher on `glx` in one way for everyone:
+every animation takes 150 ms, the overlay fades in and fades out, the
+carousel steps and the selection frame of the grid slides, and the hover
+frame appears at once. Changing any of this means switching to `cpu`, which
+also gives up the GPU presenter. The author asks (2026-10-01, the open
+decisions of 007) for a key that turns the animation off, a duration that
+can be set, a zoom for the appearance, a way to turn each effect off on its
+own, and the hover frame animated by a fade or by a zoom — which of the two
+to be chosen after seeing both on E1.
+
+The specification is a delta to `develop` at `0016519` (1.0.0). Unchanged:
+the `cpu` renderer, which changes its picture at once whatever the keys say;
+the frames at rest of both renderers, byte for byte; the step of 007 and its
+duration.
+
+== Decisions
+
+Author, 2026-10-01: the animation can be turned off as a whole; its duration
+is a key; the appearance may zoom; the appearance and each other effect can
+be turned off on its own; the hover frame can fade or zoom, to be seen.
+Having tried the variants on E1 (K10): the zoom of the hover closes in from
+1.05 of its size, not 1.1; the defaults are fade and zoom together for the
+appearance, the disappearance and the hover.
+
+Made on the way, 2026-10-01, for the author to confirm:
+
+* the keys live under `appearance.animation`; an effect is a list of
+  `fade` and `zoom`, so that each can be had alone or both together;
+* one duration for every animation;
+* the zoom of the appearance runs from 0.92 of the size to the full size,
+  and of the disappearance back to 0.92; the hover frame runs from 1.05 of
+  its size down to its size as it appears, and back to 1.05 as it goes — it
+  closes in on the tile rather than growing out of it; the factors are
+  constants, not keys;
+* with a motion off, `glx` keeps composing layers: a step shows the scene at
+  its target in the next frame and the exact frame once drawn, as at the
+  end of an animated step — not a frame drawn on the spot, which takes
+  350–480 ms for the grid on E1 (research of 007);
+* an unknown effect name or a negative duration is reported with a warning
+  and ignored, as are unknown key names elsewhere in the switcher.
+
+== Behavior
+
+All of it on `glx`; `cpu` reads the keys and changes its picture at once.
+
+=== Keys
+
+[cols="2,1,5"]
+|===
+| Key | Default | Meaning
+
+| `appearance.animation.enabled`
+| `true`
+| `false`: nothing moves; every change shows at once, as with every effect
+  below turned off.
+
+| `appearance.animation.duration`
+| `150ms`
+| The time of every animation. `0` is as `enabled: false`.
+
+| `appearance.animation.step`
+| `true`
+| The step: the carousel turns to the next card, the selection frame of the
+  grid slides to the next tile. `false`: the selection is at its target in
+  the next frame.
+
+| `appearance.animation.show`
+| `[fade, zoom]`
+| How the overlay appears: a list of effects, `fade` and `zoom`; `[]` or
+  `none`, at once.
+
+| `appearance.animation.hide`
+| `[fade, zoom]`
+| How the overlay disappears; as `show`.
+
+| `appearance.animation.hover`
+| `[fade, zoom]`
+| How the hover frame appears on the tile or card under the pointer and
+  goes from the one the pointer left; as `show`.
+|===
+
+An effect list is read from a YAML list, a single name, or names joined by
+commas: `show: [fade, zoom]`, `show: zoom`, `QWS_APPEARANCE_ANIMATION_SHOW=fade,zoom`,
+`--appearance-animation-show=fade,zoom`. Environment variables and flags are
+named as in specification 002.
+
+=== Effects
+
+. *Fade*: every channel of what is shown — the overlay, or the hover frame
+  and the shadow of the hovered tile of the grid — is scaled by an alpha
+  that runs from 0 to 1 as it appears, from 1 to 0 as it goes, along the
+  ease-out cubic of 007 over the duration.
+. *Zoom*: what is shown is scaled about its centre, along the same curve
+  and in the same frames as the fade: the overlay about the centre of the
+  window, from 0.92 to 1 as it appears and from 1 to 0.92 as it goes; the
+  hover frame about the centre of its tile or card, from 1.05 to 1 and from
+  1 to 1.05, the shadow of the grid with it. Outside the scaled overlay the
+  window is transparent.
+. With `fade` alone the scale stays 1; with `zoom` alone the alpha stays 1,
+  and what goes vanishes when its zoom ends.
+. A change mid-way — a new hover before the last has settled, a selection
+  during the appearance — starts each motion from where it is, as the
+  retargeting of 007.
+
+=== The hover
+
+With `hover` set, a change of the hover starts a motion of the frames: the
+frame of the tile or card under the pointer appears, the frame of the one it
+left goes, each by the effects of `hover`. Frames follow at the refresh
+period, as the animations of 007; the frame at rest, drawn in the
+background, follows when the motion ends. In the carousel the hover frame
+is a layer of its own, drawn for the card at its offset; during a step it
+moves with its card. The hovered tile or card is the one under the pointer,
+except the selected one, as at rest. While the layers of the scene are not
+yet uploaded, the hover shows at once, as without `hover`.
+
+Without `hover`, the hover shows at once: in the grid through the scene of
+layers, as in 007; in the carousel by the frame drawn on the spot, as in
+1.0.0.
+
+=== The appearance and the disappearance
+
+`show` and `hide` replace the fade-in and the fade-out of 007, which are
+`show: [fade]` and `hide: [fade]`. With `hide` empty, the overlay is
+unmapped before the chosen window is activated, as with `cpu`; otherwise
+after it, as in 007.
+
+=== Existing configurations
+
+No key, environment variable or flag is renamed or removed. A configuration
+without `appearance.animation` gets the defaults: the overlay now zooms as
+well as fades as it appears and disappears, and the hover frame fades and
+zooms. `show: [fade]`, `hide: [fade]` and `hover: none` give the look of
+1.0.0. The changed defaults make the release a minor one (constitution,
+"Releases and versions").
+
+== Metrics
+
+As in 007. The frames of a hover motion are logged with the kind `hover`;
+the appearance and the disappearance keep the kinds `fade-in` and `fade-out`
+whatever their effects.
+
+Session S3:: As S2 of 007, with the grid, and in each activation also a
+sweep of the pointer across the middle of the overlay — 40 moves, 60 ms
+apart — before the held key; the pointer is then put on the centre of the
+focused window, so that focus, which follows the mouse on E1, stays where it
+was. `SWEEP=1 HOLD=2 measure.sh run glx <dir>`.
+
+== Acceptance criteria
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| Defaults: `config.Default()` holds the six keys at `true`, 150 ms, `true`,
+  `[fade, zoom]`, `[fade, zoom]`, `[fade, zoom]`. Test in `internal/config`.
+  With them, S2 on E1 logs the kinds `carousel`, `fade-in` and `fade-out`
+  only, with the frame counts of K2 of 007.
+
+| K2
+| Sources: each key is read from a file, from its `QWS_` variable and from
+  its flag; an effect list from a YAML list, a single name and a
+  comma-separated string; the round trip of K3 of 002 holds with the new
+  keys. Tests in `internal/config`.
+
+| K3
+| Validation: an unknown effect name and a negative duration give one
+  warning each and are ignored; `none` and `[]` are no effect. Test in
+  `pkg/ui`.
+
+| K4
+| Off: with `enabled: false`, and in a second run with `duration: 0`, S2 on
+  E1 logs no frame of the kinds `fade-in`, `fade-out` or `hover`, and every
+  frame of a step at progress 1.
+
+| K5
+| Duration: with `duration: 300ms`, A3 of the steps and of the fades not
+  retargeted within 300 ms ± one refresh period. S2 on E1.
+
+| K6
+| Zoom and the frame at rest: `TestGLXPresenterMatchesCPU` holds — at scale
+  1 the presenter copies the frame byte for byte; a frame presented at scale
+  0.92 keeps the pixel at the centre of the window and is transparent in
+  the corners. Test in `pkg/carousel`, skipped as that one without X, GLX or
+  a compositor.
+
+| K7
+| Smoothness of the new motions on E1, at the defaults: the zoom of the
+  appearance and the disappearance — S2; the hover, in the grid and in the
+  carousel — S3, and S3 with the carousel. The effects cost the same in a
+  frame — a uniform each — so fade and zoom alone are not run apart. A1 p95 ≤ the refresh period + 0.5 ms; at least 18 frames in a
+  150 ms animation; the missed frames reported, as in 007.
+
+| K8
+| Each effect on its own: one S2 run on E1 with `step: false`, `show: none`,
+  `hide: [zoom]`: no `fade-in` frame, `fade-out` frames of 150 ms, every
+  frame of a step at progress 1.
+
+| K9
+| Motion: `TestMotion` with a duration of 150 ms as in 007, and with 0: the
+  value is at its target at once.
+
+| K10
+| The author's judgement on E1: the zoom of the appearance, the hover by
+  fade and by zoom, seen; the defaults of `show`, `hide` and `hover` chosen,
+  and `config.Default()` set to them in this change.
+
+| K11
+| `go vet ./...` and `go test ./...` pass; so does `make check-specs` once
+  specification 009 is merged.
+|===
+
+== Open decisions
+
+. A duration of its own for the hover, should one for all be too slow for
+  it.
+. The zoom factors as keys, should the constants not suit.

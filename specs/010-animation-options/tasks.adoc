@@ -1,0 +1,16 @@
+= 010 — tasks
+:toc: left
+:toc-title: Contents
+:revdate: 2026-10-01
+
+. [ ] T1. The keys: `config.Animation`, defaults, flags, the documents;
+  K1 and K2 by tests.
+. [ ] T2. Motions with a duration, effects with validation; K3 and K9.
+. [ ] T3. `Fade` with the scale in the GLX presenter; K6.
+. [ ] T4. `show`, `hide`, `step`, `enabled` and `duration` in the selector.
+. [ ] T5. The hover: levels, the grid, the hover layers of the carousel, the
+  motion in the loop.
+. [ ] T6. Session S3 in `measure.sh`.
+. [ ] T7. The runs on E1: K1, K4, K5, K7, K8.
+. [ ] T8. The author's review, K10; the defaults it sets; the results and
+  the release notes.
