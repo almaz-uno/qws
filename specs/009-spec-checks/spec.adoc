@@ -61,8 +61,9 @@ the content of specifications 001–007 except `:status:`.
   is not seen: the build stays green. `scripts/check-specs-test.sh` runs the
   check on generated `specs/` trees, valid and with each violation.
 * *A shell script, not a Go test.* lxqt-weather is C++, and one check for
-  three projects is one text to read; it differs only in the heading of the
-  results section and in what `:issue:` holds.
+  three projects is one logic to read. The copies differ in the heading of
+  the results section and in what `:issue:` holds — siphon has no tracker
+  yet — and siphon's speaks Russian, the language of that project.
 * *What is not checked.* The check sees the form, not the truth: that a
   specification matches the code rests on criteria that name a test, a
   measurement or a reproducible scenario (constitution, "Decisions rest on
@@ -171,6 +172,8 @@ brings 008 to the rule: the check fails on it until then.
 | K3
 | The test fails when the check is broken: each rule of the check, removed or
   weakened one at a time, makes `scripts/check-specs-test.sh` fail.
+  `mutate.sh` in this directory makes the mutants and reports each as killed
+  or survived.
 
 | K4
 | Workflow `test` on the pull request runs `make check-specs`, and the step

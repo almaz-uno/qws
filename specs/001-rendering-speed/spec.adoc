@@ -2,8 +2,8 @@
 :toc: left
 :toc-title: Contents
 :sectnums:
-:revdate: 2026-09-30
-:status: implemented 2026-09-30; K1–K9 met (section "Results"); not merged
+:revdate: 2026-10-01
+:status: implemented
 :issue: 5
 
 == What and why

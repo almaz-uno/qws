@@ -1,4 +1,4 @@
-.PHONY: build run clean test vet install deps lint help release
+.PHONY: build run clean test vet check-specs install deps lint help release
 
 # Binary name
 BINARY_NAME=qws
@@ -31,6 +31,12 @@ test:
 
 vet:
 	go vet ./...
+
+# The form of specs/: the test of the check, then the check
+# (specs/009-spec-checks)
+check-specs:
+	scripts/check-specs-test.sh
+	scripts/check-specs.sh
 
 # GitHub release on a pushed version tag: make release TAG=vX.Y.Z
 release:
@@ -66,6 +72,7 @@ help:
 	@echo "  make run     - Build and run"
 	@echo "  make test    - Run tests"
 	@echo "  make vet     - Run go vet"
+	@echo "  make check-specs - Check the form of specs/"
 	@echo "  make release TAG=vX.Y.Z - GitHub release on a pushed tag"
 	@echo "  make clean   - Remove binary"
 	@echo "  make install - Install to /usr/local/bin"
