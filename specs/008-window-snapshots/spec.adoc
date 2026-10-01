@@ -4,7 +4,7 @@
 :sectnums:
 :revdate: 2026-10-01
 :issue: 20
-:status: implemented 2026-10-01, merged (#22); K1–K7 met (section "Results"); the stalls to count after the services are replaced
+:status: implemented
 
 == What and why
 
@@ -165,6 +165,8 @@ CPU.
 
 == Open decisions
 
-. Live thumbnails — specification 009.
+. Live thumbnails — a specification of its own.
 . A window never viewable in a session has no snapshot but its placeholder,
   as now.
+. The stalls of the X server on E1 (section "Acceptance criteria") are still
+  to be counted, after the services are replaced.
