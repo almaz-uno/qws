@@ -3,7 +3,7 @@
 :toc-title: Contents
 :sectnums:
 :revdate: 2026-10-01
-:status: draft
+:status: implemented
 :issue: 43
 
 == What and why
@@ -112,6 +112,29 @@ agreement; without it, it goes out as a minor version.
 
 | K6
 | `go vet ./...`, `go test ./...` and `make check-specs` pass.
+|===
+
+== Results
+
+2026-10-01, ws1 (Debian 12, Go 1.26.0).
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | `TestJoinedKeys`: 20 joined keys, 20 warnings, each naming its key.
+| K2 | `TestJoinedKeys`: `snapshot_interval: 2s` over `snapshotinterval: 7s`.
+| K3 | `TestRoundTrip`, `TestTagNames`.
+| K4 | On a copy of `internal/config` whose `joinedKeyWarnings` merged each
+  joined key into the key it stands for, as `readJoinedKeys` of 1.2.0 did:
+  `TestJoinedKeys` failed — the joined values read, `snapshot interval 7s,
+  want the default 1s`.
+| K5 | `qws config show` on such a file: `workspace_modifier: Ctrl`,
+  `snapshot_interval: 2s`; the warnings "configuration key
+  keybindings.workspacemodifier is no longer read: rename it to
+  keybindings.workspace_modifier" and "configuration key
+  behavior.snapshotinterval is ignored: behavior.snapshot_interval is set".
+| K6 | `go vet ./...`, `go test ./...`, `scripts/check-specs.sh`.
 |===
 
 == Open decisions
