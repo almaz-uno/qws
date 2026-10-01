@@ -90,13 +90,15 @@ func TestTagNames(t *testing.T) {
 	})
 }
 
-// TestJoinedKeys checks K4: a file written with joined names, as config init
-// wrote it, is read with a warning per joined key, and a key with
-// underscores wins over its joined form
+// TestJoinedKeys checks K4 of specs/002-config-names as specs/015-no-joined-keys
+// changes it (K1, K2): a file written with joined names, as config init
+// wrote it, has its joined keys not read — the keys they stand for keep their
+// defaults — with a warning per joined key naming the key to use, and a key
+// with underscores wins over its joined form
 func TestJoinedKeys(t *testing.T) {
 	clearEnvironment(t)
-	want := changedConfig(t)
-	data, err := yaml.Marshal(joined(reflect.ValueOf(*want)))
+	written := changedConfig(t)
+	data, err := yaml.Marshal(joined(reflect.ValueOf(*written)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,16 +107,36 @@ func TestJoinedKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("read\n%+v\nwritten\n%+v", got, want)
+	// Every field differs from its default: a joined one read would show
+	want := *written
+	unjoined(reflect.ValueOf(&want).Elem(), reflect.ValueOf(*Default()))
+	if !reflect.DeepEqual(*got, want) {
+		t.Errorf("read\n%+v\nwant\n%+v", *got, want)
 	}
-	if n := len(joinedKeys()); len(warnings) != n {
-		t.Errorf("%d warnings, want %d: %v", len(warnings), n, warnings)
+	keys := joinedKeys()
+	if len(warnings) != len(keys) {
+		t.Errorf("%d warnings, want %d: %v", len(warnings), len(keys), warnings)
 	}
 	for _, w := range warnings {
-		if !strings.Contains(w, "rename it") {
-			t.Errorf("warning %q does not say what to do", w)
+		named := false
+		for k, key := range keys {
+			named = named || strings.Contains(w, "key "+k+" ") && strings.HasSuffix(w, "rename it to "+key)
 		}
+		if !strings.Contains(w, "no longer read") || !named {
+			t.Errorf("warning %q does not say the key is not read and which to use", w)
+		}
+	}
+
+	got, warnings, err = Load(writeFile(t, "behavior:\n  snapshotinterval: 7s\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Behavior.SnapshotInterval != Default().Behavior.SnapshotInterval {
+		t.Errorf("snapshot interval %v, want the default %v", got.Behavior.SnapshotInterval, Default().Behavior.SnapshotInterval)
+	}
+	if len(warnings) != 1 || warnings[0] !=
+		"configuration key behavior.snapshotinterval is no longer read: rename it to behavior.snapshot_interval" {
+		t.Errorf("warnings %q, want one naming behavior.snapshot_interval", warnings)
 	}
 
 	got, warnings, err = Load(writeFile(t, "behavior:\n  snapshot_interval: 2s\n  snapshotinterval: 7s\n"))
@@ -283,6 +305,19 @@ func changedConfig(t *testing.T) *Config {
 	}
 	same(reflect.ValueOf(*cfg), def, "Config")
 	return cfg
+}
+
+// unjoined sets every field of want under a multi-word name — one config
+// init wrote joined — to its value in def
+func unjoined(want, def reflect.Value) {
+	for i := 0; i < want.NumField(); i++ {
+		f := want.Type().Field(i)
+		if strings.ToLower(f.Name) != f.Tag.Get("mapstructure") {
+			want.Field(i).Set(def.Field(i))
+		} else if f.Type.Kind() == reflect.Struct {
+			unjoined(want.Field(i), def.Field(i))
+		}
+	}
 }
 
 // joined is v as yaml.v3 marshals it without tags: fields named by their
