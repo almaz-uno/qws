@@ -4,7 +4,7 @@
 :sectnums:
 :revdate: 2026-10-01
 :issue: 48
-:status: draft
+:status: implemented
 
 == What and why
 
@@ -149,6 +149,35 @@ time from `times` of the shell that ran it. R-before runs the build of
 
 | K6
 | `go vet ./...`, `go test ./...` and `make check-specs` pass.
+|===
+
+== Results
+
+2026-10-01, E1 (ws1); the runs and the probe in `research.adoc`.
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | R-after: three refusals, one per window, each "glx: binding pixmap
+  0x…: X error 11 on request 152.22"; R-before logged "X error 161".
+| K2 | R-after: 32 of 33 snapshots by RENDER, none on the CPU; the 33rd, of
+  a window the service did not hold then, on the GPU. S1 by RENDER, 29
+  snapshots after the first of each window: p50 1.64 ms, p95 6.36 ms, the
+  longest 10.75 ms; the first of a window 1.76–5.90 ms. R-before: 29 of 30
+  on the CPU, p50 102.97 ms, p95 108.27 ms. CPU time in 30 s: 0.30 s, 1.0 %
+  of a CPU, start included, against 2.97 s, 9.9 %. The bound of 10 ms was
+  set after the first run: 008 had the median of RENDER in a loop only. The
+  tail is the X server busy: a bare round trip just before the passes took
+  up to 4.7 ms at times, the passes and the read-back 0.46–1.74 ms but for
+  four spikes of 4.7–6.2 ms (research).
+| K3 | `TestRenderThumbnail` on E1: means 0.04–0.95 per channel, the pixmap of
+  300×200 exact; each of four wrong variants tried fails it (research).
+| K4 | R-after: three records "Pixmap not bound" for three windows; the
+  active one was captured 29 times more by RENDER without another attempt.
+| K5 | The four tests pass on E1; `TestNewAndClose`, itself a second
+  instance beside the service, now logs its snapshots by RENDER.
+| K6 | `go vet ./...`, `go test ./...` and `make check-specs` on E1.
 |===
 
 == Open decisions
