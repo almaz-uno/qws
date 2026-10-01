@@ -183,6 +183,18 @@ frame at rest replaces it when it is drawn, keys handled meanwhile. A
 faster grid, drawn to the same bytes, is work of its own, for a
 specification of its own.
 
+*The hover.* The author, trying the build on E1 (K9, 2026-10-01): the
+carousel is good; on the grid the hover lags behind the mouse. Each change
+of the hover drew a frame of the grid in the loop, some 480 ms, while the
+motion events queued; each of them then changed the hover again and drew
+another frame, so the hover crawled through the places the pointer had
+left. It is the same on `develop`, at some 360 ms a frame. The hover is
+now a scene of layers too — the hover frame and its shadow, at the tile
+under the pointer, over and under the tiles drawn without a hover —
+presented at once; the frame of `cpu` is drawn in the background and
+replaces the scene when it comes, and a frame at rest drawn for another
+hover is not presented.
+
 == Fades
 
 In a try of one activation that ends with a selection, 2026-10-01: the

@@ -18,5 +18,6 @@
 . [ ] T8. Three runs of S2; K3 confirmed with the author; the author's
   review, K9. The runs done (research, "Runs of S2"): K2 short of "no
   frame missed", 0.45–0.51 % of intervals in the carousel; K3 and K9 with
-  the author.
+  the author. K9, first look: the carousel good; the hover of the grid
+  lagged behind the mouse — shown through layers since.
 . [ ] T9. The results, the release notes of 1.0.0.

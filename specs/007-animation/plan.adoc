@@ -14,9 +14,10 @@ The CPU draws layers, the GPU composes them. The layers of an activation:
   `drawWindowWithData` draws it at that offset, onto a transparent image of
   its bounding box; drawn on demand, in parallel, and kept for the
   activation;
-* the layers of the *grid* — its tiles without a selection, with the hover,
-  on a transparent image; the shadow of a selected tile under them and its
-  selection frame over them, both moving.
+* the layers of the *grid* — its tiles without a selection or a hover, on
+  a transparent image; the shadows of the selected and of the hovered tile
+  under them, the selection and the hover frame over them; the selection
+  moves, the hover follows the pointer.
 
 The GLX presenter keeps them as textures and draws a frame as quads with
 premultiplied blending, `BlendFunc(ONE, ONE_MINUS_SRC_ALPHA)`, in the

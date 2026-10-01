@@ -71,7 +71,10 @@ All of it on `glx`; `cpu` behaves as today.
   it: a frame of the grid takes some 350 ms to draw on E1 (research).
 . *The grid*: the selection frame and the shadow of the selected tile slide
   from its tile to the next in 150 ms, ease-out, under and over the tiles
-  drawn without a selection; at rest, the frame of `cpu`.
+  drawn without a selection; at rest, the frame of `cpu`. The hover follows
+  the mouse at once, in a scene of the same kind with the hover frame and
+  its shadow at the tile under the pointer; the frame of `cpu` replaces the
+  scene when it is drawn.
 . *Appearance*: the first frame of an activation fades in over 150 ms, from
   the end of its presentation; an `Expose` meanwhile is not answered. A
   quick press, released before the overlay shows, is not animated.
