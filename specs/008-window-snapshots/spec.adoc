@@ -4,7 +4,7 @@
 :sectnums:
 :revdate: 2026-10-01
 :issue: 20
-:status: implemented 2026-10-01, not merged; K1–K7 met (section "Results"); the stalls to count after the services are replaced
+:status: implemented 2026-10-01, merged (#22); K1–K7 met (section "Results"); the stalls to count after the services are replaced
 
 == What and why
 
