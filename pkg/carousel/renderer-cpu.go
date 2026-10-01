@@ -54,6 +54,15 @@ type Config struct {
 	GridSpacing             float64  // Spacing between tiles in grid mode
 	Hostname                string   // Drawn large at the top left (empty draws none)
 	Version                 string   // Drawn after the hostname (empty draws none)
+	Fonts                   *FontSet // Faces of a drawing that runs in parallel with others; nil: the shared cache
+}
+
+// face is the face of the configured fonts at size, from Fonts when set
+func (c Config) face(size float64) *MultiFallbackFace {
+	if c.Fonts != nil {
+		return c.Fonts.face(c.FontPaths, size)
+	}
+	return NewMultiFallbackFace(c.FontPaths, size)
 }
 
 // DefaultConfig returns default carousel configuration
@@ -207,8 +216,8 @@ func drawHeader(dc *gg.Context, cfg Config) float64 {
 	if cfg.Hostname == "" && cfg.Version == "" {
 		return 0
 	}
-	large := NewMultiFallbackFace(cfg.FontPaths, float64(cfg.FontSize)*headerScale)
-	small := NewMultiFallbackFace(cfg.FontPaths, float64(cfg.FontSize))
+	large := cfg.face(float64(cfg.FontSize) * headerScale)
+	small := cfg.face(float64(cfg.FontSize))
 	if large == nil || small == nil {
 		return 0
 	}
@@ -229,6 +238,19 @@ func drawHeader(dc *gg.Context, cfg Config) float64 {
 		dc.DrawString(cfg.Version, x, baseline)
 	}
 	return headerMargin + float64(metrics.Height)/64 + headerGap
+}
+
+// headerBand is the bottom of the band drawHeader takes, without drawing it
+func headerBand(cfg Config) float64 {
+	if cfg.Hostname == "" && cfg.Version == "" {
+		return 0
+	}
+	large := cfg.face(float64(cfg.FontSize) * headerScale)
+	small := cfg.face(float64(cfg.FontSize))
+	if large == nil || small == nil {
+		return 0
+	}
+	return headerMargin + float64(large.Metrics().Height)/64 + headerGap
 }
 
 // backgroundKey is what the rounded window background depends on
@@ -273,7 +295,9 @@ func newCanvas(cfg Config) *gg.Context {
 		background.key, background.img = key, getImageRGBA(dc)
 	}
 	img := image.NewRGBA(background.img.Rect)
-	copy(img.Pix, background.img.Pix)
+	for y := 0; y < len(img.Pix); y += img.Stride {
+		copyRow(img.Pix[y:y+img.Stride], background.img.Pix[y:])
+	}
 	background.Unlock()
 
 	// Leave the context as drawing the background does: its colour set, and
@@ -281,6 +305,17 @@ func newCanvas(cfg Config) *gg.Context {
 	dc := gg.NewContextForRGBA(img)
 	setColor(dc, cfg.BackgroundColor, cfg.WindowBackgroundOpacity)
 	return dc
+}
+
+// copyRow copies a row of pixels; copies of whole images go through it a row
+// at a time. One copy of an image is one memmove, which the scheduler cannot
+// preempt — the less so when it faults fresh pages in — and a collection of
+// the garbage stops every goroutine and waits for it; the call per row checks
+// for preemption (specs/007-animation, research).
+//
+//go:noinline
+func copyRow(dst, src []byte) {
+	copy(dst, src)
 }
 
 // getImageRGBA converts gg.Context image to RGBA
@@ -526,7 +561,7 @@ func drawWindowWithData(dc *gg.Context, data *WindowData, index, selected, hover
 	if data.Title != "" {
 		fontSize := float64(cfg.FontSize) * scale * 1.15 // Slightly larger than configured size
 		// Load multi-fallback font face
-		fallbackFace := NewMultiFallbackFace(cfg.FontPaths, fontSize)
+		fallbackFace := cfg.face(fontSize)
 		if fallbackFace == nil {
 			// Skip text rendering if no font available
 			goto skipTitle
@@ -575,7 +610,7 @@ skipTitle:
 	if data.Workspace != "" {
 		fontSize := float64(cfg.FontSize) * scale
 		// Load multi-fallback font face
-		fallbackFace := NewMultiFallbackFace(cfg.FontPaths, fontSize)
+		fallbackFace := cfg.face(fontSize)
 		if fallbackFace == nil {
 			// Skip workspace rendering if no font available
 			goto skipWorkspace
@@ -757,11 +792,54 @@ func DrawGridLayout(windowData []WindowData, selected int, hoverIndex int, cfg C
 		return getImageRGBA(dc)
 	}
 
+	grid := layoutGrid(len(windowData), top, cfg)
+
+	// Draw each window in its grid cell
+	for i, win := range windowData {
+		x, y := grid.tile(i)
+		drawGridTile(dc, &win, x, y, grid.tileW, grid.tileH, i == selected, i == hoverIndex, cfg)
+	}
+
+	return getImageRGBA(dc)
+}
+
+// drawGridSelection draws the selection frame of a tile of size w×h whose
+// top-left corner is the origin
+func drawGridSelection(dc *gg.Context, w, h float64, cfg Config) {
+	setColor(dc, cfg.SelectionFrame, 0.9)
+	dc.SetLineWidth(4)
+	dc.DrawRoundedRectangle(-2, -2, w+4, h+4, 10)
+	dc.Stroke()
+
+	// Inner glow
+	setColor(dc, cfg.SelectionFrame, 0.4)
+	dc.SetLineWidth(2)
+	dc.DrawRoundedRectangle(0, 0, w, h, 8)
+	dc.Stroke()
+}
+
+// drawGridHover draws the hover frame of a tile of size w×h whose top-left
+// corner is the origin: an orange-yellow tint
+func drawGridHover(dc *gg.Context, w, h float64) {
+	dc.SetRGBA(1.0, 0.7, 0.2, 0.6)
+	dc.SetLineWidth(3)
+	dc.DrawRoundedRectangle(-1, -1, w+2, h+2, 9)
+	dc.Stroke()
+}
+
+// gridLayout is where DrawGridLayout puts its tiles
+type gridLayout struct {
+	cols                                    int
+	tileW, tileH, offsetX, offsetY, spacing float64
+}
+
+// layoutGrid lays out n tiles in the window below top, the bottom of the header
+func layoutGrid(n int, top float64, cfg Config) gridLayout {
 	// Calculate grid dimensions
 	cols := cfg.GridColumns
 	if cols <= 0 {
 		// Auto-calculate columns based on window count and aspect ratio
-		cols = int(math.Ceil(math.Sqrt(float64(len(windowData)) * 1.5)))
+		cols = int(math.Ceil(math.Sqrt(float64(n) * 1.5)))
 		if cols < 2 {
 			cols = 2
 		}
@@ -770,7 +848,7 @@ func DrawGridLayout(windowData []WindowData, selected int, hoverIndex int, cfg C
 		}
 	}
 
-	rows := (len(windowData) + cols - 1) / cols
+	rows := (n + cols - 1) / cols
 
 	spacing := cfg.GridSpacing
 	if spacing == 0 {
@@ -800,18 +878,16 @@ func DrawGridLayout(windowData []WindowData, selected int, hoverIndex int, cfg C
 	offsetX := (float64(cfg.Width) - totalGridW) / 2
 	offsetY := top + (float64(cfg.Height)-top-totalGridH)/2
 
-	// Draw each window in its grid cell
-	for i, win := range windowData {
-		row := i / cols
-		col := i % cols
+	return gridLayout{cols, tileW, tileH, offsetX, offsetY, spacing}
+}
 
-		x := offsetX + spacing + float64(col)*(tileW+spacing)
-		y := offsetY + spacing + float64(row)*(tileH+spacing)
-
-		drawGridTile(dc, &win, x, y, tileW, tileH, i == selected, i == hoverIndex, cfg)
-	}
-
-	return getImageRGBA(dc)
+// tile is the top-left corner of tile i
+func (g gridLayout) tile(i int) (float64, float64) {
+	row := i / g.cols
+	col := i % g.cols
+	x := g.offsetX + g.spacing + float64(col)*(g.tileW+g.spacing)
+	y := g.offsetY + g.spacing + float64(row)*(g.tileH+g.spacing)
+	return x, y
 }
 
 // drawGridTile draws a single tile in grid layout
@@ -908,7 +984,7 @@ func drawGridTile(dc *gg.Context, win *WindowData, x, y, w, h float64, isSelecte
 		}
 
 		// Load font with fallback support
-		fontFace := NewMultiFallbackFace(cfg.FontPaths, float64(cfg.FontSize))
+		fontFace := cfg.face(float64(cfg.FontSize))
 		if fontFace != nil {
 			dc.SetFontFace(fontFace)
 			setColor(dc, cfg.TextColor, 1.0)
@@ -921,7 +997,7 @@ func drawGridTile(dc *gg.Context, win *WindowData, x, y, w, h float64, isSelecte
 
 	// Draw workspace indicator (if present)
 	if win.Workspace != "" {
-		fontFace := NewMultiFallbackFace(cfg.FontPaths, float64(cfg.FontSize-2))
+		fontFace := cfg.face(float64(cfg.FontSize - 2))
 		if fontFace != nil {
 			dc.SetFontFace(fontFace)
 			setColor(dc, cfg.TextColor, 0.6)
@@ -931,22 +1007,9 @@ func drawGridTile(dc *gg.Context, win *WindowData, x, y, w, h float64, isSelecte
 
 	// Draw selection/hover frame
 	if isSelected {
-		setColor(dc, cfg.SelectionFrame, 0.9)
-		dc.SetLineWidth(4)
-		dc.DrawRoundedRectangle(-2, -2, w+4, h+4, 10)
-		dc.Stroke()
-
-		// Inner glow
-		setColor(dc, cfg.SelectionFrame, 0.4)
-		dc.SetLineWidth(2)
-		dc.DrawRoundedRectangle(0, 0, w, h, 8)
-		dc.Stroke()
+		drawGridSelection(dc, w, h, cfg)
 	} else if isHovered {
-		// Hover effect - orange/yellow tint
-		dc.SetRGBA(1.0, 0.7, 0.2, 0.6)
-		dc.SetLineWidth(3)
-		dc.DrawRoundedRectangle(-1, -1, w+2, h+2, 9)
-		dc.Stroke()
+		drawGridHover(dc, w, h)
 	} else {
 		// Normal frame
 		setColor(dc, cfg.InactiveFrame, 0.3)

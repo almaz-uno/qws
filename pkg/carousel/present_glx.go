@@ -24,13 +24,16 @@ void main() {
 	gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
 }` + "\x00"
 
+	// alpha is 1 but for the fades of specs/007-animation, and a texel times
+	// 1.0 is the texel
 	presentFragmentShader = `#version 460 core
 uniform sampler2D frame;
+uniform float alpha;
 out vec4 color;
 void main() {
 	ivec2 size = textureSize(frame, 0);
 	ivec2 p = ivec2(gl_FragCoord.xy);
-	color = texelFetch(frame, ivec2(p.x, size.y - 1 - p.y), 0);
+	color = texelFetch(frame, ivec2(p.x, size.y - 1 - p.y), 0) * alpha;
 }` + "\x00"
 )
 
@@ -38,17 +41,26 @@ void main() {
 // it into the window's back buffer through GLX, then swaps. With blending and
 // dithering disabled the window gets the frame's bytes unchanged.
 type glxPresenter struct {
-	ctx     *glx.Context
-	window  uint32
-	width   int
-	height  int
-	ready     bool // GL objects created
+	ctx       *glx.Context
+	window    uint32
+	width     int
+	height    int
+	ready     bool        // GL objects created
 	presented bool        // the texture holds the last frame of the bound window
 	last      *image.RGBA // that frame
-	program uint32
-	vao     uint32
-	texture uint32
-	pbo     uint32 // pixel unpack buffer the frames are uploaded through
+	program   uint32
+	alpha     int32 // location of the alpha of program
+	vao       uint32
+	texture   uint32
+	pbo       uint32 // pixel unpack buffer the frames are uploaded through
+	scene     sceneState
+
+	// The frame at rest of an animation, uploaded in parts before it is
+	// presented (specs/007-animation): the texture it goes into, the frame,
+	// and the rows [stageNext, stageEnd) still to go
+	stage               uint32
+	staged              *image.RGBA
+	stageNext, stageEnd int
 }
 
 // newGLXPresenter creates the GLX presenter; a variable, so that tests can make
@@ -81,11 +93,14 @@ func (p *glxPresenter) Bind(w *Window) error {
 	p.window = id
 	p.presented = false
 	p.last = nil
+	p.staged = nil
 
 	width, height := int(w.width), int(w.height)
 	if width != p.width || height != p.height {
-		gl.BindTexture(gl.TEXTURE_2D, p.texture)
-		gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, int32(width), int32(height), 0, gl.RGBA, gl.UNSIGNED_BYTE, nil)
+		for _, texture := range []uint32{p.texture, p.stage} {
+			gl.BindTexture(gl.TEXTURE_2D, texture)
+			gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, int32(width), int32(height), 0, gl.RGBA, gl.UNSIGNED_BYTE, nil)
+		}
 		p.width, p.height = width, height
 	}
 	gl.Viewport(0, 0, int32(width), int32(height))
@@ -109,6 +124,11 @@ func (p *glxPresenter) init() error {
 	p.program = program
 	gl.UseProgram(p.program)
 	gl.Uniform1i(gl.GetUniformLocation(p.program, gl.Str("frame\x00")), 0)
+	p.alpha = gl.GetUniformLocation(p.program, gl.Str("alpha\x00"))
+	gl.Uniform1f(p.alpha, 1)
+	if err := p.initScene(); err != nil {
+		return err
+	}
 
 	// Core profile draws only with a vertex array bound, even without attributes
 	gl.GenVertexArrays(1, &p.vao)
@@ -116,12 +136,15 @@ func (p *glxPresenter) init() error {
 
 	gl.GenBuffers(1, &p.pbo)
 	gl.GenTextures(1, &p.texture)
+	gl.GenTextures(1, &p.stage)
 	gl.ActiveTexture(gl.TEXTURE0)
-	gl.BindTexture(gl.TEXTURE_2D, p.texture)
-	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
-	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
-	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
-	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+	for _, texture := range []uint32{p.texture, p.stage} {
+		gl.BindTexture(gl.TEXTURE_2D, texture)
+		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+	}
 
 	// The frame is copied as it is
 	gl.Disable(gl.BLEND)
@@ -147,10 +170,20 @@ func (p *glxPresenter) Refresh() (bool, error) {
 	if !p.presented {
 		return false, nil
 	}
-	gl.BindTexture(gl.TEXTURE_2D, p.texture)
-	gl.DrawArrays(gl.TRIANGLES, 0, 3)
+	p.drawTexture(p.texture, 1)
 	p.swap()
 	return true, nil
+}
+
+// drawTexture copies a texture of the window size to the back buffer with its
+// channels scaled by alpha, without blending
+func (p *glxPresenter) drawTexture(texture uint32, alpha float32) {
+	gl.Disable(gl.BLEND)
+	gl.UseProgram(p.program)
+	gl.Uniform1f(p.alpha, alpha)
+	gl.ActiveTexture(gl.TEXTURE0)
+	gl.BindTexture(gl.TEXTURE_2D, texture)
+	gl.DrawArrays(gl.TRIANGLES, 0, 3)
 }
 
 func (p *glxPresenter) swap() {
@@ -174,13 +207,13 @@ func (p *glxPresenter) draw(img *image.RGBA) error {
 		y0, y1 = changedRows(p.last, img)
 	}
 	if y0 < y1 {
-		if err := p.upload(img, y0, y1); err != nil {
+		if err := p.upload(p.texture, img, y0, y1); err != nil {
 			p.last = nil
 			return err
 		}
 	}
 	p.last = img
-	gl.DrawArrays(gl.TRIANGLES, 0, 3)
+	p.drawTexture(p.texture, 1)
 	return nil
 }
 
@@ -203,11 +236,11 @@ func changedRows(a, b *image.RGBA) (int, int) {
 	return y0, y1
 }
 
-// upload copies rows [y0, y1) of the frame into the texture through the pixel
-// buffer: the driver takes the rows from its own memory rather than from the
-// process's. The buffer is orphaned first, so that the copy does not wait for
-// the previous upload.
-func (p *glxPresenter) upload(img *image.RGBA, y0, y1 int) error {
+// upload copies rows [y0, y1) of the frame into a texture of the window size
+// through the pixel buffer: the driver takes the rows from its own memory
+// rather than from the process's. The buffer is orphaned first, so that the
+// copy does not wait for the previous upload.
+func (p *glxPresenter) upload(texture uint32, img *image.RGBA, y0, y1 int) error {
 	b := img.Bounds()
 	rowBytes := 4 * p.width
 	n := rowBytes * (y1 - y0)
@@ -225,16 +258,79 @@ func (p *glxPresenter) upload(img *image.RGBA, y0, y1 int) error {
 	}
 	gl.UnmapBuffer(gl.PIXEL_UNPACK_BUFFER)
 
-	gl.BindTexture(gl.TEXTURE_2D, p.texture)
+	gl.ActiveTexture(gl.TEXTURE0)
+	gl.BindTexture(gl.TEXTURE_2D, texture)
 	gl.PixelStorei(gl.UNPACK_ROW_LENGTH, 0)
 	gl.TexSubImage2D(gl.TEXTURE_2D, 0, 0, int32(y0), int32(p.width), int32(y1-y0), gl.RGBA, gl.UNSIGNED_BYTE, nil)
 	return nil
 }
 
+// stageRows is how many rows StageFrame uploads at a time, 0.6 MB on E1
+const stageRows = 64
+
+func (p *glxPresenter) StageFrame(img *image.RGBA, maxBytes int) (int, bool, error) {
+	b := img.Bounds()
+	if b.Dx() != p.width || b.Dy() != p.height {
+		return 0, false, fmt.Errorf("frame %dx%d does not match the window %dx%d", b.Dx(), b.Dy(), p.width, p.height)
+	}
+	if p.staged != img {
+		// The staging texture starts as the texture of the last frame, and
+		// takes the rows of img that differ from it; frames presented later
+		// change neither
+		p.staged = img
+		p.stageNext, p.stageEnd = 0, p.height
+		if p.last != nil && &p.last.Pix[0] != &img.Pix[0] {
+			gl.CopyImageSubData(p.texture, gl.TEXTURE_2D, 0, 0, 0, 0,
+				p.stage, gl.TEXTURE_2D, 0, 0, 0, 0, int32(p.width), int32(p.height), 1)
+			p.stageNext, p.stageEnd = changedRows(p.last, img)
+		}
+	}
+	// A piece at least, whatever the budget
+	uploaded := 0
+	for p.stageNext < p.stageEnd {
+		y1 := min(p.stageNext+stageRows, p.stageEnd)
+		if err := p.upload(p.stage, img, p.stageNext, y1); err != nil {
+			p.staged = nil
+			return uploaded, false, err
+		}
+		// The transfer starts now, in the pause it is made in
+		gl.Flush()
+		uploaded += 4 * p.width * (y1 - p.stageNext)
+		p.stageNext = y1
+		if p.stageNext < p.stageEnd && uploaded+4*p.width*stageRows > maxBytes {
+			return uploaded, false, nil
+		}
+	}
+	return uploaded, true, nil
+}
+
+func (p *glxPresenter) PresentStaged(alpha float64) error {
+	if err := p.drawStaged(alpha); err != nil {
+		return err
+	}
+	p.presented = true
+	p.swap()
+	return nil
+}
+
+// drawStaged makes the frame staged in full the frame of the texture and draws
+// it into the back buffer, scaled by alpha
+func (p *glxPresenter) drawStaged(alpha float64) error {
+	if p.staged == nil || p.stageNext < p.stageEnd {
+		return fmt.Errorf("no frame staged in full")
+	}
+	p.texture, p.stage = p.stage, p.texture
+	p.last, p.staged = p.staged, nil
+	p.drawTexture(p.texture, float32(alpha))
+	return nil
+}
+
 func (p *glxPresenter) Close() {
 	if p.ready {
+		p.closeScene()
 		gl.DeleteBuffers(1, &p.pbo)
 		gl.DeleteTextures(1, &p.texture)
+		gl.DeleteTextures(1, &p.stage)
 		gl.DeleteVertexArrays(1, &p.vao)
 		gl.DeleteProgram(p.program)
 		p.ready = false

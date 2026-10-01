@@ -1,0 +1,288 @@
+= 007 — research
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-01
+
+Facts the specification rests on, `develop` at `73cfd5c`, E1 as in
+specification 001 (29 windows, 2520×1400, 144 Hz).
+
+== The cost of a frame in motion
+
+A benchmark of `Draw3DCarouselWithData` on the E1 scene of Σ, 40 frames
+each, 2026-10-01:
+
+[cols="3,1",options="header"]
+|===
+| Frame | ms
+| static, offset 0 | 37.1
+| a fractional offset, the same every frame | 33.4
+| a new fractional offset every frame, as an animation gives | 40.1
+|===
+
+With presenting, about 8.5 ms on `glx` (specification 001, T6), a frame in
+motion drawn by the CPU takes some 42–49 ms: about 20–25 frames a second, 3
+or 4 frames in a step of 150 ms. The third row is dearer because every new
+offset gives the titles a new font size, and `NewMultiFallbackFace` makes
+and caches a face for each size — without bound in an animation.
+
+Much of a card depends on its offset, not only its place: the scale, the
+alpha, the font size of the title and the workspace, the paddings and radii
+of their pills, and the truncation of the title, `max(int(30/scale), 10)`
+runes (`renderer-cpu.go:539`). A card drawn at one offset and scaled to
+another is therefore not the card of that offset; drawn at the two integer
+offsets around a fractional one and cross-faded, it ends as the card of the
+target offset.
+
+== Pacing
+
+An experiment on a copy of the code, 2026-10-01: an off-screen override-
+redirect window with the GLX context of `pkg/glx`, 300 swaps each followed
+by `glFinish`.
+
+[cols="1,3",options="header"]
+|===
+| Swap interval | Interval between swaps
+| 1 | p50 999.8 ms — the driver throttles a window that is not on screen to
+  one swap a second
+| 0 | p50 0.14 ms — no pacing at all
+|===
+
+The overlay is on screen, where an interval of 1 may well follow vertical
+blank; the tests of specification 001 draw off screen, and a compositor adds
+its own frame anyway. Pacing by a timer at the refresh period does not
+depend on either.
+
+The same on the overlay itself, 2026-10-01, with the step animated as in T5:
+an interval of 1 throttles it to a swap a second as well, under picom
+`--vsync` on NVIDIA. The timer it is.
+
+== The keyboard
+
+`xset q` on ws1: autorepeat after 500 ms, 33 repeats a second — a held step
+key sets a new target every 30 ms, less than the 150 ms of a step.
+
+== What exists
+
+`Draw3DCarouselWithData` takes `animOffset`, and the geometry of a card is
+continuous in it (`carouselCard`); `Selector.animateTransition` sets it to 0
+and draws once — the animation was planned and never done.
+`handleEventsSync` blocks on `WaitForEvent`; an animation needs frames while
+it waits.
+
+== Frames on time
+
+The step as in T5, on E1, 2026-10-01; each row one or more tries of one
+activation — five steps 0.4 s apart, then twelve 30 ms apart, as a held key
+— about 200 frame intervals each. "Late" is a frame that starts more than a
+millisecond after it is due; a missed frame is an interval above 1.5
+periods, 10.4 ms.
+
+[cols="4,2,1,1",options="header"]
+|===
+| Change | A1 p50 / p95 / max, ms | Late frames | Tries
+
+| A sleep to the time a frame is due
+| 6.69 / 9.34 / 11.03 | many | 1
+
+| A sleep to 1.5 ms before it, then a spin
+| 6.94 / 8.17 / 11.85 | many | 1
+
+| Layers uploaded in the pauses between frames, not in them
+| 6.94 / 7.12 / 14.96 | 3 | 1
+
+| One frame at rest drawn at a time
+| 6.94 / 7.02 / 10.40 | 2 | 1
+
+| Layers drawn on at most half the CPUs; the spin does not yield
+| 6.94 / 7.00–7.03 / 9.81–16.07 | 1 a try | 2
+
+| Copies of whole images a row at a time, through a call
+| 6.94 / 7.01–7.04 / 7.10–14.90 | 0–1 a try | 4
+
+| The last 3 ms spun, not slept; the keyboard mapping read once an
+  activation; no snapshots while the switcher is shown
+| 6.94 / 7.00–7.08 / 7.07–7.66 | 0 | 6
+|===
+
+What each row found:
+
+. *Timer jitter.* A sleep wakes up to half a millisecond late; a spin over
+  its last 1.5 ms puts the median on the period, 6.94 ms.
+. *Uploads.* The frames that uploaded a layer drew in 0.5–0.8 ms and
+  presented in 1.1–1.8 ms, against 0.02 and 0.2 ms without, and came after
+  their vertical blank. An upload itself is short — 134 uploads of up to
+  1.4 MB, p50 0.26 ms, max 1.6 ms. Made while the loop waits for a frame,
+  no later than 3 ms before it is due, and while it waits for an event
+  when no step moves, they leave the frames alone. The latter also took the
+  response of the first step of an activation from 30.1 ms to 3–7 ms: the
+  base and the prefetched layers are on the GPU before the first key.
+. *Frames at rest.* One drawn per key of a held step ran a dozen at once, at
+  50–77 ms of a CPU and 14 MB each; the heap of the process peaked at
+  700–930 MB and was collected every 50–100 ms. One at a time, and after it
+  only the latest target, still reaches the end of a step in time: a
+  drawing takes less than half of 150 ms.
+. *The collector.* With `GOGC=off` no frame was late in three tries — the
+  collector it was, though its pauses reported by `gctrace` were long, not
+  its work. An execution trace showed a stop-the-world of 5.7 ms waiting
+  for one goroutine: the drawing of a frame at rest, in `newCanvas`, which
+  copies the cached background of 14 MB into a fresh image. The copy is one
+  `memmove`, and a `memmove` cannot be preempted; the fresh pages it
+  faults in make it long, and the signal of asynchronous preemption,
+  delivered on the return from a fault, lands inside it. Copied a row at a
+  time, the pause was still up to 13 ms: the rows are `memmove` too. Copied
+  a row at a time through a function that is not inlined — its prologue
+  checks for preemption — the pauses are 0.2–0.7 ms. `crop` of the layers
+  and the copy of a captured window in `pkg/composite` go the same way.
+. *Wake-ups.* Once in 800 frames a sleep of the loop, locked to the thread
+  of the GL context, woke 5.8 ms late with the CPUs busy. The loop now
+  wakes once a frame, 3 ms before it is due, and spins the rest: 43 % of a
+  CPU while a step moves.
+. *The X server.* A key press made seven requests, `GetModifierMapping`
+  and six `GetKeyboardMapping`, each waiting for a reply; once in 800
+  frames they took 14 ms while the server captured a window for a
+  thumbnail. Three instances of `qws` captured the active window every
+  second on E1 at the time: the one measured and the two services of the
+  author (`/usr/local/bin/qws`, v0.1.0, `snapshot_interval: 1s`). The
+  mappings are now read once an activation and again on `MappingNotify`,
+  and the snapshots of the measured instance pause while it is shown.
+
+In the last row, over 1203 intervals: p95 7.00–7.08 ms, max 7.66 ms — no
+frame missed; the longest pause of the collector 0.67 ms. The step response
+A2 is 0.3–1.4 ms for a single key and 3.3–6.2 ms for the first step of an
+activation. For the keys of a held step it is about 7 ms, a period: the
+loop reads a key after the frame it waits for, not while it waits.
+
+These intervals were those of the frames in motion only. The last frame of
+a step, the frame at rest, came 10.7–17 ms after the frame before it in
+every step of those tries — a vertical blank or two missed at the end of
+each step: presented as a frame, it uploaded the rows that changed, up to
+14 MB, in 4–10 ms. Staged in the pauses of the step instead, into a second
+texture of the window size that starts as a GPU copy of the first
+(`glCopyImageSubData`), and presented by swapping the two, it comes on time:
+intervals 6.87–7.32 ms, presented in 0.12–0.56 ms, A3 148.6–152.6 ms. The
+staging slowed the frames it went with, presented in 1.1–3.4 ms, until the
+uploads of a pause — layers first, then pieces of 64 rows — stopped at a
+megabyte: the frame after a pause waits on the GPU for them, and E1 took
+about a gigabyte a second. Eight tries then: p95 7.00–7.03 ms, max
+8.11–9.41 ms.
+
+== The grid
+
+The CPU draws a frame of the grid of E1, 29 tiles, in 350–385 ms, against
+55–75 ms for the carousel: `gg.DrawImage` scales each thumbnail through
+`x/image/draw` (`transform_RGBA_RGBA_Src`, `transform_RGBA_NRGBA_Over`),
+2.5 s of CPU in 7 frames of a try. It does so on `develop` as well — a step
+of the grid there takes about 360 ms; specification 001 made the carousel
+fast, not the grid. The tiles layer of the grid costs the same.
+
+A step of the grid moves on time — p95 7.02 ms, in three tries — but its
+frame at rest comes 208–449 ms after the frame before it. The loop does not
+wait for it: the step ends at 150 ms with its scene at the target, and the
+frame at rest replaces it when it is drawn, keys handled meanwhile. A
+faster grid, drawn to the same bytes, is work of its own, for a
+specification of its own.
+
+*The hover.* The author, trying the build on E1 (K9, 2026-10-01): the
+carousel is good; on the grid the hover lags behind the mouse. Each change
+of the hover drew a frame of the grid in the loop, some 480 ms, while the
+motion events queued; each of them then changed the hover again and drew
+another frame, so the hover crawled through the places the pointer had
+left. It is the same on `develop`, at some 360 ms a frame. The hover is
+now a scene of layers too — the hover frame and its shadow, at the tile
+under the pointer, over and under the tiles drawn without a hover —
+presented at once; the frame of `cpu` is drawn in the background and
+replaces the scene when it comes, and a frame at rest drawn for another
+hover is not presented.
+
+== Fades
+
+In a try of one activation that ends with a selection, 2026-10-01: the
+fade-in 23 intervals, p95 6.97 ms, max 7.21 ms, A3 147.5 ms; the fade-out 21
+intervals, p95 7.00 ms, max 9.53 ms, A3 145.9 ms; the chosen window
+activated 0.68 ms after the release of the modifier was read (K6). The first
+frame of an activation uploads a whole frame, 13 ms on E1, so the fade-in
+runs from the end of its presentation: from the end of its drawing, it
+lasted 133.6 ms. An `Expose` is not answered during a fade: the frame it
+presents, at alpha 1, would flash.
+
+K3 of specification 001 after the fade-in: an absolute error of 0 for
+`cpu` and `glx`, three activations each.
+
+== Stalls
+
+Four times in about forty tries a frame of an animation took 260–300 ms to
+present, in `SwapBuffers` and `glFinish`. Not the collector: its pauses were
+under a millisecond then. Not the X server: the round trips of another
+client, measured while the active window was captured every 150 ms, stayed
+as without captures, p99 0.2–0.4 ms. Not a change of the performance state
+of the GPU: it stayed at P0 around a stall, sampled every 50 ms. Open.
+
+The capture of the active window by `pkg/composite`, 2556×1357, takes
+101–121 ms in the client, on E1.
+
+
+== Two monitors
+
+Since 2026-10-01 E1 has a second monitor, DP-4, 2560×1440 at 59.95 Hz, to
+the right of DP-0 at 144 Hz. The period of a step is that of the monitor
+the overlay is on, from RandR; the overlay moves between monitors by
+recreating its window and binding the GL context anew
+(`Monitor changed, recreating selector window`).
+
+A try with the pointer on DP-4: period 16.68 ms; the step p95 16.87 ms,
+max 19.37 ms, A3 147.4–150.1 ms; the fade-in 9 intervals, A3 137.6 ms —
+within 150 ms and a period, of 16.68 ms. At 60 Hz a step has 9 or 10
+frames: the 18 of K2 are for the 144 Hz of E1.
+
+== Runs of S2
+
+Session S2 on E1, 2026-10-01, `2f1a499`: 20 activations of 23 steps and a
+held key of 50 presses each, `glx`; and the references, S1 on `cpu` with
+the code of `develop` and of the branch, S1 on `glx` with `develop`.
+
+[cols="2,3,2,2,2,2",options="header"]
+|===
+| Run | A1 p50 / p95 / max, ms | Missed | A2 p95, ms | A3 p50, ms | K6 max, ms
+
+| carousel 1 | 6.94 / 7.09 / 425.64 | 90 of 20210 | 7.00 | 152.57 | 1.87
+| carousel 2 | 6.94 / 7.10 / 417.79 | 103 of 20222 | 6.98 | 152.57 | 1.32
+| carousel 3 | 6.94 / 7.10 / 414.93 | 90 of 20226 | 6.99 | 152.56 | 1.55
+| grid | 6.94 / 7.27 / 831.36 | 520 of 14198 | 6.96 | 485.06 | 5.17
+|===
+
+The fades in the carousel runs: A1 p95 7.01–7.10 ms, 0–2 of 420–442
+intervals missed each; A3 147.4 ms in, 143.9–144.6 ms out; 23 and 22
+frames. The steps: 23 frames each, the frame at rest included. K5: the last
+step of a held key at rest 152.7–152.9 ms after its key at p95 — once
+474.7 ms, behind a stall — and on the window the keys lead to in all 60
+activations.
+
+Of the 283 frames the carousel runs missed, 211 came after a pause that
+uploaded — a layer, or pieces of the frame at rest — 55 after one that did
+not, 2 were frames at rest, 15 were stalls over 50 ms. The rate per pause:
+0.15 % without an upload, 0.96 % with up to 640 KB, 1.55–1.58 % with more.
+The upload need not be large: its being in the same GL context as the
+frames is what costs. Uploads from a context of their own, on a thread of
+their own, could go by the copy engine beside the frames; not tried.
+
+The grid misses more, 3.7 %: its tiles layer is a frame in size, 14 MB in
+one upload, and so is the frame at rest it stages. Its K5 is 920 ms at
+p50: the frame at rest of the grid takes some 480 ms to draw (see "The
+grid"). In this run the harness read the selection before that frame
+came, took the frame before for it, and in 14 activations of 20 released
+the modifier on a window other than the first — focus moved on E1. It now
+waits for the frame of the selection it expects, and presses `Escape` when
+none comes.
+
+*Stalls.* Every run, of `develop` as of the branch, of `cpu` as of `glx`,
+has presentations of 370–420 ms, one or two a minute: S1 `cpu` of
+`develop` 2, of the branch 2, S1 `glx` of `develop` 1, each S2 run 6–8.
+`cpu` presents through `PutImage`, so the X server it is that stops for
+some 400 ms; qws reads RandR with `GetScreenResourcesCurrent`, which does
+not probe the outputs. The cause is outside qws, on E1.
+
+*K7.* M2 of `cpu`, S1, p50 / p95: `develop` 68.25 / 85.64 ms, the branch
+69.95 / 84.30 ms; M3 31.62 against 30.58 ms of CPU a frame — within the
+spread. M2 of `glx` on `develop`, for reference: 62.77 / 72.64 ms.
+

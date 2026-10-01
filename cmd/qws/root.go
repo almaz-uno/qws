@@ -17,6 +17,7 @@ import (
 	"github.com/almaz-uno/qws/pkg/mru"
 	"github.com/almaz-uno/qws/pkg/ui"
 	"github.com/almaz-uno/qws/pkg/x11"
+	"github.com/jezek/xgb"
 	"github.com/jezek/xgb/xproto"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -427,18 +428,27 @@ func run(cmd *cobra.Command, args []string) error {
 		conn.Close()
 	}()
 
-	// Main event loop
+	// Main event loop; events read while the switcher faded out come first
+	var pending []xgb.Event
 	for {
-		event, err := conn.Conn.WaitForEvent()
-		if event == nil {
-			// Connection closed or error - exit gracefully
-			log.Debug().Err(err).Msg("Event loop terminated")
-			return nil
+		var event xgb.Event
+		if len(pending) > 0 {
+			event, pending = pending[0], pending[1:]
+		} else {
+			var err error
+			event, err = conn.Conn.WaitForEvent()
+			if event == nil {
+				// Connection closed or error - exit gracefully
+				log.Debug().Err(err).Msg("Event loop terminated")
+				return nil
+			}
 		}
 
 		switch e := event.(type) {
 		case xproto.KeyPressEvent:
-			selector = handleKeyPress(ctx, conn, e, selector, mruList, watcher)
+			var read []xgb.Event
+			selector, read = handleKeyPress(ctx, conn, e, selector, mruList, watcher)
+			pending = append(read, pending...)
 		case xproto.PropertyNotifyEvent:
 			// Handle focus changes via PropertyNotify
 			if watcher != nil {
@@ -453,10 +463,11 @@ func run(cmd *cobra.Command, args []string) error {
 	}
 }
 
-// handleKeyPress handles configured key press events for window switching
-// Returns updated selector to preserve state
+// handleKeyPress handles configured key press events for window switching.
+// It returns the selector, to preserve its state, and the events read while
+// the switcher faded out, for the main loop to handle.
 func handleKeyPress(ctx context.Context, conn *x11.Connection, e xproto.KeyPressEvent, selector *ui.Selector,
-	mruList *mru.MRUList, watcher *focus.Watcher) *ui.Selector {
+	mruList *mru.MRUList, watcher *focus.Watcher) (*ui.Selector, []xgb.Event) {
 	start := time.Now()
 
 	// Apply show delay if configured
@@ -473,11 +484,11 @@ func handleKeyPress(ctx context.Context, conn *x11.Connection, e xproto.KeyPress
 	}
 	windows, err := conn.GetWindowListFiltered(filterOpts)
 	if err != nil {
-		return selector
+		return selector, nil
 	}
 
 	if len(windows) == 0 {
-		return selector
+		return selector, nil
 	}
 
 	// Sort windows by MRU order
@@ -503,7 +514,7 @@ func handleKeyPress(ctx context.Context, conn *x11.Connection, e xproto.KeyPress
 		selector, err = ui.NewSelector(ctx, conn.Conn, conn.Root, windows, cfg.Appearance, cfg.Keybindings, cfg.Windows.Workspace, watcher)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to create selector")
-			return selector
+			return selector, nil
 		}
 		if frameDumpDir != "" {
 			selector.SetFrameDump(frameDumpDir)
@@ -516,6 +527,10 @@ func handleKeyPress(ctx context.Context, conn *x11.Connection, e xproto.KeyPress
 	}
 
 	selector.BeginActivation(start, list)
+	if watcher != nil {
+		watcher.PauseSnapshots(true)
+		defer watcher.PauseSnapshots(false)
+	}
 	selected, err := selector.Show()
 
 	// Register selector window in watcher after Show() (when window is created)
@@ -525,23 +540,18 @@ func handleKeyPress(ctx context.Context, conn *x11.Connection, e xproto.KeyPress
 		}
 	}
 
-	if err != nil {
-		return selector
+	// The chosen window is activated first, then the switcher fades out
+	// (specs/007-animation)
+	if err == nil && selected != nil {
+		if err := conn.ActivateWindow(selected.ID); err == nil {
+			// Important: send all commands to X server
+			conn.Conn.Sync()
+			log.Debug().
+				Dur("since_choice_ms", time.Since(selector.ChosenAt())).
+				Msg("Window activated")
+		}
 	}
-
-	if selected == nil {
-		return selector
-	}
-
-	// Activate selected window
-	if err := conn.ActivateWindow(selected.ID); err != nil {
-		return selector
-	}
-
-	// Important: send all commands to X server
-	conn.Conn.Sync()
-
-	return selector
+	return selector, selector.FadeOut()
 }
 
 // setupProfiling initializes CPU profiling and/or starts pprof HTTP server

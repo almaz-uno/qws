@@ -386,7 +386,10 @@ func (c *Capturer) captureWithSHM(drawable xproto.Drawable, width, height int) (
 	// Create a GetImageReply-like structure with data from shared memory
 	// We need to copy the data because we'll detach the shared memory
 	dataCopy := make([]byte, imageSize)
-	copy(dataCopy, shmData[:imageSize])
+	const piece = 64 << 10
+	for i := 0; i < imageSize; i += piece {
+		copyPiece(dataCopy[i:], shmData[i:min(i+piece, imageSize)])
+	}
 
 	img := &xproto.GetImageReply{
 		Depth:  reply.Depth,
@@ -427,4 +430,15 @@ func (c *Capturer) IsCompositorRunning() bool {
 	}
 
 	return owner.Owner != 0
+}
+
+// copyPiece copies a piece of an image; copies of whole images go through it
+// a piece at a time. One copy of an image is one memmove, which the scheduler
+// cannot preempt — the less so when it faults fresh pages in — and a
+// collection of the garbage stops every goroutine and waits for it; the call
+// per piece checks for preemption (specs/007-animation, research).
+//
+//go:noinline
+func copyPiece(dst, src []byte) {
+	copy(dst, src)
 }

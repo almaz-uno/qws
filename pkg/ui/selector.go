@@ -44,17 +44,29 @@ type Selector struct {
 	paddingX            int                 // Horizontal padding from screen edges
 	paddingY            int                 // Vertical padding from screen edges
 	animOffset          float64
-	animating           bool
 	resultChan          chan *x11.WindowInfo
-	keyConfig           keyConfig              // Configured keybindings
-	modifierPressed     bool                   // Track if primary modifier is currently pressed
-	workspacePressed    bool                   // Track if workspace modifier is currently pressed
-	initialWorkspaceOpt string                 // Initial workspace configuration ("all", "current", "all-except-current")
-	initialLayoutMode   string                 // Initial layout mode ("carousel" or "grid") for restoration on exit
-	lastMouseUpdate     time.Time              // Last time mouse hover was processed
-	watcher             *focus.Watcher         // Focus watcher for getting active window
-	timing              frameTiming            // Cause and start of the next frame, for latency logging
-	placeholders        map[string]image.Image // Placeholders of windows without a thumbnail, by title
+	keyConfig           keyConfig                       // Configured keybindings
+	modifierPressed     bool                            // Track if primary modifier is currently pressed
+	workspacePressed    bool                            // Track if workspace modifier is currently pressed
+	initialWorkspaceOpt string                          // Initial workspace configuration ("all", "current", "all-except-current")
+	initialLayoutMode   string                          // Initial layout mode ("carousel" or "grid") for restoration on exit
+	lastMouseUpdate     time.Time                       // Last time mouse hover was processed
+	watcher             *focus.Watcher                  // Focus watcher for getting active window
+	timing              frameTiming                     // Cause and start of the next frame, for latency logging
+	placeholders        map[string]image.Image          // Placeholders of windows without a thumbnail, by title
+	keymap              *xproto.GetKeyboardMappingReply // Keyboard mapping of the activation; nil: to be read
+	modmap              *xproto.GetModifierMappingReply // Modifier mapping of the activation; nil: to be read
+	animator            carousel.Animator               // The presenter, when it composes layers (specs/007-animation)
+	step                stepAnimation                   // The step of the carousel in progress
+	rest                restDrawing                     // The frame at rest drawn in the background
+	layers              layerCache                      // Layers the animator holds
+	period              time.Duration                   // Frame period of the monitor of the overlay
+	fade                fadeAnimation                   // The appearance or disappearance in progress
+	frameDue            time.Time                       // When the next frame of an animation is due
+	uploaded            int                             // Bytes uploaded in the pause before that frame
+	animations          int                             // Animations so far, for the frame records
+	mapped              bool                            // The overlay is on the screen
+	chosenAt            time.Time                       // When the event that ended the activation was read
 }
 
 // NewSelector creates a new graphical window selector
@@ -188,7 +200,6 @@ func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, window
 		paddingX:            paddingX,
 		paddingY:            paddingY,
 		animOffset:          0,
-		animating:           false,
 		resultChan:          make(chan *x11.WindowInfo, 1),
 		keyConfig:           keyConf,
 		initialWorkspaceOpt: initialWorkspaceOpt,
@@ -203,6 +214,9 @@ func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, window
 	}
 	s.renderer = renderer
 	s.presenter = presenter
+	if a, ok := presenter.(carousel.Animator); ok {
+		s.animator = a
+	}
 
 	// Apply initial workspace filtering based on configuration
 	if initialWorkspaceOpt == "current" {
@@ -317,6 +331,14 @@ func (s *Selector) Show() (*x11.WindowInfo, error) {
 		currentMonitor = s.monitorGeom
 	}
 
+	// A new activation: the window list and the thumbnails may have changed,
+	// and the monitor with them
+	s.dropLayers()
+	s.period = time.Second / 60
+	if currentMonitor.Refresh > 0 {
+		s.period = time.Duration(float64(time.Second) / currentMonitor.Refresh)
+	}
+
 	// Check if monitor has changed or window needs recreation
 	needRecreate := s.window == nil ||
 		currentMonitor.X != s.monitorGeom.X ||
@@ -369,6 +391,7 @@ func (s *Selector) Show() (*x11.WindowInfo, error) {
 	if err := s.window.Show(); err != nil {
 		return nil, fmt.Errorf("failed to show window: %w", err)
 	}
+	s.mapped = true
 
 	// Grab keyboard to receive all keyboard events
 	xproto.GrabKeyboard(
@@ -419,22 +442,29 @@ func (s *Selector) Show() (*x11.WindowInfo, error) {
 		// Small delay to show the selection
 		s.conn.Sync()
 		// Return the selected window immediately
+		s.chosenAt = time.Now()
 		if s.selectedIndex >= 0 && s.selectedIndex < len(s.windows) {
-			s.window.Hide()
+			s.hide()
 			return &s.windows[s.selectedIndex], nil
 		}
-		s.window.Hide()
+		s.hide()
 		return nil, nil
 	}
 
-	// Initial render
+	// Initial render, faded in when the presenter composes
+	s.fade.pending = s.animator != nil
 	s.render(thumbnails)
+	s.prefetch()
 
 	// Event loop - wait for user input
 	result := s.handleEventsSync(thumbnails)
+	s.chosenAt = s.timing.start
 
-	// Hide window
-	s.window.Hide()
+	// The overlay stays for FadeOut when it fades out: after the chosen window
+	// is activated
+	if s.animator == nil {
+		s.hide()
+	}
 
 	return result, nil
 }
@@ -452,16 +482,37 @@ func (s *Selector) restoreInitialLayoutMode() {
 
 // handleEventsSync processes keyboard events synchronously
 func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
+	// The mappings are read once an activation, not on every key: a request
+	// waits for the X server, which a capture of a window can hold for
+	// milliseconds (specs/007-animation, research)
+	s.keymap, s.modmap = nil, nil
+
 	// Get keycodes for modifiers
 	modifierKeycodes := s.getModifierKeycodes(s.keyConfig.modifierMask)
 	workspaceKeycodes := s.getModifierKeycodes(s.keyConfig.workspaceModifierMask)
 	enterKeycode := s.keysymToKeycode(0xFF0D) // XK_Return
 
 	for {
-		event, _ := s.conn.WaitForEvent()
-		if event == nil {
-			// Connection closed or context cancelled
-			return nil
+		var event xgb.Event
+		switch {
+		case s.step.active || s.fade.active:
+			// A step or a fade is moving: frames between the events
+			if event, _ = s.conn.PollForEvent(); event == nil {
+				s.frame()
+				continue
+			}
+		case s.backgroundDue():
+			// Layers for the next step, or the frame at rest of the last one:
+			// taken between the events
+			if event, _ = s.conn.PollForEvent(); event == nil {
+				s.uploadIdle()
+				continue
+			}
+		default:
+			if event, _ = s.conn.WaitForEvent(); event == nil {
+				// Connection closed or context cancelled
+				return nil
+			}
 		}
 
 		if _, ok := event.(xproto.KeyPressEvent); ok {
@@ -512,7 +563,9 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 					if s.selectedIndex >= len(s.windows) {
 						s.selectedIndex = 0
 					}
+					s.dropLayers()
 					s.render(s.prepareThumbnails())
+					s.prefetch()
 				}
 			}
 
@@ -531,8 +584,16 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 				}
 			}
 
+		case xproto.MappingNotifyEvent:
+			s.keymap, s.modmap = nil, nil
+			modifierKeycodes = s.getModifierKeycodes(s.keyConfig.modifierMask)
+			workspaceKeycodes = s.getModifierKeycodes(s.keyConfig.workspaceModifierMask)
+			enterKeycode = s.keysymToKeycode(0xFF0D)
+
 		case xproto.ExposeEvent:
-			if e.Window == s.window.GetWindowID() {
+			// A moving step or fade presents a frame soon anyway, and so does a
+			// step whose frame at rest is on its way
+			if e.Window == s.window.GetWindowID() && !s.step.active && !s.fade.active && !s.rest.awaited {
 				s.refresh(thumbnails)
 			}
 
@@ -548,7 +609,7 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 			newHoverIndex := s.getWindowIndexAtPosition(int(e.EventX), int(e.EventY))
 			if newHoverIndex != s.hoverIndex {
 				s.hoverIndex = newHoverIndex
-				s.render(thumbnails)
+				s.hoverChanged(thumbnails)
 			}
 
 		case xproto.ButtonPressEvent:
@@ -603,6 +664,8 @@ func (s *Selector) prepareWindowData() []carousel.WindowData {
 // render renders the carousel with current state
 func (s *Selector) render(thumbnails []image.Image) {
 	drawStart := time.Now()
+	// The frame drawn here is newer than a frame at rest still on its way
+	s.rest.awaited = false
 
 	// Prepare window data with icons and titles
 	windowData := s.prepareWindowData()
@@ -617,11 +680,32 @@ func (s *Selector) render(thumbnails []image.Image) {
 	}
 	drawEnd := time.Now()
 
-	if err := s.presenter.Present(img); err != nil {
+	// The first frame of an activation starts its appearance; while a fade
+	// runs, a frame drawn in full is presented at its alpha
+	appears := s.fade.pending
+	if appears {
+		s.beginFade(false, drawEnd, s.timing.start)
+	}
+	var err error
+	if s.fade.active {
+		err = s.animator.PresentFaded(img, s.fade.alpha.at(drawEnd))
+	} else {
+		err = s.presenter.Present(img)
+	}
+	if err != nil {
 		log.Error().Err(err).Msg("Failed to present frame")
 	}
 	end := time.Now()
+	if appears {
+		// The appearance runs from the end of its first frame, which uploads
+		// a whole frame; the alpha of that frame stays
+		s.fade.alpha.start = end.Add(-s.period)
+	}
 	s.dumpFrame(img)
+	if s.fade.active {
+		s.logAnimationFrame(&s.fade.animationLog, s.fade.kind(), s.fade.alpha.progress(drawEnd), false, drawStart, drawEnd, end)
+		s.frameDue = drawEnd.Add(s.period)
+	}
 	s.logFrame(drawStart, drawEnd, end)
 }
 
@@ -672,7 +756,9 @@ func (s *Selector) handleKeyPressSimple(e xproto.KeyPressEvent, thumbnails []ima
 					s.selectedIndex = 0
 				}
 			}
+			s.dropLayers()
 			s.render(s.prepareThumbnails())
+			s.prefetch()
 		}
 		return false
 	}
@@ -693,7 +779,9 @@ func (s *Selector) handleKeyPressSimple(e xproto.KeyPressEvent, thumbnails []ima
 		if s.config.LayoutMode != "carousel" {
 			log.Debug().Msg("Switching to carousel layout")
 			s.config.LayoutMode = "carousel"
+			s.dropLayers()
 			s.render(thumbnails)
+			s.prefetch()
 		}
 		return false
 	}
@@ -702,7 +790,9 @@ func (s *Selector) handleKeyPressSimple(e xproto.KeyPressEvent, thumbnails []ima
 		if s.config.LayoutMode != "grid" {
 			log.Debug().Msg("Switching to grid layout")
 			s.config.LayoutMode = "grid"
+			s.dropLayers()
 			s.render(thumbnails)
+			s.prefetch()
 		}
 		return false
 	}
@@ -769,17 +859,7 @@ func (s *Selector) selectPrevious(thumbnails []image.Image) {
 
 // animateTransition animates transition from current to target index
 func (s *Selector) animateTransition(targetIndex int, thumbnails []image.Image) {
-	if s.animating {
-		return // Skip if already animating
-	}
-
-	s.animating = true
-	defer func() { s.animating = false }()
-
-	// No animation - instant switch
-	s.animOffset = 0.0
-	s.selectedIndex = targetIndex
-	s.render(thumbnails)
+	s.stepTo(targetIndex, thumbnails)
 }
 
 // Close closes the selector window and frees resources
@@ -813,11 +893,16 @@ func (s *Selector) isModifierPressed(mask uint16) bool {
 // keysymToKeycode converts keysym to keycode for current keyboard layout
 func (s *Selector) keysymToKeycode(keysym uint32) xproto.Keycode {
 	setup := xproto.Setup(s.conn)
-	mapping, err := xproto.GetKeyboardMapping(s.conn,
-		setup.MinKeycode,
-		byte(setup.MaxKeycode-setup.MinKeycode+1)).Reply()
-	if err != nil {
-		return 0
+	mapping := s.keymap
+	if mapping == nil {
+		var err error
+		mapping, err = xproto.GetKeyboardMapping(s.conn,
+			setup.MinKeycode,
+			byte(setup.MaxKeycode-setup.MinKeycode+1)).Reply()
+		if err != nil {
+			return 0
+		}
+		s.keymap = mapping
 	}
 
 	for keycode := setup.MinKeycode; keycode <= setup.MaxKeycode; keycode++ {
@@ -839,9 +924,14 @@ func (s *Selector) isKeycode(detail xproto.Keycode, keysym uint32) bool {
 
 // getModifierKeycodes returns all keycodes that produce the given modifier mask
 func (s *Selector) getModifierKeycodes(mask uint16) []xproto.Keycode {
-	modmap, err := xproto.GetModifierMapping(s.conn).Reply()
-	if err != nil {
-		return nil
+	modmap := s.modmap
+	if modmap == nil {
+		var err error
+		modmap, err = xproto.GetModifierMapping(s.conn).Reply()
+		if err != nil {
+			return nil
+		}
+		s.modmap = modmap
 	}
 
 	// Determine which modifier position corresponds to our mask

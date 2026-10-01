@@ -14,6 +14,11 @@ import (
 var (
 	fontCacheMu sync.RWMutex
 	fontCache   = make(map[fontCacheKey]*MultiFallbackFace)
+
+	// Parsed fonts by path; a truetype.Font is not changed after parsing and
+	// is shared by all faces made of it
+	parsedMu sync.Mutex
+	parsed   = make(map[string]*truetype.Font)
 )
 
 type fontCacheKey struct {
@@ -61,6 +66,47 @@ func NewMultiFallbackFace(fontPaths []string, size float64) *MultiFallbackFace {
 		return cached
 	}
 
+	result := newMultiFallbackFace(fontPaths, size)
+	if result != nil {
+		// Cache the result
+		fontCache[key] = result
+	}
+	return result
+}
+
+// FontSet is a cache of faces for one drawing at a time. The faces of
+// truetype are not safe for concurrent use — Glyph returns its mask in a
+// buffer that the next call reuses — so drawings that run in parallel each
+// take a set of their own (specs/007-animation); a drawing without one uses
+// the shared cache of NewMultiFallbackFace.
+type FontSet struct {
+	faces map[fontCacheKey]*MultiFallbackFace
+}
+
+// NewFontSet is an empty set
+func NewFontSet() *FontSet {
+	return &FontSet{faces: make(map[fontCacheKey]*MultiFallbackFace)}
+}
+
+// face is the face of the set for the paths and size
+func (s *FontSet) face(fontPaths []string, size float64) *MultiFallbackFace {
+	key := fontCacheKey{paths: joinPaths(fontPaths), size: size}
+	if f, ok := s.faces[key]; ok {
+		return f
+	}
+	f := newMultiFallbackFace(fontPaths, size)
+	if f != nil {
+		s.faces[key] = f
+	}
+	return f
+}
+
+// newMultiFallbackFace makes the faces of a fallback chain, uncached
+func newMultiFallbackFace(fontPaths []string, size float64) *MultiFallbackFace {
+	if len(fontPaths) == 0 {
+		return nil
+	}
+
 	var faces []font.Face
 	var fonts []*truetype.Font
 	for _, path := range fontPaths {
@@ -75,10 +121,6 @@ func NewMultiFallbackFace(fontPaths []string, size float64) *MultiFallbackFace {
 		}
 		faces = append(faces, face)
 		fonts = append(fonts, ttFont)
-		log.Debug().
-			Str("path", path).
-			Float64("size", size).
-			Msg("Font loaded successfully")
 	}
 
 	if len(faces) == 0 {
@@ -89,21 +131,19 @@ func NewMultiFallbackFace(fontPaths []string, size float64) *MultiFallbackFace {
 		return nil
 	}
 
-	log.Debug().
+	// Trace: the drawings of the animation make chains of their own, a few
+	// hundred a session
+	log.Trace().
 		Int("loaded", len(faces)).
 		Int("total", len(fontPaths)).
 		Float64("size", size).
 		Msg("Font fallback chain created")
 
-	result := &MultiFallbackFace{
+	return &MultiFallbackFace{
 		faces:   faces,
 		fonts:   fonts,
 		primary: faces[0],
 	}
-
-	// Cache the result
-	fontCache[key] = result
-	return result
 }
 
 // joinPaths creates a cache key from font paths
@@ -120,12 +160,7 @@ func joinPaths(paths []string) string {
 
 // loadFontFaceFromPath loads a font face from a file path
 func loadFontFaceFromPath(path string, size float64) (font.Face, *truetype.Font, error) {
-	fontBytes, err := os.ReadFile(path)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	f, err := truetype.Parse(fontBytes)
+	f, err := parseFont(path)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -136,6 +171,26 @@ func loadFontFaceFromPath(path string, size float64) (font.Face, *truetype.Font,
 		Hinting: font.HintingFull,
 	})
 	return face, f, nil
+}
+
+// parseFont parses the font file at path once
+func parseFont(path string) (*truetype.Font, error) {
+	parsedMu.Lock()
+	defer parsedMu.Unlock()
+	if f, ok := parsed[path]; ok {
+		return f, nil
+	}
+	fontBytes, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	f, err := truetype.Parse(fontBytes)
+	if err != nil {
+		return nil, err
+	}
+	parsed[path] = f
+	log.Debug().Str("path", path).Msg("Font loaded successfully")
+	return f, nil
 }
 
 // Close closes all font faces

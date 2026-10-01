@@ -1,0 +1,167 @@
+= 007 — animation
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-01
+:status: in progress; implemented (T2–T7), S2 run; K3 and K9 with the author
+:issue: 17
+
+== What and why
+
+The switcher changes its picture at once: a step replaces one frame of the
+carousel with the next, the overlay appears and disappears in one frame, the
+selection frame of the grid jumps to the next tile. The author wants these
+changes animated and version 1.0.0 released after a good animation
+(2026-10-01; constitution, "Releases and versions").
+
+The CPU draws a frame of E1 in 33–40 ms (research), about 25 frames per
+second with presenting — too slow for a smooth animation, which at the
+144 Hz of E1 needs a new frame every 6.94 ms. Author's decision
+(2026-10-01): on `glx` the GPU moves layers the CPU draws once; frames at
+rest stay the frames of `cpu` bit for bit, frames in motion do not; `cpu`
+keeps changing at once.
+
+The specification is a delta to `develop` at `73cfd5c`. Unchanged: the
+picture at rest of both renderers — the frames `cpu` draws, and the scene
+set Σ with its digests; the configuration; key and mouse handling apart from
+what the animation adds.
+
+== Decisions
+
+Author, 2026-10-01: the approach above; the scope — the carousel step with
+retargeting, the appearance and disappearance of the overlay, the selection
+frame of the grid; 150 ms with ease-out, a new frame every vertical blank.
+
+Made on the way, 2026-10-01, for the author to confirm — each for frames on
+time (research, "Frames on time"):
+
+* the background snapshots of the active window pause while the switcher is
+  shown;
+* the keyboard and modifier mappings are read once an activation, and again
+  on `MappingNotify`, not on every key;
+* K2 asks for no missed frame and a p95 half a millisecond above the
+  period, not a p95 of one period: an interval measured at P varies by a
+  tenth of a millisecond or more even when every frame makes its vertical
+  blank, so half of them are above the period;
+* the loop does not wait for the frame at rest: a step ends on time with
+  its scene at the target, and the frame at rest follows when drawn — for
+  the grid some 200 ms later;
+* S2 ends each activation not with `Escape` but with steps back to the
+  first window and the modifier released: an activation, for K6, that
+  leaves the focus where it was.
+
+== Behavior
+
+All of it on `glx`; `cpu` behaves as today.
+
+. *The carousel step.* The position of the selection, `p`, is continuous:
+  a step sets a target, and `p` moves from where it is to the target in
+  150 ms along ease-out cubic, `1 − (1 − u)³`. A key pressed mid-way sets a
+  new target and restarts the 150 ms from the current `p`, so holding the key
+  makes `p` follow it without queueing. A card at the fractional offset
+  `o = index − p` is placed and scaled by the geometry of the carousel,
+  continuous in `o`; its picture is the card as `cpu` draws it at the two
+  integer offsets around `o`, drawn once into layers and cross-faded by the
+  fractional part of `o`. The selection frame follows the card passing the
+  centre. A wrap-around step — from the last window to the first or back —
+  is not animated.
+. *At rest* — when `p` reaches its target — the overlay shows the frame
+  `cpu` draws for the target, byte for byte, as without animation, once it
+  is drawn; until then, the scene at the target. The loop does not wait for
+  it: a frame of the grid takes some 350 ms to draw on E1 (research).
+. *The grid*: the selection frame and the shadow of the selected tile slide
+  from its tile to the next in 150 ms, ease-out, under and over the tiles
+  drawn without a selection; at rest, the frame of `cpu`. The hover follows
+  the mouse at once, in a scene of the same kind with the hover frame and
+  its shadow at the tile under the pointer; the frame of `cpu` replaces the
+  scene when it is drawn.
+. *Appearance*: the first frame of an activation fades in over 150 ms, from
+  the end of its presentation; an `Expose` meanwhile is not answered. A
+  quick press, released before the overlay shows, is not animated.
+. *Disappearance*: on a selection — modifier released, `Enter`, a click —
+  the chosen window is activated at once, and the overlay then fades out
+  over 150 ms before it is unmapped; `Escape` fades it out too. The events
+  read during a fade-out are handled after it; a key press, as of a new
+  activation, cuts it short.
+. *Pacing*: frames of an animation follow a timer at the refresh period of
+  the monitor the overlay is on, from RandR; the swap interval stays 0 — an
+  interval of 1 throttles the overlay to one swap a second (research). The
+  layers go to the GPU in the pauses between frames.
+. *While shown*, the switcher takes no snapshots of the active window, and
+  reads the keyboard mapping once.
+
+== Metrics
+
+Frames of an animation are logged at debug level like the frames of
+specification 001, with the kind of the animation — `carousel`, `grid`,
+`fade-in`, `fade-out` — its progress and the time since the previous frame.
+A frame of a step during a fade is a frame of both.
+
+A1 — frame interval:: The time between two presented frames of one
+animation, P to P.
+
+A2 — step response:: From reading the `KeyPress` of a step to P of the first
+frame of its animation.
+
+A3 — duration:: From the first to the last frame of an animation.
+
+Session S2:: As S1 of specification 001, and in each activation also a held
+step key — 2 s at the author's autorepeat, 33 a second after 500 ms — before
+`Escape`.
+
+== Acceptance criteria
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| At rest, `glx` shows the frame of `cpu` byte for byte: for scenes of Σ,
+  after an animation to that scene has run to its end, the back buffer equals
+  the `cpu` frame. Test in `pkg/carousel`, as K2 of specification 001; K3 of
+  001, the capture of the window, still gives an absolute error of 0.
+
+| K2
+| Smoothness, on E1 for the step, the grid and the fades: A1 p95 ≤ the
+  refresh period + 0.5 ms, 7.44 ms at 144 Hz; no frame missed — A1 ≤ 1.5
+  periods, 10.4 ms; at least 18 frames in a 150 ms animation. S2, three
+  runs.
+
+| K3
+| Response: A2 p95 ≤ 30 ms on E1 — proposed, to be confirmed with the author
+  after the first measurement. S2, three runs.
+
+| K4
+| Duration: A3 of an animation that is not retargeted within 150 ms ± one
+  refresh period. S2.
+
+| K5
+| Retargeting: after the last key of a held step, the carousel is at rest on
+  the window the keys lead to within 150 ms and two frames; the selection
+  equals the number of keys sent — no key left behind. S2.
+
+| K6
+| Disappearance: the window chosen is activated before the fade-out, within
+  5 ms of reading the event that chose it. Log; S2.
+
+| K7
+| `cpu` unchanged: its digests of Σ as recorded (K1 of 001), its M2 not
+  worse than before by more than the spread of S1.
+
+| K8
+| Unit tests of the motion: `p` is continuous at a retarget, reaches its
+  target at 150 ms, and stays there.
+
+| K9
+| The author's judgement on E1: the animation is good — the condition for
+  1.0.0.
+
+| K10
+| `go vet ./...` and `go test ./...` pass.
+|===
+
+== Open decisions
+
+. The target of K3, after the first measurement.
+. A configuration key to turn the animation off.
+. Whether the hover glow and the appearance also zoom, not only fade.

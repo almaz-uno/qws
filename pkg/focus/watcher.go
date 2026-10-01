@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/almaz-uno/qws/pkg/composite"
@@ -29,6 +30,7 @@ type Watcher struct {
 	snapshotCtx      context.Context
 	snapshotCancel   context.CancelFunc
 	snapshotDone     sync.WaitGroup
+	snapshotsPaused  atomic.Bool
 }
 
 // NewWatcher creates a new focus watcher.
@@ -82,6 +84,14 @@ func NewWatcher(ctx context.Context, conn *xgb.Conn, root xproto.Window, mru *mr
 // This window will be ignored in focus tracking.
 func (fw *Watcher) SetSwitcherWindow(window xproto.Window) {
 	fw.switcherWindow = window
+}
+
+// PauseSnapshots stops or resumes the background snapshots. They are paused
+// while the switcher is shown: a capture holds the X server, and the frames
+// of an animation and the handling of keys wait for it (specs/007-animation,
+// research).
+func (fw *Watcher) PauseSnapshots(paused bool) {
+	fw.snapshotsPaused.Store(paused)
 }
 
 // HandlePropertyNotify handles PropertyNotify events.
@@ -219,6 +229,10 @@ func (fw *Watcher) startSnapshotRoutine() {
 		for {
 			select {
 			case <-ticker.C:
+				if fw.snapshotsPaused.Load() {
+					continue
+				}
+
 				// Get current active window
 				activeWin, err := fw.GetActiveWindow()
 				if err != nil || activeWin == 0 || activeWin == fw.root || activeWin == fw.switcherWindow {
