@@ -57,8 +57,8 @@ type Snapshotter struct {
 	// The switchers of the qws instances, for the pause (specs/011-snapshot-pause)
 	switchers *x11.Switchers
 	off       *glx.Offscreen
-	gpu     *gpu
-	cpu     *composite.Capturer
+	gpu       *gpu
+	cpu       *composite.Capturer
 }
 
 // window is what the snapshotter knows of a client window
