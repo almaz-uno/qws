@@ -3,7 +3,7 @@
 :toc-title: Contents
 :sectnums:
 :revdate: 2026-10-01
-:status: in progress; the step, the grid and the fades implemented (T2–T7); the runs of S2 to do
+:status: in progress; implemented (T2–T7), S2 run; K3 and K9 with the author
 :issue: 17
 
 == What and why

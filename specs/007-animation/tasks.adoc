@@ -16,5 +16,7 @@
 . [x] T6. The grid: the selection frame sliding.
 . [x] T7. The fades; K6 in a try, 0.68 ms.
 . [ ] T8. Three runs of S2; K3 confirmed with the author; the author's
-  review, K9.
+  review, K9. The runs done (research, "Runs of S2"): K2 short of "no
+  frame missed", 0.45–0.51 % of intervals in the carousel; K3 and K9 with
+  the author.
 . [ ] T9. The results, the release notes of 1.0.0.

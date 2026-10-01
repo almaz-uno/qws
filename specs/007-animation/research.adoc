@@ -223,3 +223,54 @@ max 19.37 ms, A3 147.4–150.1 ms; the fade-in 9 intervals, A3 137.6 ms —
 within 150 ms and a period, of 16.68 ms. At 60 Hz a step has 9 or 10
 frames: the 18 of K2 are for the 144 Hz of E1.
 
+== Runs of S2
+
+Session S2 on E1, 2026-10-01, `2f1a499`: 20 activations of 23 steps and a
+held key of 50 presses each, `glx`; and the references, S1 on `cpu` with
+the code of `develop` and of the branch, S1 on `glx` with `develop`.
+
+[cols="2,3,2,2,2,2",options="header"]
+|===
+| Run | A1 p50 / p95 / max, ms | Missed | A2 p95, ms | A3 p50, ms | K6 max, ms
+
+| carousel 1 | 6.94 / 7.09 / 425.64 | 90 of 20210 | 7.00 | 152.57 | 1.87
+| carousel 2 | 6.94 / 7.10 / 417.79 | 103 of 20222 | 6.98 | 152.57 | 1.32
+| carousel 3 | 6.94 / 7.10 / 414.93 | 90 of 20226 | 6.99 | 152.56 | 1.55
+| grid | 6.94 / 7.27 / 831.36 | 520 of 14198 | 6.96 | 485.06 | 5.17
+|===
+
+The fades in the carousel runs: A1 p95 7.01–7.10 ms, 0–2 of 420–442
+intervals missed each; A3 147.4 ms in, 143.9–144.6 ms out; 23 and 22
+frames. The steps: 23 frames each, the frame at rest included. K5: the last
+step of a held key at rest 152.7–152.9 ms after its key at p95 — once
+474.7 ms, behind a stall — and on the window the keys lead to in all 60
+activations.
+
+Of the 283 frames the carousel runs missed, 211 came after a pause that
+uploaded — a layer, or pieces of the frame at rest — 55 after one that did
+not, 2 were frames at rest, 15 were stalls over 50 ms. The rate per pause:
+0.15 % without an upload, 0.96 % with up to 640 KB, 1.55–1.58 % with more.
+The upload need not be large: its being in the same GL context as the
+frames is what costs. Uploads from a context of their own, on a thread of
+their own, could go by the copy engine beside the frames; not tried.
+
+The grid misses more, 3.7 %: its tiles layer is a frame in size, 14 MB in
+one upload, and so is the frame at rest it stages. Its K5 is 920 ms at
+p50: the frame at rest of the grid takes some 480 ms to draw (see "The
+grid"). In this run the harness read the selection before that frame
+came, took the frame before for it, and in 14 activations of 20 released
+the modifier on a window other than the first — focus moved on E1. It now
+waits for the frame of the selection it expects, and presses `Escape` when
+none comes.
+
+*Stalls.* Every run, of `develop` as of the branch, of `cpu` as of `glx`,
+has presentations of 370–420 ms, one or two a minute: S1 `cpu` of
+`develop` 2, of the branch 2, S1 `glx` of `develop` 1, each S2 run 6–8.
+`cpu` presents through `PutImage`, so the X server it is that stops for
+some 400 ms; qws reads RandR with `GetScreenResourcesCurrent`, which does
+not probe the outputs. The cause is outside qws, on E1.
+
+*K7.* M2 of `cpu`, S1, p50 / p95: `develop` 68.25 / 85.64 ms, the branch
+69.95 / 84.30 ms; M3 31.62 against 30.58 ms of CPU a frame — within the
+spread. M2 of `glx` on `develop`, for reference: 62.77 / 72.64 ms.
+
