@@ -536,6 +536,13 @@ log:
 | `#cccccc`
 | Light theme inactive frame color
 
+| `appearance.header.enabled`
+| `--appearance-header-enabled`
+| `QWS_APPEARANCE_HEADER_ENABLED`
+| `bool`
+| `true`
+| The header: the hostname in large letters and the qws version at the top left of the switcher; `false`: none, and the grid takes the whole window (specification `014-appearance-keys`)
+
 | `appearance.animation.enabled`
 | `--appearance-animation-enabled`
 | `QWS_APPEARANCE_ANIMATION_ENABLED`
@@ -548,7 +555,7 @@ log:
 | `QWS_APPEARANCE_ANIMATION_DURATION`
 | `duration`
 | `150ms`
-| Time of every animation, along ease-out cubic; `0` is as `enabled: false`
+| Time of every animation, along ease-out cubic — of the hover too, unless `hover_duration` is set; `0` is as `enabled: false`
 
 | `appearance.animation.step`
 | `--appearance-animation-step`
@@ -562,7 +569,7 @@ log:
 | `QWS_APPEARANCE_ANIMATION_SHOW`
 | `[]string`
 | `[fade, zoom]`
-| How the switcher appears: `fade` (alpha from 0), `zoom` (from 0.92 of its size), both, or `none` / `[]` at once. A YAML list, one name, or names joined by commas
+| How the switcher appears: `fade` (alpha from 0), `zoom` (from `overlay_zoom` of its size), both, or `none` / `[]` at once. A YAML list, one name, or names joined by commas
 
 | `appearance.animation.hide`
 | `--appearance-animation-hide`
@@ -576,7 +583,28 @@ log:
 | `QWS_APPEARANCE_ANIMATION_HOVER`
 | `[]string`
 | `[fade, zoom]`
-| How the hover frame comes to the tile or card under the pointer and goes from the one it left: `fade`, `zoom` (closing in from 1.05 of its size), both, or none — at once
+| How the hover frame comes to the tile or card under the pointer and goes from the one it left: `fade`, `zoom` (closing in from `hover_zoom` of its size), both, or none — at once
+
+| `appearance.animation.hover_duration`
+| `--appearance-animation-hover-duration`
+| `QWS_APPEARANCE_ANIMATION_HOVER_DURATION`
+| `duration`
+| `0s`
+| Time of the hover animation; `0`: that of `duration`. The hover at once is `hover: none` (specification `014-appearance-keys`)
+
+| `appearance.animation.overlay_zoom`
+| `--appearance-animation-overlay-zoom`
+| `QWS_APPEARANCE_ANIMATION_OVERLAY_ZOOM`
+| `float`
+| `0.92`
+| Scale of its size the switcher zooms from as it appears and to as it disappears, with `zoom` in `show` or `hide`; above 1 it closes in. A positive number; anything else is reported and the default used
+
+| `appearance.animation.hover_zoom`
+| `--appearance-animation-hover-zoom`
+| `QWS_APPEARANCE_ANIMATION_HOVER_ZOOM`
+| `float`
+| `1.05`
+| Scale of its size the hover frame zooms from as it comes and to as it goes, with `zoom` in `hover`; below 1 it grows out of the tile. A positive number; anything else is reported and the default used
 
 | `behavior.snapshot_interval`
 | `--behavior-snapshot-interval`

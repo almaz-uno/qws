@@ -10,10 +10,10 @@ import (
 
 // The hover of specs/010-animation-options: each tile or card has a level —
 // 1 for the one under the pointer, 0 for the rest — moved by a motion of the
-// duration of the animations, and the scenes draw its hover frame at the look
-// the effects of hover give the level. Without them, or while the scene
-// cannot show them, the levels are at their targets at once: the hover of
-// 007.
+// duration of the hover (specs/014-appearance-keys), and the scenes draw its
+// hover frame at the look the effects of hover give the level. Without them,
+// or while the scene cannot show them, the levels are at their targets at
+// once: the hover of 007.
 
 // hoverAnimation is the motion of the hover frames
 type hoverAnimation struct {
@@ -33,7 +33,7 @@ type hoverLevel struct {
 func (s *Selector) setHover(now time.Time, animated bool) {
 	var d time.Duration
 	if animated {
-		d = s.anim.duration
+		d = s.anim.hoverDuration
 	}
 	if s.hover.levels == nil {
 		s.hover.levels = map[int]motion{}
@@ -131,7 +131,7 @@ func (s *Selector) hoverLevels(now time.Time) []hoverLevel {
 
 // hoverLook is how a hover frame is drawn at the level v
 func (s *Selector) hoverLook(v float64) carousel.Fade {
-	return s.anim.hover.look(v, hoverZoom)
+	return s.anim.hover.look(v, s.anim.hoverZoom)
 }
 
 // requestHoverLayers draws in the background the hover layers of the

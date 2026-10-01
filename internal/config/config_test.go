@@ -131,11 +131,13 @@ func TestJoinedKeys(t *testing.T) {
 
 // Criteria of specs/010-animation-options
 
-// TestAnimationDefaults checks K1: the defaults the author chose
+// TestAnimationDefaults checks K1: the defaults the author chose, and those
+// of the keys of specs/014-appearance-keys
 func TestAnimationDefaults(t *testing.T) {
 	want := Animation{
 		Enabled: true, Duration: 150 * time.Millisecond, Step: true,
 		Show: []string{"fade", "zoom"}, Hide: []string{"fade", "zoom"}, Hover: []string{"fade", "zoom"},
+		OverlayZoom: 0.92, HoverZoom: 1.05,
 	}
 	if got := Default().Appearance.Animation; !reflect.DeepEqual(got, want) {
 		t.Errorf("defaults %+v, want %+v", got, want)
@@ -165,6 +167,7 @@ func TestAnimationSources(t *testing.T) {
 	want := Animation{
 		Enabled: false, Duration: 80 * time.Millisecond, Step: false,
 		Show: []string{"fade", "zoom"}, Hide: []string{"zoom"}, Hover: []string{"fade", "zoom"},
+		OverlayZoom: 0.92, HoverZoom: 1.05,
 	}
 	if got := cfg.Appearance.Animation; !reflect.DeepEqual(got, want) {
 		t.Errorf("file: %+v, want %+v", got, want)
@@ -183,9 +186,53 @@ func TestAnimationSources(t *testing.T) {
 	want = Animation{
 		Enabled: true, Duration: 300 * time.Millisecond, Step: true,
 		Show: []string{"zoom"}, Hide: []string{"fade", "zoom"}, Hover: []string{"none"},
+		OverlayZoom: 0.92, HoverZoom: 1.05,
 	}
 	if got := cfg.Appearance.Animation; !reflect.DeepEqual(got, want) {
 		t.Errorf("environment: %+v, want %+v", got, want)
+	}
+}
+
+// Criteria of specs/014-appearance-keys
+
+// TestAppearanceKeys checks K5: the defaults of the header, the hover
+// duration and the zoom factors keep the picture and the animations of 1.2.0;
+// each key is read from a file, and from its QWS_ variable over the file
+func TestAppearanceKeys(t *testing.T) {
+	def := Default().Appearance
+	if !def.Header.Enabled || def.Animation.HoverDuration != 0 ||
+		def.Animation.OverlayZoom != 0.92 || def.Animation.HoverZoom != 1.05 {
+		t.Errorf("defaults: header %+v, hover duration %v, zooms %v, %v; want shown, 0, 0.92, 1.05",
+			def.Header, def.Animation.HoverDuration, def.Animation.OverlayZoom, def.Animation.HoverZoom)
+	}
+
+	clearEnvironment(t)
+	file := writeFile(t, "appearance:\n  header:\n    enabled: false\n  animation:\n"+
+		"    hover_duration: 90ms\n    overlay_zoom: 0.8\n    hover_zoom: 1.2\n")
+	cfg, warnings, err := Load(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := cfg.Appearance.Animation
+	if cfg.Appearance.Header.Enabled || a.HoverDuration != 90*time.Millisecond || a.OverlayZoom != 0.8 || a.HoverZoom != 1.2 {
+		t.Errorf("file: header %+v, hover duration %v, zooms %v, %v; want hidden, 90ms, 0.8, 1.2",
+			cfg.Appearance.Header, a.HoverDuration, a.OverlayZoom, a.HoverZoom)
+	}
+	if len(warnings) != 0 {
+		t.Errorf("warnings %v, want none", warnings)
+	}
+
+	t.Setenv("QWS_APPEARANCE_HEADER_ENABLED", "true")
+	t.Setenv("QWS_APPEARANCE_ANIMATION_HOVER_DURATION", "40ms")
+	t.Setenv("QWS_APPEARANCE_ANIMATION_OVERLAY_ZOOM", "0.5")
+	t.Setenv("QWS_APPEARANCE_ANIMATION_HOVER_ZOOM", "1.5")
+	if cfg, _, err = Load(file); err != nil {
+		t.Fatal(err)
+	}
+	a = cfg.Appearance.Animation
+	if !cfg.Appearance.Header.Enabled || a.HoverDuration != 40*time.Millisecond || a.OverlayZoom != 0.5 || a.HoverZoom != 1.5 {
+		t.Errorf("environment: header %+v, hover duration %v, zooms %v, %v; want shown, 40ms, 0.5, 1.5",
+			cfg.Appearance.Header, a.HoverDuration, a.OverlayZoom, a.HoverZoom)
 	}
 }
 
@@ -210,9 +257,11 @@ func changedConfig(t *testing.T) *Config {
 			},
 			WindowBackground: WindowBackground{Enabled: false, Opacity: 0.5, BorderRadius: 7},
 			WindowPadding:    WindowPadding{Horizontal: "5%", Vertical: "6%"},
+			Header:           Header{Enabled: false},
 			Animation: Animation{
 				Enabled: false, Duration: 300 * time.Millisecond, Step: false,
 				Show: []string{"zoom"}, Hide: []string{"fade"}, Hover: []string{},
+				HoverDuration: 70 * time.Millisecond, OverlayZoom: 0.8, HoverZoom: 1.2,
 			},
 		},
 		Behavior: Behavior{SnapshotInterval: 1500 * time.Millisecond, ShowDelay: 20 * time.Millisecond},

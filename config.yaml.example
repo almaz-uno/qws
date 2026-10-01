@@ -73,6 +73,8 @@ appearance:
   window_padding:
     horizontal: 20px    # Horizontal padding from screen edges (e.g., "5%" or "50px")
     vertical: 20px      # Vertical padding from screen edges (e.g., "5%" or "50px")
+  header:
+    enabled: true       # The hostname and the qws version at the top left; false: none
 
   # Animations of the "glx" renderer; "cpu" changes its picture at once.
   # An effect list is fade, zoom, both ([fade, zoom] or fade,zoom), or none.
@@ -80,9 +82,12 @@ appearance:
     enabled: true       # false: every change shows at once
     duration: 150ms     # Time of every animation (0 = at once)
     step: true          # The selection moves to the next card or tile
-    show: [fade, zoom]  # How the switcher appears; zoom grows it from 0.92
+    show: [fade, zoom]  # How the switcher appears; zoom grows it from overlay_zoom
     hide: [fade, zoom]  # How it disappears, after the chosen window is activated
-    hover: [fade, zoom] # How the hover frame comes and goes; zoom closes in from 1.05
+    hover: [fade, zoom] # How the hover frame comes and goes; zoom closes in from hover_zoom
+    hover_duration: 0s  # Time of the hover animation (0 = that of duration)
+    overlay_zoom: 0.92  # Scale of its size the switcher zooms from and to
+    hover_zoom: 1.05    # Scale of its size the hover frame zooms from and to
 
 behavior:
   snapshot_interval: 1s   # a visible window that changed is captured again at most this often

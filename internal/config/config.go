@@ -44,18 +44,29 @@ type Appearance struct {
 	Colors           Colors           `mapstructure:"colors" yaml:"colors"`
 	WindowBackground WindowBackground `mapstructure:"window_background" yaml:"window_background"`
 	WindowPadding    WindowPadding    `mapstructure:"window_padding" yaml:"window_padding"`
+	Header           Header           `mapstructure:"header" yaml:"header"`
 	Animation        Animation        `mapstructure:"animation" yaml:"animation"`
 }
 
+// Header contains the header of the overlay: the hostname and the version of
+// qws at its top left (specs/005-host-and-version, specs/014-appearance-keys)
+type Header struct {
+	Enabled bool `mapstructure:"enabled" yaml:"enabled"` // false: no header; the grid takes the whole window
+}
+
 // Animation contains the animations of the glx renderer (specs/007-animation,
-// specs/010-animation-options); cpu changes its picture at once
+// specs/010-animation-options, specs/014-appearance-keys); cpu changes its
+// picture at once
 type Animation struct {
-	Enabled  bool          `mapstructure:"enabled" yaml:"enabled"`   // false: every change at once
-	Duration time.Duration `mapstructure:"duration" yaml:"duration"` // Of every animation; 0: at once
-	Step     bool          `mapstructure:"step" yaml:"step"`         // The selection moves to its target
-	Show     []string      `mapstructure:"show" yaml:"show"`         // Effects of the appearance: fade, zoom
-	Hide     []string      `mapstructure:"hide" yaml:"hide"`         // Effects of the disappearance
-	Hover    []string      `mapstructure:"hover" yaml:"hover"`       // Effects of the hover frame
+	Enabled       bool          `mapstructure:"enabled" yaml:"enabled"`               // false: every change at once
+	Duration      time.Duration `mapstructure:"duration" yaml:"duration"`             // Of every animation, the hover's unless HoverDuration; 0: at once
+	Step          bool          `mapstructure:"step" yaml:"step"`                     // The selection moves to its target
+	Show          []string      `mapstructure:"show" yaml:"show"`                     // Effects of the appearance: fade, zoom
+	Hide          []string      `mapstructure:"hide" yaml:"hide"`                     // Effects of the disappearance
+	Hover         []string      `mapstructure:"hover" yaml:"hover"`                   // Effects of the hover frame
+	HoverDuration time.Duration `mapstructure:"hover_duration" yaml:"hover_duration"` // Of the hover; 0: that of Duration
+	OverlayZoom   float64       `mapstructure:"overlay_zoom" yaml:"overlay_zoom"`     // Scale the overlay zooms from as it appears, and to as it goes
+	HoverZoom     float64       `mapstructure:"hover_zoom" yaml:"hover_zoom"`         // Scale the hover frame zooms from as it comes, and to as it goes
 }
 
 // Thumbnail contains thumbnail size configuration
@@ -229,13 +240,19 @@ func Default() *Config {
 				Horizontal: "20px",
 				Vertical:   "20px",
 			},
+			Header: Header{
+				Enabled: true,
+			},
 			Animation: Animation{
-				Enabled:  true,
-				Duration: 150 * time.Millisecond,
-				Step:     true,
-				Show:     []string{"fade", "zoom"},
-				Hide:     []string{"fade", "zoom"},
-				Hover:    []string{"fade", "zoom"},
+				Enabled:       true,
+				Duration:      150 * time.Millisecond,
+				Step:          true,
+				Show:          []string{"fade", "zoom"},
+				Hide:          []string{"fade", "zoom"},
+				Hover:         []string{"fade", "zoom"},
+				HoverDuration: 0,    // that of Duration
+				OverlayZoom:   0.92, // the overlay grows from it to its size
+				HoverZoom:     1.05, // the hover frame closes in from it on its tile
 			},
 		},
 		Behavior: Behavior{
@@ -435,6 +452,7 @@ func setDefaults(v *viper.Viper, cfg *Config) {
 	v.SetDefault("appearance.window_background.border_radius", cfg.Appearance.WindowBackground.BorderRadius)
 	v.SetDefault("appearance.window_padding.horizontal", cfg.Appearance.WindowPadding.Horizontal)
 	v.SetDefault("appearance.window_padding.vertical", cfg.Appearance.WindowPadding.Vertical)
+	v.SetDefault("appearance.header.enabled", cfg.Appearance.Header.Enabled)
 
 	v.SetDefault("appearance.animation.enabled", cfg.Appearance.Animation.Enabled)
 	v.SetDefault("appearance.animation.duration", cfg.Appearance.Animation.Duration)
@@ -442,6 +460,9 @@ func setDefaults(v *viper.Viper, cfg *Config) {
 	v.SetDefault("appearance.animation.show", cfg.Appearance.Animation.Show)
 	v.SetDefault("appearance.animation.hide", cfg.Appearance.Animation.Hide)
 	v.SetDefault("appearance.animation.hover", cfg.Appearance.Animation.Hover)
+	v.SetDefault("appearance.animation.hover_duration", cfg.Appearance.Animation.HoverDuration)
+	v.SetDefault("appearance.animation.overlay_zoom", cfg.Appearance.Animation.OverlayZoom)
+	v.SetDefault("appearance.animation.hover_zoom", cfg.Appearance.Animation.HoverZoom)
 
 	v.SetDefault("behavior.snapshot_interval", cfg.Behavior.SnapshotInterval)
 	v.SetDefault("behavior.show_delay", cfg.Behavior.ShowDelay)
