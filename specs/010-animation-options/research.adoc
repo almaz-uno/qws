@@ -103,7 +103,33 @@ of S2 back to back tell whether this change or the conditions made them so:
 
 A1 p95 in ms and the share missed. 1.0.0 measures as this change does: the
 conditions moved, not the frames. The fade-in is the least steady — its p95
-ranges from 7.89 to 15.80 ms over the five runs of this change at 150 ms, as the uploads
-of the activation fall on its frames or not. What in the conditions costs
-the frames — the snapshots of 008 in the two services, the stalls of the X
-server seen in 007, or else — is not established here.
+ranges from 7.89 to 15.80 ms over the five runs of this change at 150 ms, as
+the uploads of the activation fall on its frames or not.
+
+A third run, at 21:07, with the binary of the second and the two services
+stopped (`systemctl --user stop qws.service qws-workspace.service`, started
+again after it), names what moved:
+
+[cols="2,3,3,3",options="header"]
+|===
+| Run | carousel | fade-in | fade-out
+
+| this change, services running, 19:17
+| 8.42, 1.10 %
+| 15.12, 9.8 %
+| 8.87, 1.4 %
+
+| this change, services stopped, 21:07
+| 7.09, 0.51 %
+| 7.01, 0.45 %
+| 6.99, 0.24 %
+|===
+
+Without the services the frames are those of 007, to the hundredth of a
+millisecond. The services of 1.1.0 capture the visible windows through the
+GPU when their contents change — the switcher of the third instance among
+them, a frame each refresh — and their captures take the GPU and the X
+server from the frames. Each service pauses its own captures while its own
+switcher is shown (007), not while another's is: in use, the snapshots of
+`qws-workspace.service` run while `qws.service` shows its switcher, and the
+other way round. The hover was measured with the services running only.

@@ -242,13 +242,15 @@ was. `SWEEP=1 HOLD=2 measure.sh run glx <dir>`.
   307.4, 0.4 ms past 300 ms and a period; fade-in 299.7 / 300.2, fade-out
   298.2 / 299.7; 45 frames a step.
 | K6 | `TestGLXPresenterMatchesCPU` and `TestGLXPresenterZoom` on E1.
-| K7 | Not met against its threshold, met against 1.0.0. A1 p95 of the step
-  8.4–8.8 ms, of the hover 8.9 ms in the carousel and 11.5 in the grid, of
-  the fade-in 7.9–15.8, of the fade-out 8.9–11.0, against 7.44; at least
-  22 frames in every 150 ms animation. 1.0.0, run back to back with this
-  change, measures the same — the step 8.46 against 8.42, the fade-in 13.4
-  against 15.1, the fade-out 9.8 against 8.9 — so the conditions of E1 moved
-  since 007, not the frames of this change (research, "The control").
+| K7 | Met with the two services of the author stopped: A1 p95 of the step
+  7.09 ms, of the zoom of the appearance 7.01 and of the disappearance 6.99,
+  against 7.44, with 0.51, 0.45 and 0.24 % of the intervals missed — the
+  frames of 007. With the services of 1.1.0 running, as through the other
+  runs, the step is at 8.4–8.8 ms, the hover at 8.9 in the carousel and 11.5
+  in the grid, the fade-in at 7.9–15.8 — and 1.0.0, run back to back, at
+  the same: the snapshots of the services cost the frames, not this change
+  (research, "The control"). At least 22 frames in every 150 ms animation
+  throughout. The hover was measured with the services running only.
 | K8 | `step: false`, `show: none`, `hide: [zoom]`: no `fade-in` frame,
   fade-outs of 22 frames in 145.8 ms, every frame of a step at progress 1.
 | K9 | `TestMotion`, `TestMotionAtOnce`.
@@ -263,8 +265,10 @@ was. `SWEEP=1 HOLD=2 measure.sh run glx <dir>`.
 
 == Open decisions
 
-. K7 against its threshold: what in the conditions of E1 costs the frames
-  since 007 — 1.0.0 misses as many — to be found, and K7 measured again.
+. The snapshots of one service while another shows its switcher: those of
+  1.1.0 cost the frames of a switcher shown by another instance, as each
+  pauses only for its own (research, "The control") — to be settled by a
+  specification of its own, and the hover measured again then.
 . A duration of its own for the hover, should one for all be too slow for
   it.
 . The zoom factors as keys, should the constants not suit.
