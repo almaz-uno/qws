@@ -9,6 +9,26 @@ newest come first (link:specs/004-releases/spec.adoc[specification 004]). The
 version of a build is `qws version`. Release files are built on Debian 12:
 they need glibc 2.36 or newer and the OpenGL and X11 libraries.
 
+== 1.1.0 — unreleased
+
+*Thumbnails* (link:specs/008-window-snapshots/spec.adoc[specification 008]):
+
+* Every visible window is captured when its contents change, not only the
+  active one: the cards of windows you have not focused for a while show
+  what they show now, as long as they are on a visible workspace. A window
+  on a hidden workspace keeps the thumbnail taken while it was visible.
+* A capture costs about a millisecond instead of about a hundred: the
+  window is scaled on the GPU, through `GLX_EXT_texture_from_pixmap`,
+  averaging its pixels by area, and only the thumbnail is read back. An
+  idle qws no longer spends some 9 % of a CPU on snapshots.
+* When the switcher opens, the visible windows changed since their last
+  capture are captured first, so their cards are current.
+* `behavior.snapshot_interval` — now how often, at most, a changed window
+  is captured again — defaults to 1 s instead of 10 s.
+* Without GLX or `texture_from_pixmap`, qws captures the active window on
+  the CPU as before; `appearance.thumbnail.scaling_algorithm` applies there
+  only.
+
 == 1.0.0 — 2026-10-01
 
 The first major version, by the author's word once the switcher moves well.

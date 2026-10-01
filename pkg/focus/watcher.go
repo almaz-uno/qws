@@ -222,6 +222,10 @@ func (fw *Watcher) SetSnapshotInterval(interval time.Duration) {
 
 // startSnapshotRoutine starts background goroutine that captures snapshots periodically
 func (fw *Watcher) startSnapshotRoutine() {
+	if fw.capturer == nil {
+		// No capturer, or pkg/snapshot takes the thumbnails
+		return
+	}
 	fw.snapshotDone.Go(func() {
 		ticker := time.NewTicker(fw.snapshotInterval)
 		defer ticker.Stop()

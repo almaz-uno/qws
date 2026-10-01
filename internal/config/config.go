@@ -219,7 +219,7 @@ func Default() *Config {
 			},
 		},
 		Behavior: Behavior{
-			SnapshotInterval: 10 * time.Second,
+			SnapshotInterval: time.Second, // a visible window is captured again at most this often once it changes
 			ShowDelay:        0,
 		},
 		Windows: Windows{
