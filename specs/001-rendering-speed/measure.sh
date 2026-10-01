@@ -136,20 +136,32 @@ run() {
 				# shellcheck disable=SC2046
 				xdotool key --delay $((1000 / REPEAT_RATE)) $(yes Right | head -n $((held - 1)))
 			fi
-			# The step of the last key ends in 150 ms, on the window the keys
-			# lead to from the first frame (K5 of specs/007-animation)
-			sleep 0.5
-			read -r first sel n < <(jq -rs --argjson a "$a" '
-				map(select(.message == "Frame" and .activation == $a))
-				| "\(first | .selected) \(last | .selected) \(last | .windows)"' "$log")
-			echo "activation $a: at $sel, want $(((first + STEPS + held) % n))" >>"$out/k5"
-			back=$(((n - sel) % n))
-			if ((back > 0)); then
-				# shellcheck disable=SC2046
-				xdotool key --delay 200 $(yes Right | head -n "$back")
+			# The step of the last key ends on the window the keys lead to from
+			# the first frame (K5 of specs/007-animation): in 150 ms, but its
+			# frame at rest comes when drawn — some 500 ms for the grid. Only
+			# on that window does the run step back and release the modifier;
+			# else Escape, so that no other window is activated.
+			want=-1
+			for ((i = 0; i < 500; i++)); do
+				read -r first sel n < <(jq -rs --argjson a "$a" '
+					map(select(.message == "Frame" and .activation == $a))
+					| "\(first | .selected) \(last | .selected) \(last | .windows)"' "$log")
+				want=$(((first + STEPS + held) % n))
+				((sel == want)) && break
+				sleep 0.01
+			done
+			echo "activation $a: at $sel, want $want" >>"$out/k5"
+			if ((sel == want)); then
+				back=$(((n - sel) % n))
+				if ((back > 0)); then
+					# shellcheck disable=SC2046
+					xdotool key --delay 200 $(yes Right | head -n "$back")
+				fi
+				sleep 0.4
+				xdotool keyup alt
+			else
+				xdotool key Escape keyup alt
 			fi
-			sleep 0.4
-			xdotool keyup alt
 		else
 			xdotool key Escape keyup alt
 		fi
