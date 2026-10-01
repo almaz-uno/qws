@@ -3,7 +3,7 @@
 :toc-title: Contents
 :sectnums:
 :revdate: 2026-10-01
-:status: draft
+:status: implemented
 :issue: 51
 
 == What and why
@@ -136,6 +136,51 @@ criterion.
 | K7
 | `go vet ./...`, `go test ./...` and `make check-specs` pass.
 |===
+
+== Results
+
+2026-10-01, ws1; the runs in `research.adoc`, "Before and after".
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | `TestScenes`: all 24 scenes of Σ, the host scenes with them; the file
+  of digests unchanged. `TestGLXPresenterMatchesCPU`, a compositor running,
+  and `TestLayers`. A byte flipped in the heads copied in fails all 12 grid
+  scenes (research, "Checks of the checks").
+| K2 | `TestGridHeads`: 12 scenes of Σ and 8 configurations; heads drawn in
+  place in `tight`, `far-shadow`, `wide-workspace`, `odd-images`, `small`
+  and `corners`. Each of its safeguards undone fails at least one case.
+| K3 | `TestParallelDrawing`, and under `-race` with `TestScenes`,
+  `TestLayers` and `TestGridHeads`.
+| K4 | M1: `grid-e1-24-second` 42.6–48.0 ms against 383.1–390.2;
+  `grid-e1-header` 42.7–45.1 ms against 370.7–383.9.
+| K5 | M2: 51.7–55.2 ms against 378.3–393.6.
+| K6 | M3: `carousel-e1-24-second` 31.7–33.0 ms against 34.8–38.6;
+  `carousel-e1-header` 31.8–33.1 against 35.1–37.8 — faster by the advances
+  of its titles.
+| K7 | `go vet ./...`, `go test ./...`, `make check-specs`.
+|===
+
+Reported:
+
+* CPU time of a frame of `grid-e1-24-second`, 428 ms against 399, and of the
+  tiles layer 432 against 387: the heads resample on threads that share
+  cores. Allocations of a frame 19.4–22.2 MB against 16.0, of the tiles
+  layer 34.4–35.5 against 28.6: the scratch canvas.
+* With `GOMAXPROCS` 8 on ws1, the threads of the Steam Deck, a frame takes
+  81.5–84.8 ms, the tiles layer 89.5–90.1.
+
+Not checked:
+
+* The program on E1. The agent that did the change may not drive the
+  author's desktop: neither the step and the hover of the grid under the
+  animation (S2 and S3 of specifications 007 and 010) nor M1 of 001 for the
+  grid were run. What to expect: the frame at rest of a step about 40 ms
+  after the frame before it, not 208–449 ms; under `cpu`, a step of the grid
+  faster by some 330 ms.
+* ws7, the Steam Deck.
 
 == Open decisions
 

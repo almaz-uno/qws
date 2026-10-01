@@ -197,6 +197,53 @@ layers and frames at rest in the background and presents a frame every
 6.9 ms, could wait for a processor until a worker is preempted, after up to
 10 ms.
 
+== Before and after
+
+2026-10-01, ws1, the test binaries of `develop` with `BenchmarkE1Grid` and of
+the change, built from the same worktree, run in turn three times,
+`-test.benchtime 20x -test.count 2`: six values each, ms a frame and MB
+allocated a frame.
+
+[cols="3,2,2",options="header"]
+|===
+| Benchmark | `develop` | the change
+
+| `grid-e1-24-second` | 383.1–390.2; 16.0 MB | 42.6–48.0; 21.5–22.2 MB
+| `grid-e1-header` | 370.7–383.9; 16.1 MB | 42.7–45.1; 19.4–20.3 MB
+| `grid-e1-header-tiles` | 378.3–393.6; 28.6 MB | 51.7–55.2; 34.4–35.5 MB
+| `carousel-e1-24-second` | 34.8–38.6; 14.5–15.1 MB | 31.7–33.0; 14.6–15.1 MB
+| `carousel-e1-header` | 35.1–37.8; 14.6–14.7 MB | 31.8–33.1; 14.6–14.7 MB
+|===
+
+CPU time from profiles of 40 frames: the frame of `grid-e1-24-second` 399
+against 428 ms, the tiles layer 387 against 432 ms — with the workers, which
+resample on threads that share cores. The allocations grow by the scratch
+canvas of the heads, 14 MB, which `sync.Pool` loses at a collection. The
+carousel is faster by the advances its titles no longer load.
+
+With fewer processors, `GOMAXPROCS` on ws1: 8 — the threads of the Steam
+Deck — 81.5–84.8 ms a frame, 89.5–90.1 ms the tiles layer; 4 — 151.0–159.1
+and 159.6–164.2 ms.
+
+== Checks of the checks
+
+Each on a copy of the change, undone after.
+
+* A byte flipped in every head copied into the canvas: all 12 grid scenes of
+  `TestScenes` fail, no carousel scene.
+* Counted: in every grid scene of Σ every head is drawn apart and used;
+  none is drawn in place.
+* Without the check that the canvas is the colour of the head:
+  `TestGridHeads/corners` and `/wide-workspace` fail. Without the tiles
+  whose heads meet left out: `/tight` and `/small` fail. Without the shadow
+  in the bounds of a head: the bounds check fails for the selected and
+  hovered tiles.
+* With a margin of 0 pixels instead of 2 the bounds check holds: the
+  rectangles are already rounded out to whole pixels, and the margin is
+  spare.
+* `TestScenes`, `TestGridHeads`, `TestLayers`, `TestParallelDrawing` pass
+  five times in a row, with `GOMAXPROCS` 1 and 3, and under `-race`.
+
 == What would change pixels
 
 * *Separable resampling.* `Kernel.Scale` — horizontal, then vertical — takes
