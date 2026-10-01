@@ -38,5 +38,6 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      - run: make check-specs
       - run: make vet
       - run: make test

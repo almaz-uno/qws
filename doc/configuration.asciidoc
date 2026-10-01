@@ -250,7 +250,7 @@ appearance:
 | Parameter | Default | Description
 
 | `snapshotInterval`
-| 10s
+| 1s
 | Background thumbnail refresh interval
 |===
 
@@ -258,7 +258,7 @@ appearance:
 [source,yaml]
 ----
 behavior:
-  snapshot_interval: 10s
+  snapshot_interval: 1s
   show_delay: 0ms          # Delay before showing UI
   # close_on_release: true # Close when modifier is released
 ----
@@ -582,8 +582,8 @@ log:
 | `--behavior-snapshot-interval`
 | `QWS_BEHAVIOR_SNAPSHOT_INTERVAL`
 | `duration`
-| `10s`
-| Background thumbnail refresh interval
+| `1s`
+| How often, at most, a visible window that changed is captured again for its thumbnail
 
 | `behavior.show_delay`
 | `--behavior-show-delay`

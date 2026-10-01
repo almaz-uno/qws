@@ -15,6 +15,7 @@ import (
 	"github.com/almaz-uno/qws/pkg/focus"
 	"github.com/almaz-uno/qws/pkg/keygrab"
 	"github.com/almaz-uno/qws/pkg/mru"
+	"github.com/almaz-uno/qws/pkg/snapshot"
 	"github.com/almaz-uno/qws/pkg/ui"
 	"github.com/almaz-uno/qws/pkg/x11"
 	"github.com/jezek/xgb"
@@ -399,10 +400,19 @@ func run(cmd *cobra.Command, args []string) error {
 	// Create MRU list
 	mruList := mru.NewMRUList()
 
-	// Initialize Composite for thumbnail capture
-	capturer, err := composite.NewCapturer(conn.Conn, conn.Root, cfg.Appearance.Thumbnail.ScalingAlgorithm)
+	// Thumbnails of every visible window, averaged on the GPU
+	// (specs/008-window-snapshots); without that, the focus watcher's of the
+	// active window, scaled on the CPU, as in 1.0.0
+	var capturer *composite.Capturer
+	snap, err := snapshot.New(cfg.Behavior.SnapshotInterval, cfg.Appearance.Thumbnail.ScalingAlgorithm)
 	if err != nil {
-		log.Warn().Err(err).Msg("Composite unavailable, thumbnails will be disabled")
+		log.Info().Err(err).Msg("Snapshots on the GPU unavailable, the active window is captured on the CPU")
+		capturer, err = composite.NewCapturer(conn.Conn, conn.Root, cfg.Appearance.Thumbnail.ScalingAlgorithm)
+		if err != nil {
+			log.Warn().Err(err).Msg("Composite unavailable, thumbnails will be disabled")
+		}
+	} else {
+		defer snap.Close()
 	}
 
 	// Create Focus Watcher to track active windows
@@ -471,7 +481,7 @@ func run(cmd *cobra.Command, args []string) error {
 		switch e := event.(type) {
 		case xproto.KeyPressEvent:
 			var read []xgb.Event
-			selector, read = handleKeyPress(ctx, conn, e, selector, mruList, watcher)
+			selector, read = handleKeyPress(ctx, conn, e, selector, mruList, watcher, snap)
 			pending = append(read, pending...)
 		case xproto.PropertyNotifyEvent:
 			// Handle focus changes via PropertyNotify
@@ -491,7 +501,7 @@ func run(cmd *cobra.Command, args []string) error {
 // It returns the selector, to preserve its state, and the events read while
 // the switcher faded out, for the main loop to handle.
 func handleKeyPress(ctx context.Context, conn *x11.Connection, e xproto.KeyPressEvent, selector *ui.Selector,
-	mruList *mru.MRUList, watcher *focus.Watcher) (*ui.Selector, []xgb.Event) {
+	mruList *mru.MRUList, watcher *focus.Watcher, snap *snapshot.Snapshotter) (*ui.Selector, []xgb.Event) {
 	start := time.Now()
 
 	// Apply show delay if configured
@@ -521,11 +531,21 @@ func handleKeyPress(ctx context.Context, conn *x11.Connection, e xproto.KeyPress
 		windows = x11.SortWindowsByMRU(windows, mruOrder)
 	}
 
-	// Fill thumbnails from watcher cache
-	if watcher != nil {
-		for i := range windows {
-			// Try to get from cache first
-			if img, ok := watcher.GetThumbnail(xproto.Window(windows[i].ID)); ok {
+	// Fill thumbnails: the visible windows changed since their snapshot are
+	// captured first, waiting for them at most 20 ms (specs/008-window-snapshots)
+	if snap != nil {
+		snap.Refresh(20 * time.Millisecond)
+	}
+	for i := range windows {
+		id := xproto.Window(windows[i].ID)
+		if snap != nil {
+			if img, ok := snap.Thumbnail(id); ok {
+				windows[i].Preview = img
+				continue
+			}
+		}
+		if watcher != nil {
+			if img, ok := watcher.GetThumbnail(id); ok {
 				windows[i].Preview = img
 			}
 		}
@@ -554,6 +574,10 @@ func handleKeyPress(ctx context.Context, conn *x11.Connection, e xproto.KeyPress
 	if watcher != nil {
 		watcher.PauseSnapshots(true)
 		defer watcher.PauseSnapshots(false)
+	}
+	if snap != nil {
+		snap.Pause(true)
+		defer snap.Pause(false)
 	}
 	selected, err := selector.Show()
 

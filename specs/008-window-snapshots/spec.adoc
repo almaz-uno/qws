@@ -1,0 +1,172 @@
+= 008 — snapshots of every visible window
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-01
+:issue: 20
+:status: implemented
+
+== What and why
+
+Each card and tile of the switcher shows a thumbnail of its window. The
+focus watcher takes them: a snapshot of the active window every
+`snapshot_interval` — 10 s by default, 1 s in the configurations of ws1 and
+ws2 — and of a window 100 ms after it gets the focus. Every other window
+shows the snapshot of its last focus, however old.
+
+A snapshot costs 96–124 ms of a CPU on E1 for a window of 2560×1381
+(research): the X server copies 14 MB into a shared memory segment made for
+it, qws copies them again, swaps the channels pixel by pixel and scales them
+down in Go. At 1 s the service spends some 9 % of a CPU all day doing so.
+
+The author asked (2026-10-01) for snapshots that cost less, of every window,
+not only the active one.
+
+The specification is a delta to `develop` at `0016519` (1.0.0). Unchanged:
+thumbnails as images of at most 512×512 that both renderers draw, so the
+frames of `cpu`, and of `glx` at rest, are drawn from them as before; the MRU
+order and the tracking of the focus; the switcher.
+
+== Decisions
+
+Author, 2026-10-01:
+
+* thumbnails scaled on the GPU, in qws: the pixmap of a window bound as a
+  texture (`GLX_EXT_texture_from_pixmap`) — not scaled by RENDER in the X
+  server, which measured as cheap but leaves no way to live thumbnails;
+* every visible window, captured when its contents change (DAMAGE), each at
+  most once a `snapshot_interval`;
+* at an activation, the visible windows changed since their snapshot are
+  captured again before the first frame;
+* `snapshot_interval` defaults to 1 s;
+* live thumbnails — windows changing on the cards while the switcher is
+  shown — are a specification of their own, 009.
+
+Made on the way, 2026-10-01, confirmed by the author: K1 asks for a p95
+of 5 ms, not 2. The 2 came from a probe that captured every 50 ms, the GPU
+awake; captured once a second, the GPU wakes from idle for each snapshot,
+2.7 ms at the median, while the CPU waits on it and does nothing (research,
+"Measured on E1").
+
+== Behavior
+
+. *Which windows.* Every client window of `_NET_CLIENT_LIST` that is
+  viewable. A window the window manager unmaps — on a hidden workspace, a
+  hidden tab — has no contents in the X server: it keeps the last snapshot
+  taken while it was viewable, as now.
+. *When.* A window is captured when it becomes viewable, 100 ms later to let
+  it draw; when its contents change, at most once a `snapshot_interval`; and
+  at an activation, before the first frame, if it changed since its
+  snapshot — the activation waits for those at most 20 ms. Unchanged
+  windows are not captured again.
+. *How.* The pixmap of the window, named through Composite, is bound as a
+  texture in a GL context of the snapshots' own, on a thread of their own; a
+  shader averages it by area to at most 512×512; the thumbnail alone is read
+  back. The pixmap stays bound while the window keeps its size and stays
+  viewable.
+. *While the switcher is shown* no snapshots are taken, as since
+  specification 007, but for those of the activation.
+. *Without* GLX, `GLX_EXT_texture_from_pixmap` or a compositor, the
+  snapshots are those of 1.0.0: the active window, scaled on the CPU.
+. `appearance.thumbnail.scaling_algorithm` applies to the snapshots on the
+  CPU only; the GPU averages by area.
+. `behavior.snapshot_interval` defaults to 1 s instead of 10 s — a changed
+  default, a minor version.
+
+== Metrics
+
+Snapshots are logged at debug level, a record each: the window, its size,
+the path (GPU or CPU), the cause and the time taken.
+
+S1 — cost of a snapshot:: Wall time from binding the window to the thumbnail
+in memory, per window.
+
+S2 — idle CPU:: CPU time of the qws service over 10 minutes of the author's
+desktop on E1 without an activation, from `/proc/<pid>/stat`.
+
+S3 — freshness:: For a window changed and viewable, the time from its change
+to its snapshot.
+
+M1:: Activation latency, as in specification 001.
+
+== Acceptance criteria
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| Cost: S1 p95 ≤ 5 ms on E1 for a window of 2560×1381 on the GPU path,
+  against some 100 ms of 1.0.0.
+
+| K2
+| Idle CPU: S2 ≤ 0.5 % of a CPU on E1 with `snapshot_interval` 1 s, against
+  some 9 % of 1.0.0.
+
+| K3
+| Coverage: every viewable client window gets a thumbnail; a changed window
+  is captured within `snapshot_interval` + 0.2 s, one that becomes viewable
+  within 0.5 s. Log, a session on E1.
+
+| K4
+| Quality: the thumbnail equals the area average of the window computed on
+  the CPU within 1 per channel. Test in `pkg/glx` with an X display, GLX and a
+  compositor, skipped without them, as the GLX test of specification 001.
+
+| K5
+| Activation: M1 p50 on `glx` not worse than 1.0.0 by more than 3 ms; S1 of
+  specification 001.
+
+| K6
+| Fallback: without GLX or `texture_from_pixmap` the snapshots of 1.0.0 —
+  test forcing the fallback.
+
+| K7
+| `go vet ./...` and `go test ./...` pass.
+|===
+
+The stalls of the X server on E1 (specification 007, research) are counted
+for 10 minutes before and after, without a criterion: the snapshots of 1.0.0
+are suspected.
+
+== Results
+
+2026-10-01, E1; the measurements in `research.adoc`.
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | S1 p50 2.66 ms, p95 3.92 ms for a terminal of 2556×1357 changing now
+  and then; the first snapshot of a window, which names and binds its
+  pixmap, 12–20 ms.
+| K2 | 2.35 s of CPU in 601 s, 0.39 %, the active window changing every
+  second; 1.0.0 9.0 %.
+| K3 | Every viewable window captured within 15 ms of the start. In two runs
+  of S1, whose warm-up shows every window in turn, all 31 windows of i3
+  captured. `TestSchedule`: a settle after a change, at most once an
+  interval.
+| K4 | `TestGPUThumbnail`: within 1 of the area average on the CPU, exact for
+  a pixmap no larger than a thumbnail, and the new contents after the
+  pixmap is drawn anew and bound again; depths 24 and 32.
+| K5 | S1, 20 activations of 3 steps, the branch then 1.0.0: M1 warm p50
+  230.66 ms against 229.30 ms. The first pair, 1.0.0 first, gave 232.06
+  against 180.53, but 1.0.0 went from 163–211 ms to 101–131 ms in its
+  eighth activation, the time to list the windows — the same code — the
+  machine, not the snapshots.
+| K6 | `TestFallback`.
+| K7 | `go vet ./...`, `go test ./...`.
+|===
+
+The X server, said to name a window's pixmap the events had shown
+viewable, refused twice in a run of S1 while i3 switched workspaces; such a
+window is captured again a settle later, up to three times, not on the
+CPU.
+
+== Open decisions
+
+. Live thumbnails — a specification of its own.
+. A window never viewable in a session has no snapshot but its placeholder,
+  as now.
+. The stalls of the X server on E1 (section "Acceptance criteria") are still
+  to be counted, after the services are replaced.

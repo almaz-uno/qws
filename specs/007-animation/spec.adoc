@@ -3,7 +3,7 @@
 :toc-title: Contents
 :sectnums:
 :revdate: 2026-10-01
-:status: implemented 2026-10-01, merged (#18); K9 given by the author, K2 met but for 0.5 % of frames (section "Results")
+:status: implemented
 :issue: 17
 
 == What and why

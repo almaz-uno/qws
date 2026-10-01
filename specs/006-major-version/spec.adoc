@@ -3,7 +3,7 @@
 :toc-title: Contents
 :sectnums:
 :revdate: 2026-10-01
-:status: implemented 2026-10-01; K1, K2 met (section "Results"); changes the constitution, not the program — not released by itself
+:status: implemented
 :issue: 15
 
 == What and why
