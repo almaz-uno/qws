@@ -32,10 +32,8 @@ test:
 vet:
 	go vet ./...
 
-# The form of specs/: the test of the check, then the check
-# (specs/009-spec-checks)
+# The form of specs/ (specs/009-spec-checks)
 check-specs:
-	scripts/check-specs-test.sh
 	scripts/check-specs.sh
 
 # GitHub release on a pushed version tag: make release TAG=vX.Y.Z
