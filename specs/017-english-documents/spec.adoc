@@ -3,7 +3,7 @@
 :toc-title: Contents
 :sectnums:
 :revdate: 2026-10-01
-:status: draft
+:status: implemented
 :issue: 40
 
 == What and why
@@ -148,6 +148,30 @@ done
 | K6
 | Section "Language" of `specs/constitution.adoc` has the rule of section
   "Constitution", and the open question "Non-English documents" is gone.
+|===
+
+== Results
+
+2026-10-01, ws1 (Debian 12, bash 5.2.15, perl 5.36.0, Asciidoctor 2.0.26,
+go 1.26.0), the change on `f90abc7`.
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | `5 pkg/carousel/scenes_test.go` alone.
+| K2 | 307, 29, 4 and 1 lines added and removed in
+  `doc/optimization.asciidoc`, `doc/font-fallback.md`,
+  `doc/windows-switcher.asciidoc` and `doc/configuration.asciidoc`; the
+  number of lines of each is that of `f90abc7`. The default algorithm, Myers,
+  pairs some blank lines between translated ones differently and counts 315
+  in `doc/optimization.asciidoc`; histogram counts the lines that differ.
+| K3 | Nothing printed.
+| K4 | Exit status 0 for each of the five.
+| K5 | `git diff --quiet` exits 0; `make check-specs`, `go vet ./...` and
+  `go test ./...` pass, the tests run without `DISPLAY`, so the ones that
+  need X skip, as in workflow `test`.
+| K6 | Sections "Language" and "What the constitution does not regulate".
 |===
 
 == Open decisions
