@@ -3,7 +3,7 @@
 :toc-title: Contents
 :sectnums:
 :revdate: 2026-10-01
-:status: draft
+:status: implemented
 :issue: 21
 
 == What and why
@@ -169,7 +169,7 @@ specification of its own".
 
 | K1
 | `make check-specs` passes on the branch: the test, then the check of
-  specifications 001–007 and 009.
+  specifications 001–009.
 
 | K2
 | `scripts/check-specs-test.sh` covers each rule of section "Behavior": a
@@ -194,4 +194,31 @@ specification of its own".
   and "Stack and layout" name `make check-specs`, and the open question "SDD
   framework" is gone; `specs/README.adoc` has the rule on `:status:` of
   section "`specs/README.adoc`".
+|===
+
+== Results
+
+2026-10-01, ws1 (Debian 12, bash 5.2.15) and GitHub Actions.
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | `make check-specs` at `2d11248`: both scripts exit 0. Before the
+  statuses were rewritten, the check of `develop` named the six of 001–007,
+  and nothing else.
+| K2 | `scripts/check-specs-test.sh`, nine cases: `valid`, `stray-file`,
+  `bad-name`, `same-number`, `no-spec`, `free-status`, `no-results`,
+  `bad-issue`, `status-in-body`.
+| K3 | `mutate.sh`: nine mutants — a stray `.adoc` let through, any number of
+  digits, numbers not remembered, a missing `spec.adoc` not reported, any
+  status accepted, "Results" not required, `:issue:` not checked, the
+  attributes read from the whole document, exit status 0 — all killed.
+| K4 | Workflow `test` on `2d11248`: run 36875442104 (push) and 36875447197
+  (pull request), step `make check-specs` passed. Run 36875245643, the pull
+  request at `a9d450f`, failed at that step on the merge with `develop`,
+  which had just received 008 with "not merged" in its status: the case of
+  section "Behavior", two branches meeting on `develop`, caught in CI.
+| K5 | Sections "Specifications", "Verifiability" and "Stack and layout" of
+  the constitution; "Layout" and "Rules" of `specs/README.adoc`.
 |===
