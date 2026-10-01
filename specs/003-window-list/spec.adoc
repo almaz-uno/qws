@@ -4,7 +4,7 @@
 :sectnums:
 :revdate: 2026-10-01
 :issue: 37
-:status: draft
+:status: implemented
 
 == What and why
 
@@ -88,6 +88,36 @@ M1:: Activation latency, as in specification 001.
 
 | K6
 | `go vet ./...`, `go test ./...`.
+|===
+
+== Results
+
+2026-10-01, E1, 35 windows; the measurements in `research.adoc`.
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | `TestModelMatchesQueries`: for the 12 combinations of the filters, the
+  model's list against the queries' on the windows of the display — the
+  same windows in the same order, names, workspaces, urgency, icons pixel
+  for pixel; windows whose title changed between two queries left out.
+| K2 | `TestIconByHeaders` on 13 properties made in the test, among them
+  several sizes, a tie, invalid and too large sizes, a short property;
+  `TestIconByHeadersOfWindows` on every window of the display.
+| K3 | `TestModelFollows`: a name, the state for skip-taskbar and for
+  minimized, the urgency hint, an icon, a new window, a window gone, the
+  current desktop and the names of the desktops, each reaching the next
+  list.
+| K4 | The probe, 100 lists: p95 3.20 ms. S1, 20 activations: the list itself
+  — the "Window list" record — p50 0.28 ms; of the 19 after the first, 18
+  under 3 ms and one 5.20 ms, which p95 of 19 is; the first, after the
+  warm-up of S1 changed the focus of every window, 41.88 ms, the model
+  taking in their events.
+| K5 | S1, the branch then 1.2.0: M1 warm p50 123.32 ms against 345.38 ms;
+  `list_ms`, which holds the fresh snapshots of an activation too, 10.01
+  against 261.47 ms.
+| K6 | `go vet ./...`, `go test ./...`.
 |===
 
 == Open decisions
