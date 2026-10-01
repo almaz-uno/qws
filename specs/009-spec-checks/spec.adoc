@@ -125,9 +125,9 @@ it checks.
 
 == Existing specifications
 
-`:status:` of 001, 002, 004, 005, 006 and 007 becomes `implemented`. What the
-old status said beyond that is either in their section "Results" or held by
-git and GitHub:
+`:status:` of 001, 002, 004, 005, 006, 007 and 008 becomes `implemented`.
+What the old status said beyond that is either in their section "Results" or
+held by git and GitHub:
 
 [cols="1,4,4"]
 |===
@@ -145,11 +145,21 @@ git and GitHub:
 | "Results"; section "What and why"
 | 007 | 2026-10-01, merged (#18); K9 by the author, K2 but for 0.5 % of frames
 | "Results", K2 and K9; merged as #18
+| 008 | 2026-10-01, not merged; K1–K7 met; the stalls to count after the
+  services are replaced
+| "Results"; merged as #22; the stalls — its open decisions
 |===
 
-Specification 008 is on branch `issue/qws#20-window-snapshots`, not merged
-when this is written. Whichever of the two pull requests is merged second
-brings 008 to the rule: the check fails on it until then.
+Specification 008 was merged (#22) while this change was under way, with
+"not merged" in its status — the fourth status of the kind. This change,
+merged second, brings it to the rule; the check failed on it until then. The
+count of the X server's stalls its status promised was in no section, and
+moves to its open decisions.
+
+The open decisions of 008 named "specification 009" for live thumbnails, a
+number this change already had. A number is given when work starts
+(`specs/README.adoc`, "Layout"), not reserved ahead: the reference becomes "a
+specification of its own".
 
 == Acceptance criteria
 
