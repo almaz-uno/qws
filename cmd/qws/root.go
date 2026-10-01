@@ -415,6 +415,15 @@ func run(cmd *cobra.Command, args []string) error {
 		defer snap.Close()
 	}
 
+	// The windows of an activation from a model kept by events
+	// (specs/003-window-list); without it, collected at each activation
+	model, err := x11.NewModel()
+	if err != nil {
+		log.Info().Err(err).Msg("Window model unavailable, the list is collected at each activation")
+	} else {
+		defer model.Close()
+	}
+
 	// Create Focus Watcher to track active windows
 	watcher, err := focus.NewWatcher(ctx, conn.Conn, conn.Root, mruList, capturer, cfg.Behavior.SnapshotInterval)
 	if err != nil {
@@ -481,7 +490,7 @@ func run(cmd *cobra.Command, args []string) error {
 		switch e := event.(type) {
 		case xproto.KeyPressEvent:
 			var read []xgb.Event
-			selector, read = handleKeyPress(ctx, conn, e, selector, mruList, watcher, snap)
+			selector, read = handleKeyPress(ctx, conn, e, selector, mruList, watcher, snap, model)
 			pending = append(read, pending...)
 		case xproto.PropertyNotifyEvent:
 			// Handle focus changes via PropertyNotify
@@ -501,7 +510,7 @@ func run(cmd *cobra.Command, args []string) error {
 // It returns the selector, to preserve its state, and the events read while
 // the switcher faded out, for the main loop to handle.
 func handleKeyPress(ctx context.Context, conn *x11.Connection, e xproto.KeyPressEvent, selector *ui.Selector,
-	mruList *mru.MRUList, watcher *focus.Watcher, snap *snapshot.Snapshotter) (*ui.Selector, []xgb.Event) {
+	mruList *mru.MRUList, watcher *focus.Watcher, snap *snapshot.Snapshotter, model *x11.Model) (*ui.Selector, []xgb.Event) {
 	start := time.Now()
 
 	// Apply show delay if configured
@@ -516,7 +525,19 @@ func handleKeyPress(ctx context.Context, conn *x11.Connection, e xproto.KeyPress
 		IgnoreSkipTaskbar: cfg.Windows.IgnoreSkipTaskbar,
 		SortMinimizedLast: cfg.Windows.SortMinimizedLast,
 	}
-	windows, err := conn.GetWindowListFiltered(filterOpts)
+	var windows []x11.WindowInfo
+	var err error
+	listStart := time.Now()
+	if model != nil {
+		windows, err = model.List(filterOpts)
+	} else {
+		windows, err = conn.GetWindowListFiltered(filterOpts)
+	}
+	log.Debug().
+		Bool("model", model != nil).
+		Int("windows", len(windows)).
+		Dur("ms", time.Since(listStart)).
+		Msg("Window list")
 	if err != nil {
 		return selector, nil
 	}

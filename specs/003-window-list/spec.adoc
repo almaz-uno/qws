@@ -1,0 +1,126 @@
+= 003 — the window list
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-01
+:issue: 37
+:status: implemented
+
+== What and why
+
+At an activation qws collects the list of windows before it draws: for
+every client window of `_NET_CLIENT_LIST` it reads its name, its state, its
+desktop and the names of the desktops, its icon, its class when it has no
+icon, and its hints — a request and a wait for its reply each, window after
+window. On E1 that takes 152–182 ms of the 230 ms between the key and the
+first frame (research). Specification 001 left it to a specification of its
+own, this one (author's decision, 2026-09-30); the author made it the first
+priority (2026-10-01).
+
+The specification is a delta to `develop` at `f90abc7` (1.2.0). Unchanged:
+the windows listed, their order, names, workspaces, icons and urgency, the
+filters of the configuration — the list is the same list, collected
+elsewhere and earlier; the MRU order, which the focus watcher keeps.
+
+== Decisions
+
+Author, 2026-10-01:
+
+* a model of the windows kept up to date by events — the list of an
+  activation is read from memory, not from the X server;
+* `_NET_WM_ICON` read by its headers: the sizes first, then the one icon
+  chosen, not all the sizes a window offers.
+
+== Behavior
+
+. *The model.* An X connection of its own follows `_NET_CLIENT_LIST`,
+  `_NET_DESKTOP_NAMES` and `_NET_CURRENT_DESKTOP` on the root, and on every
+  client window the properties the list is made of: `_NET_WM_NAME` and
+  `WM_NAME`, `_NET_WM_STATE`, `_NET_WM_DESKTOP`, `_NET_WM_ICON`, `WM_CLASS`,
+  `WM_HINTS`. A change of one, `PropertyNotify`, reads that one again. A new
+  window is read in full when it appears in the client list.
+. *An activation* asks the model for the list: one round trip on the
+  model's connection, so that the events the X server sent before it are
+  taken in first, then the list from memory, with the filters and the sort
+  of today.
+. *Icons.* Of the icons of `_NET_WM_ICON`, their sizes are read first,
+  piece by piece; the one the switcher shows — the same choice as today,
+  nearest to 48 pixels — is read alone. A window without one has the icon
+  of its class looked up on disk once per class for the life of the process,
+  not at every activation.
+. *Without* the model — it failed to start — the list is collected at the
+  activation, as today.
+
+== Metrics
+
+M1.list:: The time to collect the list at an activation, `list_ms` of the
+frame records of specification 001.
+
+M1:: Activation latency, as in specification 001.
+
+== Acceptance criteria
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| The same list: for every filter option, the model gives the windows,
+  order, names, workspaces, urgency and icons — pixel for pixel — that the
+  queries of today give at the same moment. Test with an X display, against
+  the windows there are, skipped without one.
+
+| K2
+| The same icon: read by its headers, the icon of a window equals the one
+  read from the whole property, for every window of the display, and for
+  synthetic properties — several sizes, invalid sizes, a short property.
+  Tests in `pkg/x11`.
+
+| K3
+| The model follows: a change of each property, a new window and a window
+  gone reach the next list. Unit test with a fake X server.
+
+| K4
+| M1.list p95 ≤ 5 ms on E1, against 152–182 ms; S1 of specification 001.
+
+| K5
+| M1 p50 on E1 lower by at least 100 ms; S1.
+
+| K6
+| `go vet ./...`, `go test ./...`.
+|===
+
+== Results
+
+2026-10-01, E1, 35 windows; the measurements in `research.adoc`.
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | `TestModelMatchesQueries`: for the 12 combinations of the filters, the
+  model's list against the queries' on the windows of the display — the
+  same windows in the same order, names, workspaces, urgency, icons pixel
+  for pixel; windows whose title changed between two queries left out.
+| K2 | `TestIconByHeaders` on 13 properties made in the test, among them
+  several sizes, a tie, invalid and too large sizes, a short property;
+  `TestIconByHeadersOfWindows` on every window of the display.
+| K3 | `TestModelFollows`: a name, the state for skip-taskbar and for
+  minimized, the urgency hint, an icon, a new window, a window gone, the
+  current desktop and the names of the desktops, each reaching the next
+  list.
+| K4 | The probe, 100 lists: p95 3.20 ms. S1, 20 activations: the list itself
+  — the "Window list" record — p50 0.28 ms; of the 19 after the first, 18
+  under 3 ms and one 5.20 ms, which p95 of 19 is; the first, after the
+  warm-up of S1 changed the focus of every window, 41.88 ms, the model
+  taking in their events.
+| K5 | S1, the branch then 1.2.0: M1 warm p50 123.32 ms against 345.38 ms;
+  `list_ms`, which holds the fresh snapshots of an activation too, 10.01
+  against 261.47 ms.
+| K6 | `go vet ./...`, `go test ./...`.
+|===
+
+== Open decisions
+
+. The icons looked up on disk by class are kept for the life of the
+  process: an application installed later shows its icon after a restart.

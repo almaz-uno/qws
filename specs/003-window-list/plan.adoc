@@ -1,0 +1,39 @@
+= 003 — plan
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-01
+
+== Approach
+
+`pkg/x11` gets a model of the client windows. It reads properties through a
+small interface, `properties`, implemented on an xgb connection of its own
+and, in tests, by a fake server, so that its following of `PropertyNotify`
+can be tested without X. It handles its events on a goroutine of its own
+under a mutex; `List` takes the mutex, makes one round trip, handles the
+events that came before the reply, and builds the list as
+`GetWindowListFiltered` does — the same filters, the same fallbacks, in the
+same order.
+
+The icon is chosen by the same score as `findBestIcon`, factored out of it,
+over the headers read piece by piece; the pixels of the one chosen are
+decoded as `findBestIcon` decodes them. The icons found on disk by class
+are kept in a map, for the model and for `GetWindowListFiltered` alike.
+
+== Files
+
+[cols="2,5"]
+|===
+| File | What changes
+
+| `pkg/x11/model.go`
+| New: the model, its events, `List`.
+
+| `pkg/x11/windows.go`
+| The score of an icon factored out; the icon read by its headers; the
+  icons by class kept.
+
+| `cmd/qws/root.go`
+| The model made at the start; the list of an activation from it, else as
+  today.
+|===
