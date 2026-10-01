@@ -69,7 +69,7 @@ func (s *Selector) fadeAt(now time.Time) carousel.Fade {
 	if s.fade.out {
 		e = s.anim.hide
 	}
-	return e.look(s.fade.level.at(now), overlayZoom)
+	return e.look(s.fade.level.at(now), s.anim.overlayZoom)
 }
 
 // fadesOut reports whether the overlay disappears by an animation

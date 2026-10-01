@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -16,8 +17,8 @@ func TestParseAnimation(t *testing.T) {
 	o, warnings := parseAnimation(a)
 	both := effects{fade: true, zoom: true}
 	want := animationOptions{
-		duration: 150 * time.Millisecond, step: 150 * time.Millisecond,
-		show: both, hide: both, hover: both,
+		duration: 150 * time.Millisecond, step: 150 * time.Millisecond, hoverDuration: 150 * time.Millisecond,
+		show: both, hide: both, hover: both, overlayZoom: 0.92, hoverZoom: 1.05,
 	}
 	if o != want || len(warnings) != 0 {
 		t.Errorf("defaults: %+v, %v; want %+v, no warning", o, warnings, want)
@@ -29,8 +30,9 @@ func TestParseAnimation(t *testing.T) {
 	a.Step = false
 	o, warnings = parseAnimation(a)
 	want = animationOptions{
-		duration: 150 * time.Millisecond,
-		show:     effects{fade: true, zoom: true}, hover: effects{zoom: true},
+		duration: 150 * time.Millisecond, hoverDuration: 150 * time.Millisecond,
+		show: effects{fade: true, zoom: true}, hover: effects{zoom: true},
+		overlayZoom: 0.92, hoverZoom: 1.05,
 	}
 	if o != want {
 		t.Errorf("options %+v, want %+v", o, want)
@@ -40,8 +42,8 @@ func TestParseAnimation(t *testing.T) {
 	}
 
 	for _, off := range []config.Animation{
-		{Enabled: false, Duration: 150 * time.Millisecond, Step: true, Show: []string{"fade"}},
-		{Enabled: true, Duration: 0, Step: true, Show: []string{"fade"}},
+		{Enabled: false, Duration: 150 * time.Millisecond, Step: true, Show: []string{"fade"}, OverlayZoom: 0.92, HoverZoom: 1.05},
+		{Enabled: true, Duration: 0, Step: true, Show: []string{"fade"}, OverlayZoom: 0.92, HoverZoom: 1.05},
 	} {
 		if o, warnings := parseAnimation(off); o != (animationOptions{}) || len(warnings) != 0 {
 			t.Errorf("%+v: %+v, %v; want nothing moving, no warning", off, o, warnings)
@@ -58,6 +60,7 @@ func TestParseAnimation(t *testing.T) {
 
 // TestLook checks the effects at the ends of a level: gone and shown
 func TestLook(t *testing.T) {
+	const overlayZoom, hoverZoom = 0.92, 1.05
 	both := effects{fade: true, zoom: true}
 	if f := both.look(0, overlayZoom); f.Alpha != 0 || f.Scale != overlayZoom {
 		t.Errorf("both at 0: %+v", f)
@@ -69,5 +72,89 @@ func TestLook(t *testing.T) {
 	}
 	if f := (effects{zoom: true}).look(0.5, hoverZoom); f.Alpha != 1 || f.Scale <= 1 || f.Scale >= hoverZoom {
 		t.Errorf("zoom alone half way: %+v", f)
+	}
+}
+
+// Criteria of specs/014-appearance-keys
+
+// TestHoverDuration checks K3: the hover takes the duration of every
+// animation by default and its own when set; a negative one gives a warning
+// and is ignored; with the animation off the hover does not move either
+func TestHoverDuration(t *testing.T) {
+	a := config.Default().Appearance.Animation
+	a.Duration = 300 * time.Millisecond
+	if o, _ := parseAnimation(a); o.hoverDuration != 300*time.Millisecond {
+		t.Errorf("by default %v, want that of duration, 300ms", o.hoverDuration)
+	}
+
+	a.HoverDuration = 80 * time.Millisecond
+	o, warnings := parseAnimation(a)
+	if o.hoverDuration != 80*time.Millisecond || o.duration != 300*time.Millisecond || o.step != 300*time.Millisecond {
+		t.Errorf("hover %v, duration %v, step %v; want 80ms, 300ms, 300ms", o.hoverDuration, o.duration, o.step)
+	}
+	if len(warnings) != 0 {
+		t.Errorf("warnings %v, want none", warnings)
+	}
+
+	a.HoverDuration = -time.Second
+	o, warnings = parseAnimation(a)
+	if o.hoverDuration != 300*time.Millisecond || len(warnings) != 1 || !strings.Contains(warnings[0], "hover_duration") {
+		t.Errorf("negative: %v, %v; want that of duration and one warning", o.hoverDuration, warnings)
+	}
+
+	a.HoverDuration = 80 * time.Millisecond
+	for _, off := range []func(*config.Animation){
+		func(a *config.Animation) { a.Enabled = false },
+		func(a *config.Animation) { a.Duration = 0 },
+	} {
+		b := a
+		off(&b)
+		if o, _ := parseAnimation(b); o != (animationOptions{}) {
+			t.Errorf("%+v: %+v, want nothing moving", b, o)
+		}
+	}
+
+	// The levels of the hover move by it
+	s := &Selector{anim: animationOptions{hoverDuration: 80 * time.Millisecond}, hoverIndex: 2}
+	now := time.Unix(1000, 0)
+	s.setHover(now, true)
+	if m := s.hover.levels[2]; m.d != 80*time.Millisecond || !m.moving(now.Add(79*time.Millisecond)) || m.moving(now.Add(80*time.Millisecond)) {
+		t.Errorf("level of the hovered: %+v, want a motion of 80ms", m)
+	}
+}
+
+// TestZoomFactors checks K4: the factors of the keys are the scales the zoom
+// of the overlay and of the hover start from; a factor that is not a
+// positive number gives a warning and is its default
+func TestZoomFactors(t *testing.T) {
+	a := config.Default().Appearance.Animation
+	a.OverlayZoom, a.HoverZoom = 0.5, 1.5
+	o, warnings := parseAnimation(a)
+	if o.overlayZoom != 0.5 || o.hoverZoom != 1.5 || len(warnings) != 0 {
+		t.Errorf("factors %v, %v, warnings %v; want 0.5, 1.5, none", o.overlayZoom, o.hoverZoom, warnings)
+	}
+	s := &Selector{anim: o}
+	if f := s.hoverLook(0); f.Scale != 1.5 || f.Alpha != 0 {
+		t.Errorf("hover at 0: %+v, want scale 1.5, alpha 0", f)
+	}
+	now := time.Unix(1000, 0)
+	s.fade.active = true
+	s.fade.level.rest(0)
+	if f := s.fadeAt(now); f.Scale != 0.5 || f.Alpha != 0 {
+		t.Errorf("appearance at 0: %+v, want scale 0.5, alpha 0", f)
+	}
+	s.fade.out = true
+	s.fade.level.rest(0.5)
+	if f := s.fadeAt(now); f.Scale != 0.75 || f.Alpha != 0.5 {
+		t.Errorf("disappearance half way: %+v, want scale 0.75, alpha 0.5", f)
+	}
+
+	for _, bad := range []float64{0, -1, math.NaN(), math.Inf(1)} {
+		a.OverlayZoom, a.HoverZoom = bad, bad
+		o, warnings := parseAnimation(a)
+		if o.overlayZoom != 0.92 || o.hoverZoom != 1.05 || len(warnings) != 2 ||
+			!strings.Contains(warnings[0], "overlay_zoom") || !strings.Contains(warnings[1], "hover_zoom") {
+			t.Errorf("factor %v: %v, %v, warnings %q; want the defaults and two warnings", bad, o.overlayZoom, o.hoverZoom, warnings)
+		}
 	}
 }

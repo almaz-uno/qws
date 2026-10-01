@@ -40,6 +40,9 @@ appearance:
     show: [fade, zoom]     # how the switcher appears: fade, zoom, both, or none
     hide: [fade, zoom]     # how it disappears
     hover: [fade, zoom]    # how the hover frame comes and goes
+    hover_duration: 0s     # of the hover; 0: that of duration
+    overlay_zoom: 0.92     # the scale the switcher zooms from and to
+    hover_zoom: 1.05       # the scale the hover frame zooms from and to
 ```
 
 `cpu` changes its picture at once whatever these keys say.
@@ -84,7 +87,7 @@ The carousel displays window thumbnails in a 3D perspective view.
 - **Keyboard Navigation**: Arrow keys, Tab, Enter, and Escape support
 - **Mouse Support**: Hover to highlight windows (orange glow), click to select
 - **Always On Top**: Overlay window with no WM decorations
-- **Header**: the hostname in large letters and the qws version at the top left of the overlay
+- **Header**: the hostname in large letters and the qws version at the top left of the overlay; `appearance.header.enabled: false` hides it
 - **Configuration**: Flexible config via YAML file, environment variables, or CLI flags
 - **Window Filtering**: Filter by desktop, skip_taskbar state, or minimized state
 - **Behavior Control**: Configurable snapshot interval and show delay
