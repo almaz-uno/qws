@@ -84,17 +84,17 @@ const (
 
 // X11 keysyms for common keys
 const (
-	XK_Tab     = 0xFF09
-	XK_grave   = 0x0060 // backtick/grave accent
-	XK_space   = 0x0020
-	XK_Escape  = 0xFF1B
-	XK_Return  = 0xFF0D
-	XK_Left    = 0xFF51
-	XK_Up      = 0xFF52
-	XK_Right   = 0xFF53
-	XK_Down    = 0xFF54
-	XK_a       = 0x0061
-	XK_z       = 0x007A
+	XK_Tab    = 0xFF09
+	XK_grave  = 0x0060 // backtick/grave accent
+	XK_space  = 0x0020
+	XK_Escape = 0xFF1B
+	XK_Return = 0xFF0D
+	XK_Left   = 0xFF51
+	XK_Up     = 0xFF52
+	XK_Right  = 0xFF53
+	XK_Down   = 0xFF54
+	XK_a      = 0x0061
+	XK_z      = 0x007A
 	// Function keys
 	XK_F1  = 0xFFBE
 	XK_F2  = 0xFFBF
@@ -248,12 +248,12 @@ func (kg *KeyGrabber) GrabKeys(modifier, key, backward, workspaceModifier string
 	// Capture: modifier+backward+key (e.g., Alt+Shift+Tab)
 	for _, mod := range ignoreMods {
 		err := xproto.GrabKeyChecked(kg.conn,
-			true,                       // owner_events
-			kg.root,                    // grab_window
-			modMask|backwardMask|mod,   // modifiers
-			keycode,                    // key
-			xproto.GrabModeAsync,       // pointer_mode
-			xproto.GrabModeAsync,       // keyboard_mode
+			true,                     // owner_events
+			kg.root,                  // grab_window
+			modMask|backwardMask|mod, // modifiers
+			keycode,                  // key
+			xproto.GrabModeAsync,     // pointer_mode
+			xproto.GrabModeAsync,     // keyboard_mode
 		).Check()
 		if err != nil {
 			kg.UngrabAll()
@@ -264,12 +264,12 @@ func (kg *KeyGrabber) GrabKeys(modifier, key, backward, workspaceModifier string
 	// Capture: modifier+workspace+key (e.g., Alt+Ctrl+Tab)
 	for _, mod := range ignoreMods {
 		err := xproto.GrabKeyChecked(kg.conn,
-			true,                       // owner_events
-			kg.root,                    // grab_window
-			modMask|workspaceMask|mod,  // modifiers
-			keycode,                    // key
-			xproto.GrabModeAsync,       // pointer_mode
-			xproto.GrabModeAsync,       // keyboard_mode
+			true,                      // owner_events
+			kg.root,                   // grab_window
+			modMask|workspaceMask|mod, // modifiers
+			keycode,                   // key
+			xproto.GrabModeAsync,      // pointer_mode
+			xproto.GrabModeAsync,      // keyboard_mode
 		).Check()
 		if err != nil {
 			kg.UngrabAll()
@@ -280,12 +280,12 @@ func (kg *KeyGrabber) GrabKeys(modifier, key, backward, workspaceModifier string
 	// Capture: modifier+workspace+backward+key (e.g., Alt+Ctrl+Shift+Tab)
 	for _, mod := range ignoreMods {
 		err := xproto.GrabKeyChecked(kg.conn,
-			true,                                 // owner_events
-			kg.root,                              // grab_window
+			true,    // owner_events
+			kg.root, // grab_window
 			modMask|workspaceMask|backwardMask|mod, // modifiers
-			keycode,                              // key
-			xproto.GrabModeAsync,                 // pointer_mode
-			xproto.GrabModeAsync,                 // keyboard_mode
+			keycode,              // key
+			xproto.GrabModeAsync, // pointer_mode
+			xproto.GrabModeAsync, // keyboard_mode
 		).Check()
 		if err != nil {
 			kg.UngrabAll()

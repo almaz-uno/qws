@@ -144,4 +144,3 @@ func TestMultiFallbackFace_SpecificGlyph(t *testing.T) {
 		t.Error("Glyph mask is empty")
 	}
 }
-
