@@ -203,7 +203,7 @@ fontPaths = []string{
 }
 ----
 
-Шрифты загружаются с поддержкой автоматического fallback на уровне глифов — если символ отсутствует в основном шрифте, используется следующий шрифт в цепочке.
+Fonts are loaded with automatic glyph-level fallback — if a character is missing from the primary font, the next font in the chain is used.
 
 .Configuration example
 [source,yaml]
