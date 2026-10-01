@@ -1,0 +1,25 @@
+= 015 — plan
+:toc: left
+:toc-title: Contents
+:revdate: 2026-10-01
+
+[cols="2,5"]
+|===
+| File | What changes
+
+| `internal/config/config.go`
+| `readJoinedKeys`, which merged each joined key into the key it stands for,
+  becomes `joinedKeyWarnings`, which only reports them; `nestedMap`, used by
+  the merge alone, goes. `joinedKeys` and the warning for a file with both
+  forms stay.
+
+| `internal/config/config_test.go`
+| `TestJoinedKeys`: the joined keys read nothing; the warnings name the key
+  to use.
+
+| `doc/configuration.asciidoc`
+| The note on files written by `config init` before 002.
+|===
+
+The order: the test of K1 is checked against the merge of 1.2.0 (K4) on a
+copy of the package, outside the repository.

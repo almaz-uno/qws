@@ -1,0 +1,120 @@
+= 015 — joined configuration keys no longer read
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-01
+:status: draft
+:issue: 43
+
+== What and why
+
+Specification 002 made `qws config init` write multi-word keys with
+underscores, as qws reads them, and kept reading the joined keys earlier
+builds had written — `snapshotinterval` as `snapshot_interval` — with a
+warning naming the key to use. It left open "whether joined keys stop being
+read in a later version, once warnings have had time to be seen". The author
+decides to stop reading them (2026-10-01); the author's own configurations
+have been renamed.
+
+002 is in every release — its last commit, `0290ab7`, is in 0.1.0 — so no
+release wrote joined keys, only the builds before the first did. Every
+release, 0.1.0 to 1.2.0, reads them.
+
+The specification is a delta to `develop` at `f90abc7` (1.2.0). Unchanged:
+the keys with underscores, the environment variables and the flags, the
+precedence of the sources; what `config init` and `config show` write; the
+warning when a file has a key in both forms.
+
+== Decisions
+
+Author, 2026-10-01: joined keys are no longer read.
+
+Made on the way, 2026-10-01, for the author to confirm:
+
+* *Not read*: a joined key gives the key it stands for no value; that key
+  takes its value from the other sources or its default, as any key qws
+  does not know (constitution, "Configuration and user data").
+* *Reported with a warning*, one per joined key, naming the key to use:
+  `configuration key keybindings.workspacemodifier is no longer read: rename
+  it to keybindings.workspace_modifier`. Not an error: qws runs as a
+  service, and a configuration 1.2.0 read that keeps qws from starting
+  leaves no switcher until the file is edited, while a warning leaves one
+  with the default and the name to fix in the log; `qws config show` prints
+  it on the terminal. Not nothing: a value falling back to its default
+  without a word is what 002 was written against.
+* *The joined keys stay derived from the fields* (`joinedKeys` of 002), not
+  listed: the 17 of 002 and the joined forms of the multi-word keys added
+  since — `hover_duration`, `overlay_zoom` and `hover_zoom` of
+  specification 014 — 20 in all. No version wrote those joined, but a
+  hand-written `hoverduration` is the same mistake and gets the same
+  message.
+* *A file with both forms* is read as before: the key with underscores, and
+  a warning that the joined one is ignored.
+
+== Behavior
+
+. *A joined key in the file* — a key whose path has a multi-word name
+  joined, as `config init` wrote it before 002 — is not read. qws logs a
+  warning for it: the key is no longer read, rename it to the key with
+  underscores.
+. *A file with both* the joined and the underscored form of a key: the
+  underscored one is read, and the warning says the joined one is ignored,
+  as in 002.
+. *Everything else* is read as by 1.2.0.
+
+=== Existing configurations
+
+* A file with joined keys: their values no longer apply. Each key they stand
+  for takes its default, unless the same file, an environment variable or a
+  flag sets it; a warning per joined key names the key to use. For example,
+  `workspacemodifier: Super` gave `Super` under 1.2.0 and gives `Ctrl` now.
+* A file written by `config init` of any release, or by hand with
+  underscores, is read as before, without a warning.
+* Environment variables and flags never had joined names (002); unchanged.
+
+=== The release
+
+By the constitution ("Releases and versions") the change is incompatible: a
+configuration the earlier releases read is not read the same way. The
+release that contains it is the major version 2.0.0 only by the author's
+agreement; without it, it goes out as a minor version.
+
+== Acceptance criteria
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| A file with every key joined: no joined key is read — every key with a
+  multi-word name at its default, every one-word key read — and one warning
+  per joined key, 20, saying it is no longer read and naming the key to
+  use. A file with `snapshotinterval: 7s` alone gives the default and that
+  warning, word for word. `TestJoinedKeys` in `internal/config`.
+
+| K2
+| A file with both forms: the key with underscores is read, and one warning
+  says the joined one is ignored. `TestJoinedKeys`.
+
+| K3
+| What `config init` writes is read back as it was, without a warning.
+  `TestRoundTrip`, `TestTagNames`.
+
+| K4
+| The test of K1 fails against the reading of 1.2.0: a copy of
+  `internal/config` with the merge of the joined keys put back fails
+  `TestJoinedKeys`.
+
+| K5
+| `qws config show --config <file>` with `workspacemodifier: Super` and
+  both forms of `snapshot_interval` prints `workspace_modifier: Ctrl`, the
+  value of `snapshot_interval`, and the two warnings.
+
+| K6
+| `go vet ./...`, `go test ./...` and `make check-specs` pass.
+|===
+
+== Open decisions
+
+. The version of the release that contains the change: 2.0.0 by the
+  author's agreement, otherwise a minor version (section "The release").
