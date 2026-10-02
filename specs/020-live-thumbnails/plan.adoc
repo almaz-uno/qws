@@ -58,17 +58,25 @@ sooner than the interval divided by the number of windows taking passes —
 waiting, or passed within the interval — after the one before it, the
 `spread` of the probe; each followed by a fence and a flush. Counting only
 the windows waiting, a window passed alone would hold the pass of another
-back by a whole interval, and its lag past the bound of K7. While frames
-come one after another — one ended less than 10 ms ago — a pass due waits
-for `EndFrame`, which wakes the loop, and is made right after the frame,
-in the pause before the next, or once it has waited 10 ms: passes at any
-moment ran beside a frame on the GPU in about one case in six, and
-`BenchmarkLiveBeside` found 2.2–2.5 % of the frames presented in more than
-2 ms with them, 0.2–0.9 % with the passes after the frames, 0.04–0.13 %
-for the clients alone (research). After a pass is
-published the snapshotter tells the selector (below). Windows changed
-since their snapshot when live begins wait for a pass from the time they
-changed.
+back by a whole interval, and its lag past the bound of K7.
+
+*Passes in the pauses.* While frames come one after another — the last two
+ended less than 10 ms apart, the last less than 10 ms ago — a pass due
+less than 4 ms before the next frame ends, by the period of the last two,
+waits for that end: `EndFrame` wakes the loop, and the pass runs on the GPU
+in the pause after the frame. A pass made whenever due ran beside a frame
+about one time in six. `BenchmarkLiveBeside`, the probe of "Beside the
+frames" with the code of qws: with one window changing 50 times a second,
+the frames presented in more than 2 ms were 0.57–0.75 % with passes
+whenever due, 0.13 % with them in the pauses, 0–0.18 % with none, for a
+lag at p95 of 40.2–40.4 ms against 39.1–39.7; with four windows 30 times a
+second, 1.8–3.4 % against 0.48–0.66 %, the lag 46.7–47.0 ms against
+39.7–40.7 (research, "Passes in the pauses"). Every pass right after a
+frame, as first made, cost the lag a period and more: 60.9–61.8 ms at p95
+with four windows. At rest no frame comes, and a pass goes when due. After
+a pass is published the snapshotter tells the selector (below). Windows
+changed since their snapshot when live begins wait for a pass from the
+time they changed.
 
 *The pause of 011.* `Pause` stays around an activation, as in 1.3.1, and
 stops the snapshots on change only: between `SetLive(overlay)` and

@@ -61,7 +61,8 @@ type Snapshotter struct {
 	inFrame   bool
 	presFence uintptr
 	woken     bool
-	lastEnd   time.Time       // of the last frame
+	lastEnd   time.Time       // the end of the last frame
+	prevEnd   time.Time       // and of the one before
 	shown     []xproto.Window // the windows of the last frame, those the switcher shows
 	liveWant  liveSession
 
@@ -83,6 +84,7 @@ type Snapshotter struct {
 	live      liveSession     // the live thumbnails taken; overlay 0: none
 	lastPass  time.Time       // the last live pass
 	hold      time.Duration   // liveHold; 0 in a test: no pass waits for a frame
+	guard     time.Duration   // liveGuard
 	liveRetry time.Time       // a pass a frame held back is tried again then
 	trash     []*liveTextures // live textures to delete once no frame is drawn
 }
@@ -154,6 +156,7 @@ func New(interval time.Duration, scaling string) (*Snapshotter, error) {
 		liveWake: make(chan struct{}, 1),
 		frameEnd: make(chan struct{}, 1),
 		hold:     liveHold,
+		guard:    liveGuard,
 		events:   make(chan xgb.Event, 256),
 		refresh:  make(chan chan struct{}),
 		quit:     make(chan struct{}),

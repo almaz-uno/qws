@@ -110,11 +110,35 @@ func TestLiveSchedule(t *testing.T) {
 		}
 	}
 
-	// While frames come one after another, a pass due waits for the end of
-	// one, liveHold at most: the timer is set for then, and a tick before it
-	// that is not the end of a frame makes no pass — a pass here would need
-	// the GPU, which the test has not
-	hs := &Snapshotter{windows: map[xproto.Window]*window{3: &viewable}, hold: liveHold,
+	// While frames come one after another, a pass due just before the end
+	// of a frame waits for it; in a pause it goes at once
+	last := t0.Add(time.Second)
+	prev := last.Add(-ms(7))
+	for _, c := range []struct {
+		name           string
+		now, due, want time.Time
+	}{
+		{"due in the pause", last.Add(ms(1)), last.Add(ms(1)), last.Add(ms(1))},
+		{"due before, made now", last.Add(ms(2)), last.Add(-ms(3)), last.Add(ms(2))},
+		{"due at the end of the pause", last.Add(ms(1)), last.Add(ms(3)), last.Add(ms(3))},
+		{"due before the next frame", last.Add(ms(1)), last.Add(ms(4)), last.Add(ms(7))},
+		{"due in a pause after it", last.Add(ms(1)), last.Add(ms(8)), last.Add(ms(8))},
+		{"no frame for a while", last.Add(liveHold), last.Add(liveHold + ms(5)), last.Add(liveHold + ms(5))},
+		{"frames a hold apart", last.Add(ms(1)), last.Add(ms(5)), last.Add(ms(5))},
+	} {
+		p := prev
+		if c.name == "frames a hold apart" {
+			p = last.Add(-liveHold)
+		}
+		if got := passAt(c.now, c.due, last, p, liveHold, liveGuard); !got.Equal(c.want) {
+			t.Errorf("%s: at %v, want %v", c.name, got.Sub(last), c.want.Sub(last))
+		}
+	}
+
+	// The loop: the timer for the end of the frame, no pass before it, and
+	// only the windows the switcher shows — a pass would need the GPU, which
+	// the test has not
+	hs := &Snapshotter{windows: map[xproto.Window]*window{3: &viewable}, hold: liveHold, guard: liveGuard,
 		live: liveSession{overlay: 7, interval: interval}}
 	now := t0.Add(ms(5))
 	if d := hs.liveWait(now); d != time.Hour {
@@ -125,15 +149,15 @@ func TestLiveSchedule(t *testing.T) {
 		t.Errorf("a window not shown: the timer in %v, want none", d)
 	}
 	hs.shown = []xproto.Window{2, 3}
-	hs.lastEnd = now.Add(-ms(1))
-	if d := hs.liveWait(now); d != liveHold-ms(5) {
-		t.Errorf("frames flowing: the timer in %v, want %v: the hold after the pass was due", d, liveHold-ms(5))
+	hs.lastEnd, hs.prevEnd = now.Add(-ms(6)), now.Add(-ms(13))
+	if d := hs.liveWait(now); d != ms(2) {
+		t.Errorf("due before the end of a frame: the timer in %v, want 2 ms, a millisecond after it", d)
 	}
 	hs.liveTick(now, false)
 	if !viewable.liveDue.dirty {
-		t.Error("a pass made while frames flow, before the end of one or the hold")
+		t.Error("a pass made just before the end of a frame")
 	}
-	hs.lastEnd = now.Add(-liveHold)
+	hs.lastEnd, hs.prevEnd = now.Add(-liveHold), now.Add(-liveHold-ms(7))
 	if d := hs.liveWait(now); d != 0 {
 		t.Errorf("no frame for a hold: the timer in %v, want at once", d)
 	}
@@ -181,6 +205,7 @@ func newLiveSnapshotter(t testing.TB, conn *xgb.Conn) (*Snapshotter, *glThread) 
 		windows:  map[xproto.Window]*window{},
 		frameEnd: make(chan struct{}, 1),
 		hold:     liveHold,
+		guard:    liveGuard,
 	}
 	g := &glThread{do: make(chan func())}
 	ready := make(chan error)
@@ -474,8 +499,11 @@ func BenchmarkLivePass(b *testing.B) {
 // the changes as DAMAGE would — with each frame drawing the pictures
 // published ("live"). Per mode, at p95, the time a frame takes from its start
 // to the end of glFinish (presented) and on the GPU by a timer query, and the
-// share of frames presented in more than 2 ms. b.N is the number of frames;
-// N and R are LIVE_N and LIVE_R, 4 and 30 by default:
+// share of frames presented in more than 2 ms; and the lag of a pass, from
+// the change it shows to the end of the first frame that draws it, L of the
+// specification but for the vertical blank. b.N is the number of frames; N
+// and R are LIVE_N and LIVE_R, 4 and 30 by default, LIVE_HOLD the hold
+// (0s: passes whenever due):
 //
 //	go test -run '^$' -bench LiveBeside -benchtime 12000x ./pkg/snapshot
 func BenchmarkLiveBeside(b *testing.B) {
@@ -499,6 +527,9 @@ func BenchmarkLiveBeside(b *testing.B) {
 	s.live = liveSession{interval: 33 * time.Millisecond}
 	if v := os.Getenv("LIVE_HOLD"); v != "" {
 		s.hold, _ = time.ParseDuration(v)
+	}
+	if v := os.Getenv("LIVE_GUARD"); v != "" {
+		s.guard, _ = time.ParseDuration(v)
 	}
 
 	runtime.LockOSThread()
@@ -620,6 +651,8 @@ func BenchmarkLiveBeside(b *testing.B) {
 	type sample struct{ presented, gpu time.Duration }
 	modes := []string{"clients", "live"}
 	samples := map[string][]sample{}
+	drawn := map[xproto.Window]uint64{}
+	var lags []float64
 	due := time.Now()
 	b.ResetTimer()
 	for f := 0; f < b.N; f++ {
@@ -648,6 +681,15 @@ func BenchmarkLiveBeside(b *testing.B) {
 		gl.QueryCounter(queries[1], gl.TIMESTAMP)
 		gl.Finish()
 		presented := time.Since(start)
+		end := time.Now()
+		for id, p := range pics {
+			if p.Gen > drawn[id] {
+				drawn[id] = p.Gen
+				if f%block >= warmUp && mode == "live" {
+					lags = append(lags, float64(end.Sub(p.Changed))/1e6)
+				}
+			}
+		}
 		lp.ReleaseFence(s.EndFrame(lp.TakeLiveFence()))
 		var t0, t1 uint64
 		gl.GetQueryObjectui64v(queries[0], gl.QUERY_RESULT, &t0)
@@ -684,6 +726,11 @@ func BenchmarkLiveBeside(b *testing.B) {
 		b.ReportMetric(p(presented, 99), mode+"-presented-p99-ms")
 		b.ReportMetric(p(gpu, 95), mode+"-gpu-p95-ms")
 		b.ReportMetric(100*float64(over)/float64(len(v)), mode+"-over-2ms-%")
+	}
+	if len(lags) > 0 {
+		sort.Float64s(lags)
+		b.ReportMetric(lags[(len(lags)*50+99)/100-1], "live-lag-p50-ms")
+		b.ReportMetric(lags[(len(lags)*95+99)/100-1], "live-lag-p95-ms")
 	}
 	var passes int
 	g.run(func() {

@@ -54,10 +54,37 @@ type Picture struct {
 // a pass a frame holds back is tried again
 const livePoll = 500 * time.Microsecond
 
-// liveHold is how long, at most, a pass due waits for the end of a frame
-// while frames come one after another: made right after a frame, it runs on
-// the GPU in the pause before the next, not beside it
-const liveHold = 10 * time.Millisecond
+// While frames come one after another — the last two less than liveHold
+// apart, the last less than liveHold ago — a pass due less than liveGuard
+// before the end of a frame waits for that end: it then runs on the GPU in
+// the pause before the next frame, not beside it. A pass takes the GPU a
+// millisecond or so, 1.6 ms at p95 at the lowest clock; 4 ms, of a period
+// of 6.94, left the frames of one window changing nearly as those of none,
+// for 0.7 ms of lag at p95 (research, "Passes in the pauses").
+const (
+	liveHold  = 10 * time.Millisecond
+	liveGuard = 4 * time.Millisecond
+)
+
+// passAt is when a pass due at due is made, at now: at once in a pause
+// between frames, or else at the end of the next frame, about — its end
+// wakes the loop — given the ends of the last two frames
+func passAt(now, due, last, prev time.Time, hold, guard time.Duration) time.Time {
+	t := due
+	if t.Before(now) {
+		t = now
+	}
+	period := last.Sub(prev)
+	if now.Sub(last) >= hold || prev.IsZero() || period <= 0 || period >= hold {
+		// Frames do not come one after another
+		return t
+	}
+	phase := t.Sub(last) % period
+	if phase <= period-guard {
+		return t
+	}
+	return t.Add(period - phase)
+}
 
 // liveSession is what SetLive asks for: the overlay of the switcher shown, 0
 // for none, and the live interval
@@ -190,7 +217,7 @@ func (s *Snapshotter) BeginFrame(windows []xproto.Window) map[xproto.Window]Pict
 func (s *Snapshotter) EndFrame(fence uintptr) uintptr {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.inFrame, s.lastEnd = false, time.Now()
+	s.inFrame, s.prevEnd, s.lastEnd = false, s.lastEnd, time.Now()
 	select {
 	case s.frameEnd <- struct{}{}:
 	default:
@@ -256,26 +283,27 @@ func (s *Snapshotter) liveWait(now time.Time) time.Duration {
 		if s.liveRetry.After(due) {
 			due = s.liveRetry
 		}
-		if s.framesFlowing(now) {
-			// For the end of a frame, or the hold at most
-			due = due.Add(s.hold)
+		if at := s.passAt(now, due); at.After(due) && at.After(now) {
+			// For the end of a frame, or a millisecond after it should it not
+			// come
+			due = at.Add(time.Millisecond)
 		}
 		d = min(d, max(0, due.Sub(now)))
 	}
 	return d
 }
 
-// framesFlowing reports whether the switcher presents frames one after
-// another: one ended less than liveHold ago
-func (s *Snapshotter) framesFlowing(now time.Time) bool {
+// passAt is passAt of the frames the switcher presented
+func (s *Snapshotter) passAt(now, due time.Time) time.Time {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	return now.Sub(s.lastEnd) < s.hold
+	last, prev := s.lastEnd, s.prevEnd
+	s.mu.Unlock()
+	return passAt(now, due, last, prev, s.hold, s.guard)
 }
 
-// liveTick publishes the passes done and makes the next one, if due: right
-// after the end of a frame, afterFrame, while frames come one after another,
-// or once it has waited liveHold for one
+// liveTick publishes the passes done and makes the next one, if due and in
+// a pause between frames: right after the end of one, afterFrame, or else
+// not less than liveGuard before the next
 func (s *Snapshotter) liveTick(now time.Time, afterFrame bool) {
 	s.publishDone()
 	s.emptyTrash()
@@ -283,7 +311,7 @@ func (s *Snapshotter) liveTick(now time.Time, afterFrame bool) {
 	if !ok || due.After(now) || s.liveRetry.After(now) {
 		return
 	}
-	if !afterFrame && s.framesFlowing(now) && now.Before(due.Add(s.hold)) {
+	if !afterFrame && s.passAt(now, due).After(now) {
 		return
 	}
 	if s.livePass(w, now) {
