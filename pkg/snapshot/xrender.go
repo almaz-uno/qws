@@ -100,13 +100,17 @@ func (x *xrender) close() {
 	unix.SysvShmDetach(x.shm)
 }
 
-// thumbnail scales the pixmap of a window of w×h and the visual into its
-// thumbnail and reads it back
-func (x *xrender) thumbnail(pixmap xproto.Pixmap, visual xproto.Visualid, w, h int) (*image.RGBA, error) {
+// thumbnail scales the rectangle r of a pixmap of the visual and the depth —
+// a window, at r — into its thumbnail and reads it back. A rectangle not at
+// the pixmap's corner — a window in its frame's pixmap — is copied first
+// into a pixmap of its own, so that the passes pad at its edges, not with the
+// frame around it (specs/022-uncaptured-windows).
+func (x *xrender) thumbnail(pixmap xproto.Pixmap, visual xproto.Visualid, depth int, r image.Rectangle) (*image.RGBA, error) {
 	format, ok := x.formats[visual]
 	if !ok {
 		return nil, fmt.Errorf("RENDER: no picture format for visual 0x%x", visual)
 	}
+	w, h := r.Dx(), r.Dy()
 	tw, th := thumbSize(w, h)
 
 	var pictures []render.Picture
@@ -131,6 +135,23 @@ func (x *xrender) thumbnail(pixmap xproto.Pixmap, visual xproto.Visualid, w, h i
 		return p, nil
 	}
 
+	if r.Min != (image.Point{}) {
+		window, err := xproto.NewPixmapId(x.conn)
+		if err != nil {
+			return nil, err
+		}
+		xproto.CreatePixmap(x.conn, byte(depth), window, xproto.Drawable(x.root), uint16(w), uint16(h))
+		pixmaps = append(pixmaps, window)
+		gc, err := xproto.NewGcontextId(x.conn)
+		if err != nil {
+			return nil, err
+		}
+		xproto.CreateGC(x.conn, gc, xproto.Drawable(window), 0, nil)
+		xproto.CopyArea(x.conn, xproto.Drawable(pixmap), xproto.Drawable(window), gc,
+			int16(r.Min.X), int16(r.Min.Y), 0, 0, uint16(w), uint16(h))
+		xproto.FreeGC(x.conn, gc)
+		pixmap = window
+	}
 	src, err := picture(xproto.Drawable(pixmap), format)
 	if err != nil {
 		return nil, err

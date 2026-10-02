@@ -1,0 +1,16 @@
+= 022 — tasks
+:toc: left
+:toc-title: Contents
+:revdate: 2026-10-02
+
+. [x] T1. The probe off the screen: the pixmaps the X server names and the
+  damage it reports, for the visuals of a client window and its frame
+  (research).
+. [x] T2. The windows of E1 and the snapshots of S5 of 020 (research).
+. [x] T3. The specification, its decisions laid out for the author.
+. [x] T4. `namePixmap`, RENDER from a rectangle, the frame named anew; K1–K3
+  with `TestCaptureFromFrame`, failing first without the change.
+. [x] T5. `BenchmarkFrameRender`; K4.
+. [x] T6. Scenario E on E1, by the author; K5.
+. [x] T7. `go vet ./...`, `go test ./...`, `make check-specs`; K6; the
+  results.

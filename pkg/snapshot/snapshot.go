@@ -88,6 +88,14 @@ type window struct {
 	bound         *glx.TexturePixmap
 	width, height int
 	depth         int
+
+	// The ancestor whose pixmap the window is drawn in and taken from, when
+	// the X server does not redirect the window itself, 0 when the pixmap is
+	// its own; the visual and the depth of the pixmap named
+	// (specs/022-uncaptured-windows)
+	via       xproto.Window
+	pixVisual xproto.Visualid
+	pixDepth  int
 }
 
 // errNotViewable: the X server would not name the window's pixmap — it is not
@@ -101,6 +109,11 @@ const retries = 3
 // errNotBound: the GPU would not bind the window's pixmap — another client
 // holds a GLX pixmap of the window, or no FBConfig has its depth
 var errNotBound = errors.New("pixmap not bound on the GPU")
+
+// errNotRedirected: the window is viewable, but neither its pixmap nor that
+// of an ancestor can be named — without a compositor, a window the X server
+// does not redirect on its own (specs/022-uncaptured-windows)
+var errNotRedirected = errors.New("no pixmap of the window or of an ancestor")
 
 // newOffscreen is the GL context of the snapshots; a variable, so that a test
 // can make it fail
@@ -370,6 +383,9 @@ func (s *Snapshotter) handle(ev xgb.Event) {
 	case xproto.ConfigureNotifyEvent:
 		if w, ok := s.windows[e.Window]; ok && (int(e.Width) != w.width || int(e.Height) != w.height) {
 			s.restructured(e.Window, now)
+		} else if w := s.client(e.Window); w != nil && w.via != 0 && w.via == e.Window {
+			// The frame the window is taken from: of a new size, a new pixmap
+			s.restructured(e.Window, now)
 		}
 	case xproto.ReparentNotifyEvent:
 		if w, ok := s.windows[e.Window]; ok {
@@ -544,7 +560,10 @@ func (s *Snapshotter) capture(w *window, cause string) {
 	w.retried = 0
 	if errors.Is(err, errNotBound) && s.render != nil {
 		path = "render"
-		img, err = s.render.thumbnail(w.pixmap, w.visual, w.width, w.height)
+		var r image.Rectangle
+		if r, err = s.pixmapRect(w); err == nil {
+			img, err = s.render.thumbnail(w.pixmap, w.pixVisual, w.pixDepth, r)
+		}
 	}
 	if err != nil {
 		log.Debug().Err(err).Uint32("window", uint32(w.id)).Str("path", path).Msg("Snapshot failed, taken on the CPU")
@@ -560,8 +579,11 @@ func (s *Snapshotter) capture(w *window, cause string) {
 	if err != nil {
 		return
 	}
-	log.Debug().
-		Uint32("window", uint32(w.id)).
+	e := log.Debug()
+	if w.via != 0 {
+		e = e.Uint32("via", uint32(w.via))
+	}
+	e.Uint32("window", uint32(w.id)).
 		Int("width", w.width).
 		Int("height", w.height).
 		Str("path", path).
@@ -589,16 +611,20 @@ func (s *Snapshotter) captureGPU(w *window) (*image.RGBA, error) {
 		if err != nil {
 			return nil, err
 		}
-		pixmap, err := xproto.NewPixmapId(s.conn)
-		if err != nil {
+		w.width, w.height, w.depth = int(geom.Width), int(geom.Height), int(geom.Depth)
+		if err := s.namePixmap(w); err != nil {
 			return nil, err
 		}
-		if err := xcomposite.NameWindowPixmapChecked(s.conn, w.id, pixmap).Check(); err != nil {
-			return nil, fmt.Errorf("%w: %v", errNotViewable, err)
+		w.stale = false
+		if w.via != 0 {
+			// The pixmap of a frame is the compositor's, bound on the GPU by
+			// it: taken by RENDER, never bound by qws, which would hold the one
+			// GLX pixmap its storage may have (specs/018-snapshot-bind-conflicts)
+			log.Debug().Uint32("window", uint32(w.id)).Uint32("via", uint32(w.via)).
+				Msg("No pixmap of its own: taken from its frame by RENDER")
+			return nil, errNotBound
 		}
-		w.pixmap, w.stale = pixmap, false
-		w.width, w.height, w.depth = int(geom.Width), int(geom.Height), int(geom.Depth)
-		bound, err := s.off.BindPixmap(uint32(pixmap), w.depth)
+		bound, err := s.off.BindPixmap(uint32(w.pixmap), w.depth)
 		if err != nil {
 			log.Debug().Err(err).Uint32("window", uint32(w.id)).Msg("Pixmap not bound on the GPU until named anew")
 			return nil, errNotBound
@@ -610,6 +636,78 @@ func (s *Snapshotter) captureGPU(w *window) (*image.RGBA, error) {
 		w.bound.Rebind()
 	}
 	return s.gpu.thumbnail(w.width, w.height, w.bound.YInverted), nil
+}
+
+// namePixmap names the pixmap the window is drawn in: its own, when the X
+// server redirects it — as it does a window whose visual differs from its
+// frame's, one of the two the 32-bit ARGB visual of Composite — and else,
+// when the window is viewable, the pixmap of its nearest ancestor below the
+// root that can be named: its frame, which the compositor redirects
+// (specs/022-uncaptured-windows). errNotViewable when the window is not
+// viewable, errNotRedirected when no ancestor's pixmap can be named.
+func (s *Snapshotter) namePixmap(w *window) error {
+	w.via, w.pixVisual, w.pixDepth = 0, w.visual, w.depth
+	pixmap, err := xproto.NewPixmapId(s.conn)
+	if err != nil {
+		return err
+	}
+	refusal := xcomposite.NameWindowPixmapChecked(s.conn, w.id, pixmap).Check()
+	if refusal == nil {
+		w.pixmap = pixmap
+		return nil
+	}
+	// BadMatch either way: not viewable, or not redirected
+	attrs, err := xproto.GetWindowAttributes(s.conn, w.id).Reply()
+	if err != nil || attrs.MapState != xproto.MapStateViewable {
+		return fmt.Errorf("%w: %v", errNotViewable, refusal)
+	}
+	for id := w.id; ; {
+		tree, err := xproto.QueryTree(s.conn, id).Reply()
+		if err != nil {
+			return err
+		}
+		if tree.Parent == 0 || tree.Parent == s.root {
+			return errNotRedirected
+		}
+		id = tree.Parent
+		// The ID of a pixmap not named stays free for the next attempt
+		if xcomposite.NameWindowPixmapChecked(s.conn, id, pixmap).Check() != nil {
+			continue
+		}
+		geom, err := xproto.GetGeometry(s.conn, xproto.Drawable(id)).Reply()
+		if err == nil {
+			attrs, err = xproto.GetWindowAttributes(s.conn, id).Reply()
+		}
+		if err != nil {
+			xproto.FreePixmap(s.conn, pixmap)
+			return err
+		}
+		w.pixmap, w.via = pixmap, id
+		w.pixVisual, w.pixDepth = attrs.Visual, int(geom.Depth)
+		return nil
+	}
+}
+
+// pixmapRect is where the window lies in the pixmap named for it: all of its
+// own, but for its border; in its ancestor's, at its offset from the
+// ancestor's origin, asked at each capture — i3 moves a window in its frame,
+// and its ConfigureNotify events in root coordinates do not tell — and past
+// the ancestor's border, which the pixmap holds
+func (s *Snapshotter) pixmapRect(w *window) (image.Rectangle, error) {
+	r := image.Rect(0, 0, w.width, w.height)
+	if w.via == 0 {
+		return r, nil
+	}
+	pos, err := xproto.TranslateCoordinates(s.conn, w.id, w.via, 0, 0).Reply()
+	if err != nil {
+		return image.Rectangle{}, err
+	}
+	geom, err := xproto.GetGeometry(s.conn, xproto.Drawable(w.via)).Reply()
+	if err != nil {
+		return image.Rectangle{}, err
+	}
+	b := int(geom.BorderWidth)
+	return r.Add(image.Pt(int(pos.DstX)+b, int(pos.DstY)+b)), nil
 }
 
 // store keeps the thumbnail of the window
