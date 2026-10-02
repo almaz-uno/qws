@@ -164,9 +164,15 @@ func New(interval time.Duration, scaling string) (*Snapshotter, error) {
 	if err != nil {
 		return nil, fmt.Errorf("snapshot: %w", err)
 	}
+	return start(conn, xproto.Setup(conn).DefaultScreen(conn).Root, interval, scaling)
+}
+
+// start runs a snapshotter on conn of the client windows listed on root, the
+// root window but in a test; conn is closed should it fail
+func start(conn *xgb.Conn, root xproto.Window, interval time.Duration, scaling string) (*Snapshotter, error) {
 	s := &Snapshotter{
 		conn:      conn,
-		root:      xproto.Setup(conn).DefaultScreen(conn).Root,
+		root:      root,
 		interval:  interval,
 		thumbs:    make(map[xproto.Window]image.Image),
 		thumbGen:  make(map[xproto.Window]uint64),
