@@ -279,6 +279,11 @@ func (s *Snapshotter) liveWait(now time.Time) time.Duration {
 			break
 		}
 	}
+	if s.othersShown() {
+		// No pass until the other switcher goes: its unmapping wakes the
+		// loop
+		return d
+	}
 	if _, due, ok := s.nextLive(now); ok {
 		if s.liveRetry.After(due) {
 			due = s.liveRetry
@@ -307,6 +312,9 @@ func (s *Snapshotter) passAt(now, due time.Time) time.Time {
 func (s *Snapshotter) liveTick(now time.Time, afterFrame bool) {
 	s.publishDone()
 	s.emptyTrash()
+	if s.othersShown() {
+		return
+	}
 	w, due, ok := s.nextLive(now)
 	if !ok || due.After(now) || s.liveRetry.After(now) {
 		return
@@ -319,6 +327,14 @@ func (s *Snapshotter) liveTick(now time.Time, afterFrame bool) {
 	} else {
 		s.liveRetry = now.Add(livePoll)
 	}
+}
+
+// othersShown reports whether the switcher of another qws instance is shown:
+// the live passes pause for it as the snapshots do (specs/011-snapshot-pause,
+// D5 of specs/020-live-thumbnails), but not for this instance's own overlay,
+// listed among the switchers as well
+func (s *Snapshotter) othersShown() bool {
+	return s.switchers != nil && s.switchers.Shown(s.live.overlay)
 }
 
 // nextLive is the window due the next pass at now, and when: of the windows

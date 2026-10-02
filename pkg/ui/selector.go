@@ -414,6 +414,11 @@ func (s *Selector) Show() (*x11.WindowInfo, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to create window: %w", err)
 		}
+		// Listed, so that the snapshots of other instances pause while it is
+		// shown (specs/011-snapshot-pause)
+		if err := x11.ListSwitcher(s.conn, s.root, s.window.GetWindowID()); err != nil {
+			log.Debug().Err(err).Msg("Switcher not listed for other instances")
+		}
 		if err := s.presenter.Bind(s.window); err != nil {
 			return nil, fmt.Errorf("failed to bind presenter to window: %w", err)
 		}

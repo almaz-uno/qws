@@ -628,7 +628,7 @@ log:
 | `QWS_BEHAVIOR_SNAPSHOT_INTERVAL`
 | `duration`
 | `1s`
-| How often, at most, a visible window that changed is captured again for its thumbnail
+| How often, at most, a visible window that changed is captured again for its thumbnail. No window is captured on change while the switcher of any qws instance on the display is shown
 
 | `behavior.show_delay`
 | `--behavior-show-delay`

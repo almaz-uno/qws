@@ -181,6 +181,70 @@ func TestLiveSchedule(t *testing.T) {
 	}
 }
 
+// fakeSwitchers are the switchers of qws instances, by overlay: whether
+// mapped
+type fakeSwitchers map[xproto.Window]bool
+
+func (f fakeSwitchers) Handle(xgb.Event) bool { return false }
+
+func (f fakeSwitchers) Shown(except xproto.Window) bool {
+	for id, mapped := range f {
+		if mapped && id != except {
+			return true
+		}
+	}
+	return false
+}
+
+// TestLivePause checks D5 of specs/020-live-thumbnails with
+// specs/011-snapshot-pause: the live passes pause while the switcher of
+// another instance is shown, and not for this instance's own overlay, listed
+// among the switchers as well; the snapshots on change pause for either, as
+// in 011
+func TestLivePause(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	const own, other = 7, 9
+	w := window{mapped: true, bound: &glx.TexturePixmap{}}
+	w.liveDue.change(t0)
+	sw := fakeSwitchers{own: true}
+	s := &Snapshotter{
+		windows:   map[xproto.Window]*window{3: &w},
+		switchers: sw,
+		live:      liveSession{overlay: own, interval: 33 * time.Millisecond},
+		shown:     []xproto.Window{3},
+	}
+	now := t0.Add(5 * time.Millisecond)
+	if d := s.liveWait(now); d != 0 {
+		t.Errorf("own overlay shown: the pass in %v, want at once", d)
+	}
+
+	sw[other] = true
+	if d := s.liveWait(now); d != time.Hour {
+		t.Errorf("another instance's switcher shown: the timer in %v, want none", d)
+	}
+	// A pass here would need the GPU, which the test has not
+	s.liveTick(now, false)
+	s.liveTick(now, true)
+	if !w.liveDue.dirty {
+		t.Error("a pass made while another instance's switcher is shown")
+	}
+	sw[other] = false
+	if d := s.liveWait(now); d != 0 {
+		t.Errorf("the other switcher gone: the pass in %v, want at once", d)
+	}
+
+	// Hidden, the snapshots on change pause for any switcher, as in 011
+	s.live = liveSession{}
+	for _, c := range []struct {
+		own, other, paused bool
+	}{{false, false, false}, {true, false, true}, {false, true, true}} {
+		sw[own], sw[other] = c.own, c.other
+		if got := s.pausedNow(); got != c.paused {
+			t.Errorf("own %v, other %v: snapshots paused %v, want %v", c.own, c.other, got, c.paused)
+		}
+	}
+}
+
 // glThread runs functions on a goroutine locked to its thread, where the
 // offscreen context of a snapshotter is current, as in its loop
 type glThread struct {
