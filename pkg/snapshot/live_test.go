@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"sort"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -25,8 +26,9 @@ import (
 // most once a live interval, of those due the window that has waited longest
 // first, and no pass closer to the one before than the interval divided by
 // the windows taking passes, and while frames come one after another after
-// the end of one; a window not viewable, whose size changed, taken from its
-// frame's pixmap, or not shown in the last frame, is not passed; while live
+// the end of one; a window taken from its frame's pixmap is passed, by
+// RENDER; a window not viewable, whose size changed, not shown in the last
+// frame, or taken from its frame without RENDER, is not passed; while live
 // no snapshot is taken on change, and hidden the snapshots of 008 are
 // (TestSchedule)
 func TestLiveSchedule(t *testing.T) {
@@ -95,19 +97,23 @@ func TestLiveSchedule(t *testing.T) {
 	// Which windows take passes
 	viewable := window{mapped: true, bound: &glx.TexturePixmap{}}
 	viewable.liveDue.change(t0)
-	if !viewable.livePassable() {
+	if !viewable.livePassable(false) {
 		t.Error("a viewable window that changed takes no pass")
 	}
+	if fromFrame := (window{mapped: true, via: 2, pixmap: 3, liveDue: viewable.liveDue}); !fromFrame.livePassable(true) {
+		t.Error("a viewable window taken from its frame that changed takes no pass")
+	}
 	for name, w := range map[string]window{
-		"unmapped":       {mapped: false, bound: viewable.bound, liveDue: viewable.liveDue},
-		"frame unmapped": {mapped: true, frame: 2, bound: viewable.bound, liveDue: viewable.liveDue},
-		"size changed":   {mapped: true, stale: true, bound: viewable.bound, liveDue: viewable.liveDue},
-		"not bound":      {mapped: true, liveDue: viewable.liveDue},
-		"from its frame": {mapped: true, via: 2, bound: viewable.bound, liveDue: viewable.liveDue},
-		"unchanged":      {mapped: true, bound: viewable.bound},
-		"pass under way": {mapped: true, bound: viewable.bound, liveDue: viewable.liveDue, live: &liveTextures{pending: 1}},
+		"unmapped":                  {mapped: false, bound: viewable.bound, liveDue: viewable.liveDue},
+		"frame unmapped":            {mapped: true, frame: 2, bound: viewable.bound, liveDue: viewable.liveDue},
+		"size changed":              {mapped: true, stale: true, bound: viewable.bound, liveDue: viewable.liveDue},
+		"not bound":                 {mapped: true, liveDue: viewable.liveDue},
+		"from its frame, no RENDER": {mapped: true, via: 2, pixmap: 3, liveDue: viewable.liveDue},
+		"from its frame, not named": {mapped: true, via: 2, liveDue: viewable.liveDue},
+		"unchanged":                 {mapped: true, bound: viewable.bound},
+		"pass under way":            {mapped: true, bound: viewable.bound, liveDue: viewable.liveDue, live: &liveTextures{pending: 1}},
 	} {
-		if w.livePassable() {
+		if w.livePassable(!strings.HasSuffix(name, "no RENDER")) {
 			t.Errorf("%s: takes a pass", name)
 		}
 	}
@@ -505,10 +511,11 @@ func offscreenWindow(t testing.TB, conn *xgb.Conn, screen *xproto.ScreenInfo, vi
 // of a window of the size of those of E1, 2556×1357, one 30 times a second:
 // the binding again and the area average into 512×271 with its fence, on the
 // snapshotter's thread (pass-cpu), on the GPU by a timer query (pass-gpu),
-// and from the start of the pass to its publication (done), at p50 and p95.
-// b.N is the number of passes:
+// and from the start of the pass to its publication (done), at p50 and p95;
+// the CPU of the X server a pass, less its own over as long a stretch before,
+// and of the test's process. b.N is the number of passes:
 //
-//	go test -run '^$' -bench LivePass -benchtime 300x ./pkg/snapshot
+//	go test -run '^$' -bench 'LivePass$' -benchtime 300x ./pkg/snapshot
 func BenchmarkLivePass(b *testing.B) {
 	conn, err := xgb.NewConn()
 	if err != nil {
@@ -532,6 +539,7 @@ func BenchmarkLivePass(b *testing.B) {
 
 	var cpu, gpu, done []float64
 	ms := func(d time.Duration) float64 { return float64(d) / float64(time.Millisecond) }
+	m := newCPUMeter(time.Duration(b.N) * time.Second / 30)
 	next := time.Now()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -554,6 +562,10 @@ func BenchmarkLivePass(b *testing.B) {
 				s.publishDone()
 				pending = w.live.pending != 0
 			})
+			if pending {
+				// As the loop polls, not spinning
+				time.Sleep(livePoll)
+			}
 		}
 		done = append(done, ms(time.Since(start)))
 		cpu = append(cpu, ms(w.live.cpu))
@@ -561,6 +573,7 @@ func BenchmarkLivePass(b *testing.B) {
 		gpu = append(gpu, float64(ns)/1e6)
 	}
 	b.StopTimer()
+	m.report(b, b.N)
 	for _, m := range []struct {
 		name string
 		v    []float64

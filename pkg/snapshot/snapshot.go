@@ -92,6 +92,7 @@ type Snapshotter struct {
 	guard     time.Duration   // liveGuard
 	liveRetry time.Time       // a pass a frame held back is tried again then
 	trash     []*liveTextures // live textures to delete once no frame is drawn
+	noScaled  bool            // a scaled pixmap would not bind: no live pass from a frame
 }
 
 // window is what the snapshotter knows of a client window
@@ -128,10 +129,13 @@ type window struct {
 
 	// The live thumbnails (specs/020-live-thumbnails): the pictures so far,
 	// snapshots and passes, which number their generations; the textures of
-	// the passes, nil before the first; when it is due one
+	// the passes, nil before the first; when it is due one; for a window
+	// taken from its frame, the pixmap its passes scale it into, nil before
+	// the first
 	pictures uint64
 	live     *liveTextures
 	liveDue  liveSchedule
+	scaled   *scaledPixmap
 }
 
 // errNotViewable: the X server would not name the window's pixmap — it is not
@@ -603,6 +607,7 @@ func (s *Snapshotter) forget(id xproto.Window) {
 	}
 	s.release(w)
 	s.dropLive(w)
+	s.dropScaled(w)
 	if w.texture != 0 {
 		gl.DeleteTextures(1, &w.texture)
 	}

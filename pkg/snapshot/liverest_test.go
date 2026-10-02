@@ -20,10 +20,19 @@ import (
 // runs it: shown, presenting no frame but those the passes ask for by their
 // ClientMessage, with a window changing every 5 ms, the passes keep coming at
 // about the live interval, and each publication is followed by a frame that
-// draws it. The windows of the test are children of a window of its own off
-// the screen, whose children the X server redirects, and the snapshotter
-// follows the windows listed on it: no window of the desktop is bound.
+// draws it — a window with a pixmap of its own, and one of depth 24 taken
+// from its frame's pixmap (K14). The windows of the test are children of a
+// window of its own off the screen, whose children the X server redirects,
+// and the snapshotter follows the windows listed on it: no window of the
+// desktop is bound.
 func TestLiveAtRest(t *testing.T) {
+	t.Run("own pixmap", func(t *testing.T) { liveAtRest(t, false) })
+	t.Run("from its frame", func(t *testing.T) { liveAtRest(t, true) })
+}
+
+// liveAtRest is TestLiveAtRest of a window with a pixmap of its own, or,
+// fromFrame, of one in a frame, which the X server redirects in its place
+func liveAtRest(t *testing.T, fromFrame bool) {
 	conn, err := x11.NewConn()
 	if err != nil {
 		t.Skipf("no X display: %v", err)
@@ -34,7 +43,18 @@ func TestLiveAtRest(t *testing.T) {
 	if err := xcomposite.RedirectSubwindowsChecked(conn, parent, xcomposite.RedirectAutomatic).Check(); err != nil {
 		t.Skipf("no Composite: %v", err)
 	}
-	win := testWindow(t, conn, parent, image.Rect(0, 0, 1200, 700), 0, 0)
+	var win xproto.Window
+	if fromFrame {
+		// Of its frame's visual: drawn into the frame's pixmap, none of its own
+		frame := testWindow(t, conn, parent, image.Rect(0, 0, 1204, 724), 0, 0)
+		win = testWindow(t, conn, frame, image.Rect(2, 22, 1202, 722), 0, 0)
+		p, _ := xproto.NewPixmapId(conn)
+		if xcomposite.NameWindowPixmapChecked(conn, win, p).Check() == nil {
+			t.Fatal("the window in the frame has a pixmap of its own")
+		}
+	} else {
+		win = testWindow(t, conn, parent, image.Rect(0, 0, 1200, 700), 0, 0)
+	}
 
 	sconn, err := x11.NewConn()
 	if err != nil {
@@ -64,7 +84,7 @@ func TestLiveAtRest(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Skip("the window of the test not captured: no GPU path")
+			t.Skip("the window of the test not captured: no GPU or RENDER path")
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

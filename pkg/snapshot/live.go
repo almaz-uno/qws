@@ -1,11 +1,13 @@
 package snapshot
 
 import (
+	"image"
 	"time"
 
 	"github.com/almaz-uno/qws/pkg/glx"
 	"github.com/go-gl/gl/v4.6-core/gl"
 	"github.com/jezek/xgb/damage"
+	"github.com/jezek/xgb/render"
 	"github.com/jezek/xgb/xproto"
 	"github.com/rs/zerolog/log"
 )
@@ -360,7 +362,7 @@ func (s *Snapshotter) nextLive(now time.Time) (*window, time.Time, bool) {
 		if !ok {
 			continue
 		}
-		if w.livePassable() {
+		if w.livePassable(s.render != nil && !s.noScaled) {
 			windows = append(windows, w)
 			waiting = append(waiting, w.liveDue)
 			n++
@@ -376,18 +378,25 @@ func (s *Snapshotter) nextLive(now time.Time) (*window, time.Time, bool) {
 }
 
 // livePassable reports whether the window waits a pass that can be made: it
-// changed, is viewable, keeps the pixmap of its snapshot bound — a window
-// whose size changed keeps its last picture — and has no pass under way. A
-// window taken from its frame's pixmap (specs/022-uncaptured-windows) has no
-// texture of its own, and takes none.
-func (w *window) livePassable() bool {
-	return w.liveDue.dirty && w.viewable() && !w.stale && w.via == 0 && w.bound != nil &&
-		(w.live == nil || w.live.pending == 0)
+// changed, is viewable, keeps the pixmap of its snapshot — a window whose
+// size changed keeps its last picture — bound on the GPU, or, taken from its
+// frame's pixmap (specs/022-uncaptured-windows), named, with fromFrame, the
+// passes by RENDER (scaleFromFrame) possible; and it has no pass under way
+func (w *window) livePassable(fromFrame bool) bool {
+	if !w.liveDue.dirty || !w.viewable() || w.stale || w.live != nil && w.live.pending != 0 {
+		return false
+	}
+	if w.via != 0 {
+		return fromFrame && w.pixmap != 0
+	}
+	return w.bound != nil
 }
 
 // livePass binds the window's pixmap again and averages it into the live
-// texture not published, then makes a fence. False, and no pass, while a frame
-// that may draw that texture is being drawn.
+// texture not published, then makes a fence; a window taken from its frame,
+// scaled first into a pixmap of qws's own (scaleFromFrame), is copied from
+// that one. False, and no pass, while a frame that may draw that texture is
+// being drawn, or when the window cannot be scaled.
 func (s *Snapshotter) livePass(w *window, now time.Time) bool {
 	start := time.Now()
 	tw, th := thumbSize(w.width, w.height)
@@ -425,9 +434,22 @@ func (s *Snapshotter) livePass(w *window, now time.Time) bool {
 		damage.Subtract(s.conn, w.damage, 0, 0)
 	}
 	gl.ActiveTexture(gl.TEXTURE0)
-	gl.BindTexture(gl.TEXTURE_2D, w.texture)
-	w.bound.Rebind()
-	s.gpu.average(lv.fbo[next], w.width, w.height, w.bound.YInverted)
+	if w.via != 0 {
+		if !s.scaleFromFrame(w, tw, th) {
+			return false
+		}
+		// Of the thumbnail's size already: the average copies it, once the X
+		// server has drawn it on the GPU
+		sp := w.scaled
+		s.off.WaitX()
+		gl.BindTexture(gl.TEXTURE_2D, sp.texture)
+		sp.bound.Rebind()
+		s.gpu.average(lv.fbo[next], tw, th, sp.bound.YInverted)
+	} else {
+		gl.BindTexture(gl.TEXTURE_2D, w.texture)
+		w.bound.Rebind()
+		s.gpu.average(lv.fbo[next], w.width, w.height, w.bound.YInverted)
+	}
 	lv.pending = gl.FenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0)
 	// The pass starts now; and a fence tested from this context signals only
 	// once flushed
@@ -435,6 +457,123 @@ func (s *Snapshotter) livePass(w *window, now time.Time) bool {
 	lv.changed, lv.start, lv.cpu = w.liveDue.dirtyAt, start, time.Since(start)
 	w.liveDue.passed(now)
 	return true
+}
+
+// Live passes of the windows taken from their frame (D2 of
+// specs/020-live-thumbnails, the author's answer A): such a window — of depth
+// 24 in a frame of depth 24, which the X server does not redirect apart from
+// it — has no pixmap of its own, and the frame's is the compositor's, never
+// bound by qws (specs/022-uncaptured-windows, D2). A pass scales the window's
+// rectangle out of the frame's pixmap by RENDER, as its snapshot is scaled,
+// straight into a pixmap of qws's own of the thumbnail's size, bound on the
+// GPU once — its storage is the snapshotter's, which no other client binds
+// (specs/018-snapshot-bind-conflicts) — and copies that into the live texture
+// not published: the fences and the two textures of every other pass.
+// Nothing is read back.
+
+// scaledPixmap is the pixmap a window taken from its frame is scaled into,
+// a8r8g8b8 of its thumbnail's size, its picture, and its texture bound on the
+// GPU
+type scaledPixmap struct {
+	pixmap        xproto.Pixmap
+	picture       render.Picture
+	width, height int
+	texture       uint32
+	bound         *glx.TexturePixmap
+}
+
+// bindScaled binds a scaled pixmap to the texture bound; a variable, so that
+// a test can make it fail, or see what is bound
+var bindScaled = func(off *glx.Offscreen, pixmap xproto.Pixmap) (*glx.TexturePixmap, error) {
+	return off.BindPixmap(uint32(pixmap), 32)
+}
+
+// scaleFromFrame scales the window, taken from its frame's pixmap, into its
+// scaled pixmap, of tw×th, by RENDER, and waits for the X server to have
+// done it: the GPU reads the pixmap next. False when it cannot: the window is
+// then stale and keeps its picture until a snapshot names its pixmap anew;
+// should a scaled pixmap not bind on the GPU, no window is passed from its
+// frame for the session.
+func (s *Snapshotter) scaleFromFrame(w *window, tw, th int) bool {
+	sp, err := s.scaledFor(w, tw, th)
+	if err == nil {
+		var r image.Rectangle
+		if r, err = s.pixmapRect(w); err == nil {
+			var passes []render.CompositeCookie
+			passes, err = s.render.scale(w.pixmap, w.pixVisual, w.pixDepth, r, sp.picture)
+			for _, p := range passes {
+				if err == nil {
+					err = p.Check()
+				}
+			}
+		}
+	}
+	if err != nil {
+		log.Debug().Err(err).Uint32("window", uint32(w.id)).Uint32("via", uint32(w.via)).
+			Msg("Live pass from the frame failed: the window keeps its picture")
+		w.stale = true
+		return false
+	}
+	return true
+}
+
+// scaledFor is the scaled pixmap of the window, of tw×th, made at its first
+// pass from the frame and anew at another size
+func (s *Snapshotter) scaledFor(w *window, tw, th int) (*scaledPixmap, error) {
+	if sp := w.scaled; sp != nil && sp.width == tw && sp.height == th {
+		return sp, nil
+	}
+	s.dropScaled(w)
+	sp := &scaledPixmap{width: tw, height: th}
+	w.scaled = sp // for dropScaled to free what is made, should a step fail
+	var err error
+	if sp.pixmap, err = xproto.NewPixmapId(s.conn); err != nil {
+		sp.pixmap = 0
+		s.dropScaled(w)
+		return nil, err
+	}
+	if err = xproto.CreatePixmapChecked(s.conn, 32, sp.pixmap, xproto.Drawable(s.root), uint16(tw), uint16(th)).Check(); err != nil {
+		sp.pixmap = 0
+		s.dropScaled(w)
+		return nil, err
+	}
+	if sp.picture, err = render.NewPictureId(s.conn); err == nil {
+		err = render.CreatePictureChecked(s.conn, sp.picture, xproto.Drawable(sp.pixmap), s.render.argb32, 0, nil).Check()
+	}
+	if err != nil {
+		sp.picture = 0
+		s.dropScaled(w)
+		return nil, err
+	}
+	sp.texture = newWindowTexture()
+	if sp.bound, err = bindScaled(s.off, sp.pixmap); err != nil {
+		s.dropScaled(w)
+		s.noScaled = true
+		log.Info().Err(err).Msg("Live thumbnails of the windows taken from their frame off: a pixmap of qws does not bind on the GPU")
+		return nil, err
+	}
+	return sp, nil
+}
+
+// dropScaled frees the window's scaled pixmap and what goes with it
+func (s *Snapshotter) dropScaled(w *window) {
+	sp := w.scaled
+	if sp == nil {
+		return
+	}
+	if sp.bound != nil {
+		sp.bound.Release()
+	}
+	if sp.texture != 0 {
+		gl.DeleteTextures(1, &sp.texture)
+	}
+	if sp.picture != 0 {
+		render.FreePicture(s.conn, sp.picture)
+	}
+	if sp.pixmap != 0 {
+		xproto.FreePixmap(s.conn, sp.pixmap)
+	}
+	w.scaled = nil
 }
 
 // publishDone publishes the passes whose fences have signalled, and wakes the
