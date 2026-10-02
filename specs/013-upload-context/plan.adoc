@@ -1,0 +1,93 @@
+= 013 — plan
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-02
+
+The specification is dropped (`spec.adoc`, "Why it is dropped"): the code of
+this plan is not merged; its patch against `f90abc7` is kept outside the
+repository.
+
+== Approach
+
+*The context.* `glx.Context.NewShared` creates, on an Xlib display of its
+own, a pbuffer of 1×1 and a direct GLX 4.6 core context whose share context
+is the presenter's, and makes it current on the calling thread, locked to
+it — as `NewOffscreen` of 008 does for the snapshots, with a handler of X
+errors of the same design: installed once, counting the errors of its
+display, passing those of the others on.
+
+*The uploader* is a goroutine on that thread, started by the presenter when
+it creates its GL objects. It runs jobs — closures of GL commands, given its
+own pixel buffer — in the order queued, each followed by a fence and a
+flush, and hands the fence back. The presenter keeps, for each job whose end
+it has not taken, a handle: whether the uploader has issued it, whether its
+fence has signalled (`glClientWaitSync`, timeout 0), and a wait — the CPU for
+the issue, the GPU, by `glWaitSync`, for the rest.
+
+*The presenter*:
+
+* `SetLayer` generates the texture name, as before, and queues the
+  definition of the texture, through the uploader's pixel buffer; a layer
+  set anew waits first for a fence of the frames so far. A frame that draws
+  the layer — the base or an item of a scene — takes the job's end before:
+  signalled, or the GPU waits.
+* `StageFrame` queues one job a call: for a new staging, a wait for a fence
+  of the frames so far and the copy of the texture of the last frame, then
+  the pieces of the call, 64 rows each through the pixel buffer. The last job
+  is kept; a later one ends after it, so the earlier fence is only deleted,
+  its error kept. `PresentStaged` takes the last job's end before it swaps
+  the textures; `draw`, which writes the texture of the last frame, takes it
+  first while a copy is among the jobs.
+* `Bind` for a window of another size, `DropLayers` and `Close` wait for the
+  jobs queued to complete before they reallocate or delete textures.
+* `UploadWaits` counts the jobs a frame waited for, by the frame presented
+  last.
+
+Without a shared context, every path is that of 1.2.0, in the presenter's
+context.
+
+== Files
+
+[cols="2,5"]
+|===
+| File | What changes
+
+| `pkg/glx/shared_linux.go`
+| New: `Context.NewShared`, `Shared.Destroy`.
+
+| `pkg/carousel/present_glx_upload.go`
+| New: the uploader, its jobs and their ends; the fences of the presenter
+  for its jobs.
+
+| `pkg/carousel/present_glx.go`
+| The uploader started with the GL objects and closed first; the staging
+  queued; the texture written after the copy; the jobs completed before a
+  new size; `uploadRows`, which was `upload`, given the pixel buffer;
+  `UploadWaits`.
+
+| `pkg/carousel/present_glx_scene.go`
+| `SetLayer` queued; `defineLayer` the body it had, or through a pixel
+  buffer; `layer` takes the end of an upload before a frame draws it;
+  `DropLayers` after the jobs.
+
+| `pkg/carousel/present.go`
+| `Animator.UploadWaits`.
+
+| `pkg/ui/timing.go`
+| `upload_waits` in the frame records of animations.
+
+| `pkg/carousel/present_glx_test.go`, `present_glx_bench_test.go`
+| `TestGLXPresenterMatchesCPU` for both kinds of uploads; `TestGLXLayerSetAnew`;
+  `BenchmarkPacedFrames`.
+
+| `specs/001-rendering-speed/measure.sh`
+| Line `A1 <kind> by pause` of the summary: metric M1.
+|===
+
+== What is kept
+
+The loop of `pkg/ui/animation.go` — `waitFrame`, `frame`, `uploadIdle`,
+`pauseUpload`, `spinAhead` — and the scenes it composes. The frame at rest
+reaches the window through the same texture, copy and rows as in 1.2.0, so
+its bytes are those of `cpu`; K1 checks it for both kinds of uploads.
