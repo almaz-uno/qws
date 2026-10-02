@@ -213,14 +213,19 @@ func (s *Snapshotter) BeginFrame(windows []xproto.Window) map[xproto.Window]Pict
 
 // EndFrame follows the frame of BeginFrame with a fence of the presenter's
 // commands after it, 0 when it drew no live picture. It returns the fence it
-// replaces, for the presenter to delete.
+// replaces, for the presenter to delete. It wakes the loop only for a pass
+// that waits for the end of the frame, not at every frame: in S5 the loop
+// woken 144 times a second took a third of a percent of a CPU.
 func (s *Snapshotter) EndFrame(fence uintptr) uintptr {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.inFrame, s.prevEnd, s.lastEnd = false, s.lastEnd, time.Now()
-	select {
-	case s.frameEnd <- struct{}{}:
-	default:
+	if s.endWanted {
+		s.endWanted = false
+		select {
+		case s.frameEnd <- struct{}{}:
+		default:
+		}
 	}
 	if fence == 0 {
 		return 0
@@ -292,6 +297,9 @@ func (s *Snapshotter) liveWait(now time.Time) time.Duration {
 			// For the end of a frame, or a millisecond after it should it not
 			// come
 			due = at.Add(time.Millisecond)
+			s.mu.Lock()
+			s.endWanted = true
+			s.mu.Unlock()
 		}
 		d = min(d, max(0, due.Sub(now)))
 	}

@@ -149,6 +149,11 @@ func TestLiveSchedule(t *testing.T) {
 		t.Errorf("a window not shown: the timer in %v, want none", d)
 	}
 	hs.shown = []xproto.Window{2, 3}
+	hs.frameEnd = make(chan struct{}, 1)
+	hs.EndFrame(0)
+	if len(hs.frameEnd) != 0 {
+		t.Error("the end of a frame no pass waits for wakes the loop")
+	}
 	hs.lastEnd, hs.prevEnd = now.Add(-ms(6)), now.Add(-ms(13))
 	if d := hs.liveWait(now); d != ms(2) {
 		t.Errorf("due before the end of a frame: the timer in %v, want 2 ms, a millisecond after it", d)
@@ -157,6 +162,12 @@ func TestLiveSchedule(t *testing.T) {
 	if !viewable.liveDue.dirty {
 		t.Error("a pass made just before the end of a frame")
 	}
+	hs.lastEnd, hs.prevEnd = now.Add(-ms(6)), now.Add(-ms(13))
+	hs.EndFrame(0)
+	if len(hs.frameEnd) != 1 || hs.endWanted {
+		t.Error("the end of the frame a pass waits for does not wake the loop, once")
+	}
+	<-hs.frameEnd
 	hs.lastEnd, hs.prevEnd = now.Add(-liveHold), now.Add(-liveHold-ms(7))
 	if d := hs.liveWait(now); d != 0 {
 		t.Errorf("no frame for a hold: the timer in %v, want at once", d)

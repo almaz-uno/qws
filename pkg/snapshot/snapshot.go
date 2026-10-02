@@ -64,13 +64,14 @@ type Snapshotter struct {
 	woken     bool
 	lastEnd   time.Time       // the end of the last frame
 	prevEnd   time.Time       // and of the one before
+	endWanted bool            // a pass waits for the end of the frame: EndFrame wakes the loop
 	shown     []xproto.Window // the windows of the last frame, those the switcher shows
 	liveWant  liveSession
 
 	paused   atomic.Bool
 	wake     chan struct{} // the pause ended
 	liveWake chan struct{} // SetLive was called
-	frameEnd chan struct{} // EndFrame was called
+	frameEnd chan struct{} // EndFrame was called, a pass waiting for it
 	events   chan xgb.Event
 	refresh  chan chan struct{}
 	quit     chan struct{}
