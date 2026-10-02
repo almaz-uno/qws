@@ -52,9 +52,10 @@ with and without it.
 
 == Decisions
 
-None taken by the author yet. Each decision below lists its options, the
-facts they rest on (research) and the option recommended — for the author
-to confirm.
+Author, 2026-10-02: the options recommended below, D1–D7, as written, and
+the bounds of K7 and K9 as proposed, provisional until the first measurement
+on the screen. Each decision lists its options, the facts they rest on
+(research) and the option recommended, which is the one taken.
 
 === D1. How live
 
@@ -104,7 +105,7 @@ to confirm.
   on NVIDIA (research, "Sharing") and is not known on Mesa.
 |===
 
-*Recommended: c* — for the author to confirm. Option a pays per frame
+*Recommended: c*, taken. Option a pays per frame
 what c pays per change, and its one advantage, a frame of lag, c reaches
 with a `live_interval` of 0; b pays with the CPU and with uploads.
 
@@ -113,13 +114,12 @@ Where the passes of c run, and when, was measured beside paced frames
 (`thumb` there); the same, one window at a time, spread over the interval
 (`spread`); and in the presenter's own context, in the pauses between its
 frames, as the uploads of 007 (`inline`). *Recommended: in the
-snapshotter's context, one window at a time, spread* — for the author to
-confirm. With 4–36 windows changing 30 times a second it left 0.07–2.0 %
-of the frames over 2 ms, `inline` 0.8–3.5 %, `thumb` 4.7–12.3 %, the
-clients' drawing alone 1.0–10.1 %; at 144 changes a second, 0.2 %. And the
-window textures stay inside the snapshotter: the presenter only draws
-thumbnails and tests their fences, and its loop gets no work of passes to
-schedule.
+snapshotter's context, one window at a time, spread*, taken. With 4–36
+windows changing 30 times a second it left 0.07–2.0 % of the frames over
+2 ms, `inline` 0.8–3.5 %, `thumb` 4.7–12.3 %, the clients' drawing alone
+1.0–10.1 %; at 144 changes a second, 0.2 %. And the window textures stay
+inside the snapshotter: the presenter only draws thumbnails and tests their
+fences, and its loop gets no work of passes to schedule.
 
 === D2. Which windows are live
 
@@ -127,19 +127,19 @@ Options: every card and tile shown; only the selected and the hovered; a
 number at most.
 
 *Recommended: every card and tile the switcher draws whose window is
-viewable* — for the author to confirm. A window not viewable — on a hidden
-workspace, a hidden tab — has no contents (008) and keeps its snapshot; one
-never viewable keeps its placeholder (016). On E1 that leaves a few windows
-live, one or two a monitor; the bound on the work is the rate of each
-window and the spreading of the passes (D1), not a number of windows: a
-frame costs 4–8 µs more a live thumbnail (research), a window that does
-not change costs nothing, and 36 windows changing 30 times a second kept
-the frames as well as 4 did.
+viewable*, taken. A window not viewable — on a hidden workspace, a hidden
+tab — has no contents (008) and keeps its snapshot; one never viewable
+keeps its placeholder (016). On E1 that leaves a few windows live, one or
+two a monitor; the bound on the work is the rate of each window and the
+spreading of the passes (D1), not a number of windows: a frame costs 4–8 µs
+more a live thumbnail (research), a window that does not change costs
+nothing, and 36 windows changing 30 times a second kept the frames as well
+as 4 did.
 
 === D3. What replaces the frame at rest byte for byte
 
 The frame of `glx` at rest can no longer be the frame `cpu` draws once,
-since its thumbnails move. *Recommended* — for the author to confirm:
+since its thumbnails move. *Recommended*, taken:
 
 . `cpu` keeps every byte: the digests of Σ in `testdata/scenes.json`
   unchanged.
@@ -173,7 +173,7 @@ option b.
 
 Options: semi-live (option b of D1), or snapshots as today.
 
-*Recommended: snapshots as today* — for the author to confirm. `cpu` draws
+*Recommended: snapshots as today*, taken. `cpu` draws
 a whole frame for any change, 70–100 ms on E1 with presenting; it is the
 renderer of machines without GLX, where the snapshots themselves are taken
 on the CPU at some 100 ms a window (008). `live` and `live_interval` are
@@ -192,7 +192,7 @@ when it creates it (`ListSwitcher` in `pkg/ui/selector.go`), so that its
 own switcher makes `Shown()` true as well (read on the branch at
 `aff81ee`).
 
-*Recommended* — for the author to confirm:
+*Recommended*, taken:
 
 * while its own overlay is mapped and live thumbnails are on, the
   snapshotter takes live passes of the windows shown, and no snapshot with
@@ -257,7 +257,7 @@ Environment variables and flags as in 002: `QWS_APPEARANCE_THUMBNAIL_LIVE`,
 `--appearance-thumbnail-live-interval`. A negative interval is reported and
 the default used, as 010 and 014 do with their durations.
 
-*Recommended: `live: true` and 33 ms* — for the author to confirm. 33 ms,
+*Recommended: `live: true` and 33 ms*, taken. 33 ms,
 some 30 changes a second, is a video's rate and lags behind a window by at
 most 33 ms and a frame. At 0 — once a refresh, 144 a second on E1 — the
 frames hold as well (research, R = 144), but the snapshotter's CPU follows
@@ -274,7 +274,7 @@ Whether Mesa shares textures between contexts of two Xlib displays, and
 whether its texture of a pixmap reflects the pixmap's changes, is not known:
 ws3 was not tried, and `glx` itself is untested there (008).
 
-*Recommended* — for the author to confirm: where the presenter's context
+*Recommended*, taken: where the presenter's context
 cannot be created sharing the snapshotter's, or the snapshotter runs
 without the GPU, live thumbnails are off for the session, reported once at
 info level, and the thumbnails are the snapshots of today. Creating both
@@ -401,8 +401,8 @@ Run with the carousel and with the grid, with `live: true` and with
 
 | K7
 | Lag: in S5 with `live: true`, L p95 ≤ `live_interval` + one refresh
-  period + 5 ms, 45 ms at the defaults on E1 — proposed, to be confirmed
-  after the first measurement.
+  period + 5 ms, 45 ms at the defaults on E1 — provisional, confirmed by
+  the author on 2026-10-02 until the first measurement.
 
 | K8
 | Frames: in S5, the step of the carousel, the fades and the grid with
@@ -413,8 +413,8 @@ Run with the carousel and with the grid, with `live: true` and with
 
 | K9
 | CPU: in S5, C with `live: true` no more than 3 % of a CPU above
-  `live: false` over the time the switcher is shown — proposed, to be
-  confirmed after the first measurement.
+  `live: false` over the time the switcher is shown — provisional,
+  confirmed by the author on 2026-10-02 until the first measurement.
 
 | K10
 | Configuration: the two keys from a file, their `QWS_` variables and
@@ -433,8 +433,8 @@ Run with the carousel and with the grid, with `live: true` and with
 
 == Open decisions
 
-. The decisions D1–D7, for the author to confirm.
-. The bounds of K7 and K9, proposed before any measurement on the screen.
+. The bounds of K7 and K9, provisional until the first measurement on
+  the screen.
 . The passes made cheaper by the damaged rectangles: a terminal that prints
   a line damages a band of a window, and a pass could average only the
   thumbnail rows under it — DAMAGE reports the region through XFIXES at a
