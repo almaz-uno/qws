@@ -51,6 +51,25 @@ incompatible change, released in a minor version by the author's decision:
 The documents under `doc/` are in English
 (link:specs/017-english-documents/spec.adoc[specification 017]).
 
+=== 1.3.3 — 2026-10-02
+
+*Windows that had no thumbnail*
+(link:specs/022-uncaptured-windows/spec.adoc[specification 022]):
+
+* A window of depth 24 drawn into the frame of the window manager — Dion,
+  Telegram, KeePassXC, Yandex Music, xterm — has no pixmap of its own, and
+  since 1.1.0 the snapshots took that for a window not shown: it had no
+  thumbnail. It is now taken from the pixmap of its frame and scaled in the X
+  server by RENDER, in about a millisecond; windows of depth 32 are captured
+  on the GPU as before.
+
+*A crash* (link:specs/021-xgb-extension-init/spec.adoc[specification 021]):
+
+* qws could end with `fatal error: concurrent map read and map write` as the
+  switcher opened while windows changed: an X extension was set up again at
+  every activation, writing tables that every connection reads. The
+  extensions are now set up once, before the first connection.
+
 === 1.3.2 — 2026-10-02
 
 *Snapshots out of the switcher's way* (link:specs/011-snapshot-pause/spec.adoc[specification
