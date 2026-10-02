@@ -198,6 +198,25 @@ would break this; qws makes none.
 
 The setup costs a connection: the first `x11.NewConn` took 0.87–1.45 ms,
 a later one 0.28–0.40 ms, `xgb.NewConn` 0.26–0.45 ms — the three in turn
-in a test of the package, run 5 times, with the change. It
-saves a round trip per `Init`: seven at the start of the snapshotter, one
-or two at each activation.
+in a test of the package, run 5 times, with the change. It saves a round
+trip per `Init`: seven at the start of the snapshotter, one or two at each
+activation.
+
+== After the change
+
+T-after, the binaries built from `b510741` in a clean worktree: 20 runs of
+20 passed, with 199–432 calls of `GetMonitors` and 221 649–261 938 events
+read in the second, Xorg's CPU 0.97–1.02 s a run; built with `-race`, 5 of
+5 passed with no race, 1 352–1 759 calls and 97 022–106 529 events.
+
+== The same tables
+
+`tables_test.go` of the probes, copied into `pkg/x11` of `b510741` and run
+alone (`go test -count=1 -run TestTables -v ./pkg/x11`): the maps as
+numbers and the addresses of their constructors, before the first
+`x11.NewConn`, after it, and after `composite.Init`, `damage.Init`,
+`randr.Init`, `render.Init`, `shm.Init` and `xfixes.Init` run on its
+connection. The setup added the events 65 and 87–91 and the errors 128,
+140, 142–150 and 152 — 34 events and 17 errors before it, 40 and 29 after
+— and gave the connection the opcodes of `xdpyinfo`; the six `Init` changed
+neither map, a number or a constructor.

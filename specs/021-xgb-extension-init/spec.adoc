@@ -4,7 +4,7 @@
 :sectnums:
 :revdate: 2026-10-02
 :issue: 61
-:status: draft
+:status: implemented
 
 == What and why
 
@@ -158,6 +158,40 @@ test file of this change added; T-after builds this change.
   and `make check-specs` pass; `gofmt -l .` finds nothing.
 |===
 
+== Results
+
+2026-10-02, E1 (ws1), the commit of the fix `b510741` in a clean worktree;
+the runs and the probe in `research.adoc`.
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | T-before: 18 runs of 20 ended with "concurrent map read and map
+  write" at `xgb.go:557`, 0.01–0.87 s after the binary started; with
+  `-race`, 9 of 9 failed on one race each between `randr.Init` and
+  `readResponses`. T-after: 20 of 20 passed, with 199–432 calls of
+  `GetMonitors` and 221 649–261 938 events in the second; with `-race`, 5
+  of 5, no race, 1 352–1 759 calls and 97 022–106 529 events. The bound of
+  15 of 20 was set after T-before; a first version of the test, with the
+  same flood and loop, crashed in 25 runs of 26.
+| K2 | The grep finds the `gl.Init` of `pkg/snapshot/gpu.go`,
+  `pkg/carousel/present_glx.go` and `console/glxoverlay/main.go` and
+  nothing else; the tables are written in `setupExtensions` alone
+  (`pkg/x11/extensions.go`, the two loops); `xgb.NewConn` outside tests:
+  the setup and `NewConn` in `pkg/x11/extensions.go`,
+  `console/framecmp` and `console/glxoverlay`.
+| K3 | The probe: the setup wrote the events 65 and 87–91 and the errors
+  128, 140, 142–150 and 152, those the numbers of E1 give; the six `Init`
+  run after it left both maps as they were — 40 events, 29 errors, each
+  with the same constructor.
+| K4 | The six tests pass on E1 and none skips; `TestNewAndClose` logs
+  "XSHM extension available" and no "RENDER unavailable".
+| K5 | `go vet ./...`, `go test ./...`, `go test -race ./pkg/x11
+  ./pkg/snapshot`, `make check-specs` and `gofmt -l .` on E1, for each
+  commit of the change in a clean worktree.
+|===
+
 == Open decisions
 
 . S5 of 020 on the desktop of E1, where the crash was seen, is not run with
@@ -166,6 +200,10 @@ test file of this change added; T-after builds this change.
 . Upstream: xgb writes and reads the tables without a lock up to 1.3.1, and
   no issue of `jezek/xgb` is about it (2026-10-02). A report, or a patch
   that would let this change go, is the author's decision.
+. `TestMonitorsUnderEvents` takes a core of the X server for its second at
+  every `go test ./...` with a display, on the author's desktop that of the
+  desktop; a shorter or paced run catches the race less often (research,
+  "Reproduction").
 . The probe of K3 is not kept as a test: an update of xgb (012) that
   changed what `Init` writes would go unnoticed until such a probe is run
   again.
