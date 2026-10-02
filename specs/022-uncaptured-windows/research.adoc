@@ -102,3 +102,35 @@ default visual, its VT100 widget a child of its own.
 * i3 sends a client window synthetic ConfigureNotify events in root
   coordinates (ICCCM, 4.1.5), which the snapshotter receives with the real
   ones, as it selects the structure of the window.
+
+== The change off the screen
+
+2026-10-02, the branch at `6ed3123`. `TestCaptureFromFrame`
+(`go test -run TestCaptureFromFrame -v ./pkg/snapshot`): windows of 800×500
+off the screen, their picture `windowImage` in a child that covers them,
+drawn twice:
+
+[cols="4,2,2",options="header"]
+|===
+| Client window | Taken | Mean / worst from the area average
+
+| depth 24, the frame's visual, a child of another client
+| RENDER, from the frame | 0.680, 0.675 / 93
+| depth 24, the frame's visual, a child of its own
+| RENDER, from the frame | 0.508, 0.682 / 92–93
+| depth 24, another visual
+| RENDER, from the frame | 0.671, 0.566 / 92
+| depth 24, in a window of its frame's visual inside the frame
+| RENDER, from the frame | 0.643, 0.687 / 92–93
+| depth 32 ARGB, in a frame of depth 24
+| GPU, its own pixmap | 0.001 / 1
+|===
+
+The worst pixels are the 1-pixel strokes of the picture, which RENDER's
+halving blurs as in 018; its bound there is the mean.
+
+`BenchmarkFrameRender` (`go test -run '^$' -bench FrameRender -benchtime
+200x ./pkg/snapshot`), a window of 2556×1357 at 2,22 in a frame of
+2560×1381, three runs: a capture — the offset asked, the rectangle copied,
+the passes, the read back — 1.01–1.06 ms at p50, 1.44–1.55 ms at p95; RENDER
+from a window's own pixmap took 1.64 ms at p50 on the desktop of E1 in 018.

@@ -8,9 +8,10 @@
   (research).
 . [x] T2. The windows of E1 and the snapshots of S5 of 020 (research).
 . [x] T3. The specification, its decisions laid out for the author.
-. [ ] T4. `namePixmap`, RENDER from a rectangle, the frame named anew; K1–K3
+. [x] T4. `namePixmap`, RENDER from a rectangle, the frame named anew; K1–K3
   with `TestCaptureFromFrame`, failing first without the change.
-. [ ] T5. `BenchmarkFrameRender`; K4.
+. [x] T5. `BenchmarkFrameRender`; K4.
 . [ ] T6. Scenario E on E1, by the author; K5.
 . [ ] T7. `go vet ./...`, `go test ./...`, `make check-specs`; K6; the
-  results.
+  results. The checks pass; the results off the screen are written, K5's
+  to come.

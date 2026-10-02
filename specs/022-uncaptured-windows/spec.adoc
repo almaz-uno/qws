@@ -173,6 +173,35 @@ and `via` their frames.
 | `go vet ./...`, `go test ./...` and `make check-specs` pass.
 |===
 
+== Results
+
+2026-10-02, ws1, off the screen: windows of the test off every monitor;
+the runs in `research.adoc`, "The change off the screen". K5 waits for the
+author on the desktop of E1.
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | `TestCaptureFromFrame`: the four windows of depth 24 — a child of
+  another client, a child of its own, another visual, two levels below the
+  window redirected — each taken by RENDER from the pixmap of the window
+  the compositor redirects, within a mean of 0.51–0.69 per channel of the
+  area average, drawn anew and taken anew, none bound on the GPU. Without
+  the change: "no thumbnail" at the first.
+| K2 | The same test: each drawing into a child reported damage of the
+  client window.
+| K3 | The window of depth 32 in a frame of depth 24 taken on the GPU from
+  its own pixmap, a mean of 0.001, as before. `TestGPUThumbnail`,
+  `TestRenderThumbnail`, `TestFallback`, `TestSchedule`, `TestWait` and
+  `TestNewAndClose` pass.
+| K4 | `BenchmarkFrameRender`, three runs of 200: p50 1.01–1.06 ms, p95
+  1.44–1.55 ms.
+| K5 | Waits for the author.
+| K6 | `go vet ./...`, `go test ./...` and `make check-specs` on each
+  commit, in a worktree of its own.
+|===
+
 == Open decisions
 
 . The decisions D1–D3, for the author to confirm.
