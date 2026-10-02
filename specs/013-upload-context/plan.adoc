@@ -2,7 +2,11 @@
 :toc: left
 :toc-title: Contents
 :sectnums:
-:revdate: 2026-10-01
+:revdate: 2026-10-02
+
+The specification is dropped (`spec.adoc`, "Why it is dropped"): the code of
+this plan is not merged; its patch against `f90abc7` is kept outside the
+repository.
 
 == Approach
 

@@ -2,8 +2,8 @@
 :toc: left
 :toc-title: Contents
 :sectnums:
-:revdate: 2026-10-01
-:status: draft
+:revdate: 2026-10-02
+:status: dropped
 :issue: 55
 
 == What and why
@@ -169,7 +169,63 @@ more than 2 ms, and of frames that waited for an upload.
   check-specs` pass.
 |===
 
+== Results
+
+2026-10-01 and 2026-10-02, E1 (ws1); the probe, the benchmark and the runs
+in `research.adoc`. Off the screen the change could be checked for what it
+must not break; on the screen, S2 of 007 with 1.2.0 run in turn with it,
+for what it was to mend.
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | `TestGLXPresenterMatchesCPU/uploader` and `/presenter`,
+  `TestScenes`, `TestLayers`, `TestParallelDrawing` pass on E1;
+  `scenes.json` unchanged.
+| K2 | `TestGLXLayerSetAnew` passes on E1.
+| K3 | Two runs of `BenchmarkPacedFrames`, the desktop busy: in the first
+  met — queued 0.50 against 0.78 ms, on the GPU 1.78 against 1.91 ms, over
+  2 ms 6.10 against 8.39 %; in the second queued and on the GPU met, 0.87
+  against 0.79 ms and 1.69 against 1.67 ms, over 2 ms short by 0.06 points,
+  5.09 against 4.53 %. The presenter's context in the same runs: over 2 ms
+  1.4 and 2.1 points above no uploads. The runs without uploads differ by
+  3.9 points among themselves.
+| K4 | Not met. S2, three runs of the carousel: after a pause that
+  uploaded 31 of 28 376 intervals missed, 0.109 %, after one that did not 4
+  of 66 461, 0.006 % — above by 0.103 points, the bound 0.1. 1.2.0 in turn
+  with it: 41 of 28 412, 0.144 %, and 2 of 66 385.
+| K5 | Not met. Missed intervals of the carousel 57 of 98 333 against 65 of
+  98 296 for 1.2.0, not half; A1 p95 7.86 ms in every run of both, above
+  7.44 for 1.2.0 as well; 23 frames in a step at p50; K5 of 007 — every
+  activation on its window — and A2, response p95 7.57–7.59 ms against
+  7.52–7.61, as 1.2.0.
+| K6 | `TestGLXPresenterMatchesCPU/presenter` passes; each log of S2 says
+  `Uploads in a context of their own`.
+| K7 | `go vet ./...`, `go test ./...`, `go test -race ./pkg/carousel
+  ./pkg/ui` and `scripts/check-specs.sh` pass on E1.
+|===
+
+== Why it is dropped
+
+The author's decision, 2026-10-02, after S2. What the change set out to
+mend was mostly gone: 1.2.0 itself missed 0.066 % of the intervals of the
+carousel in these runs, against 0.45–0.51 % in those of 007. Of what was
+left, the misses after a pause that uploaded, the change took away 10 of 41
+— within the spread of the runs, from 7 to 19 a run — and K4 and K5 are
+not met. For that it would add a GL context on an Xlib display of its own,
+a goroutine with its queue and fences, a third X error handler in the chain
+and a method of `Animator`.
+
+The code is not merged. The patch against `f90abc7`, the change but for its
+specification, is kept outside the repository, in
+`~/.cache/qws-013-upload-context.patch` on ws1; with the probe and
+`BenchmarkPacedFrames` in it, it is where to start should misses after
+uploads come back.
+
 == Open decisions
+
+Should the change be taken up again:
 
 . The limits of the pauses: with the uploads in a context of their own, the
   megabyte a pause and the end 3 ms before a frame may be needless — to be

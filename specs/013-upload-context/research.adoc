@@ -2,7 +2,7 @@
 :toc: left
 :toc-title: Contents
 :sectnums:
-:revdate: 2026-10-01
+:revdate: 2026-10-02
 
 Facts the specification rests on, 2026-10-01, `develop` at `f90abc7`
 (1.2.0), E1: ws1, RTX 4080 SUPER, NVIDIA 580.105.08, i9-7920X, picom
@@ -208,3 +208,47 @@ Two runs before, at 22:20 and 22:47, logged frame timings, so that the
 presenter waited for the GPU in each swap and the queries took that wait in:
 1.36 ms at p95 and 11–15 % over 2 ms in every mode alike. The benchmark turns
 the timings off.
+
+== On the screen
+
+S2 of 007 on E1, 2026-10-02 00:33 to 01:09, the author away and the service
+stopped, the overlay on DP-0 at 144 Hz, 36 windows: the binary of 1.2.0
+(`f90abc7`) and that of the change, built in clean worktrees, run in turn,
+three times each, `HOLD=2 LAYOUT=carousel`, `glx`. The runs are outside the
+repository, `013-s2-*` in `~/.cache/qws-runs/20261001-2323` on ws1. Line
+`A1 carousel by pause` of `measure.sh summary`, the intervals above 1.5
+periods by what the pause before the frame uploaded:
+
+[cols="2,2,2,2,2,1",options="header"]
+|===
+| Run | No upload | Up to 640 KB | More | All | Waited
+
+| 1.2.0, 1 | 0 of 22 105 | 4 of 2 266 | 7 of 7 171 | 20 of 32 709 | —
+| change, 1 | 0 of 22 142 | 1 of 2 250 | 10 of 7 175 | 17 of 32 732 | 2
+| 1.2.0, 2 | 2 of 22 101 | 6 of 2 279 | 13 of 7 231 | 27 of 32 776 | —
+| change, 2 | 1 of 22 184 | 2 of 2 207 | 5 of 7 246 | 15 of 32 803 | 0
+| 1.2.0, 3 | 0 of 22 179 | 4 of 2 227 | 7 of 7 238 | 18 of 32 811 | —
+| change, 3 | 3 of 22 135 | 4 of 2 213 | 9 of 7 285 | 25 of 32 798 | 0
+| 1.2.0, all | 2 of 66 385 | 14 of 6 772 | 27 of 21 640 | 65 of 98 296 |
+| change, all | 4 of 66 461 | 7 of 6 670 | 24 of 21 706 | 57 of 98 333 | 2
+|===
+
+"All" counts the frames at rest — none missed — and the stalls over 50 ms,
+6–9 a run in both, which the other columns leave out. The two frames that
+waited for an upload missed no refresh. A1 p95 was 7.85–7.86 ms in every
+run, A3 152.7 ms at p50, every activation ended on its window.
+
+The same uploads of 1.2.0 missed after 0.144 % of the pauses that uploaded,
+against 1.37 % in the runs of 007 the day before with the same harness: most
+of those misses came with the conditions of those runs, not with the uploads
+alone, and what those conditions were is not known. The change took 10 of
+the 41 misses after an upload away; the runs of one build differ by up to 8
+of them among themselves (11 to 19 for 1.2.0, 7 to 13 for the change).
+
+M1 warm at p95, the slowest of 19 activations, was 566–569 ms in two of the
+three runs of 1.2.0 and 310 ms in the third, 336–338 ms in those of the
+change; at p50 277–288 ms in both. Too few activations to say more.
+
+The run of the change on the grid, `013-s2-new-grid`, ended at its fifth
+activation: `measure.sh` read the selection of a frame record of cause
+`refresh`, which has none, and stopped under `set -u`. It was not repeated.
