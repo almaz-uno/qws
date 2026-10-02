@@ -172,11 +172,13 @@ run() {
 			# the first frame (K5 of specs/007-animation): in 150 ms, but its
 			# frame at rest comes when drawn — some 500 ms for the grid. Only
 			# on that window does the run step back and release the modifier;
-			# else Escape, so that no other window is activated.
+			# else Escape, so that no other window is activated. A frame
+			# answering an Expose has no selection: such frames are left out,
+			# or the last one makes sel "null", which set -u fails on.
 			want=-1
 			for ((i = 0; i < 500; i++)); do
 				read -r first sel n < <(jq -rs --argjson a "$a" '
-					map(select(.message == "Frame" and .activation == $a))
+					map(select(.message == "Frame" and .activation == $a and .selected != null))
 					| "\(first | .selected) \(last | .selected) \(last | .windows)"' "$log")
 				want=$(((first + STEPS + held) % n))
 				((sel == want)) && break
