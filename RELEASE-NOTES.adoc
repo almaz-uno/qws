@@ -51,7 +51,7 @@ incompatible change, released in a minor version by the author's decision:
 The documents under `doc/` are in English
 (link:specs/017-english-documents/spec.adoc[specification 017]).
 
-=== 1.3.2 — unreleased
+=== 1.3.2 — 2026-10-02
 
 *Snapshots out of the switcher's way* (link:specs/011-snapshot-pause/spec.adoc[specification
 011]):
