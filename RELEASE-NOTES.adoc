@@ -2,14 +2,14 @@
 :toc: left
 :toc-title: Contents
 :toclevels: 2
-:revdate: 2026-10-01
+:revdate: 2026-10-02
 
 Every minor or major release is a chapter, its patches are subsections, the
 newest come first (link:specs/004-releases/spec.adoc[specification 004]). The
 version of a build is `qws version`. Release files are built on Debian 12:
 they need glibc 2.36 or newer and the OpenGL and X11 libraries.
 
-== 1.3.0 — 2026-10-01
+== 1.3.0 — 2026-10-02
 
 *Faster to open* (link:specs/003-window-list/spec.adoc[specification 003]):
 
@@ -50,6 +50,20 @@ incompatible change, released in a minor version by the author's decision:
 
 The documents under `doc/` are in English
 (link:specs/017-english-documents/spec.adoc[specification 017]).
+
+=== 1.3.1 — 2026-10-02
+
+*The grid drawn faster* (link:specs/019-grid-speed/spec.adoc[specification
+019]), the picture the same byte for byte:
+
+* A frame of the grid is drawn in some 80 ms instead of some 520 ms for 36
+  windows on ws1 — as the switcher opens in the grid, and at every step with
+  `cpu`: the thumbnails of the tiles are scaled in parallel, on up to half of
+  the processors, and a long title is measured once instead of once for each
+  length tried.
+* With `glx` a step through the grid ends with its animation, 150 ms after
+  the key, instead of some 530 ms: its last frame no longer waits for the
+  drawing.
 
 == 1.2.0 — 2026-10-01
 
