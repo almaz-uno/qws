@@ -21,9 +21,13 @@
 # in the pixmap of its frame, which takes none. meta has its window and
 # depth. With
 # LIVE=true or LIVE=false the instance runs with appearance.thumbnail.live so
-# (a build that knows the key); unset, as configured. Each run writes the CPU
-# time of the instance over each activation, from the key press to 0.3 s
-# after the release, from /proc, to cpu — C of 020.
+# (a build that knows the key); unset, as configured. With REST=<seconds>, the
+# rest variant of S5: after its steps each activation holds the overlay still
+# for that long — a second for the frame at rest of the last step, then the
+# seconds of REST — whose lines of the log and times go to rest, so that the
+# summary counts the live passes a second at rest (K13 of 020). Each run
+# writes the CPU time of the instance over each activation, from the key press
+# to 0.3 s after the release, from /proc, to cpu — C of 020.
 #
 #   measure.sh run <renderer> <outdir>   one run of S1, renderer cpu or glx
 #   measure.sh summary <outdir>          summary of a finished run
@@ -51,6 +55,7 @@ REPEAT_RATE=${REPEAT_RATE:-33}
 CHANGING=${CHANGING:-}
 CHANGING_TERM=${CHANGING_TERM:-mate-terminal}
 LIVE=${LIVE:-}
+REST=${REST:-0}
 
 # Presses of the held key: the first, and the repeats after the delay
 held=0
@@ -172,6 +177,18 @@ start_changing() {
 	sleep 0.5
 }
 
+# The overlay of activation $3 held still for REST seconds, after a second
+# for the frame at rest of its last step: the lines of the log $1 and the
+# times, in ms, around them go to $2/rest
+hold_still() {
+	local log=$1 out=$2 a=$3 l0 t0
+	sleep 1
+	l0=$(wc -l <"$log")
+	t0=$(date +%s%3N)
+	sleep "$REST"
+	echo "$a $l0 $(wc -l <"$log") $t0 $(date +%s%3N)" >>"$out/rest"
+}
+
 # CPU time of the process $1 so far, in ms
 cpu_ms() {
 	awk -v hz="$(getconf CLK_TCK)" '{ print ($14 + $15) * 1000 / hz }' "/proc/$1/stat"
@@ -198,6 +215,7 @@ run() {
 		echo "keys per activation: $((STEPS + held))"
 		echo "changing: ${CHANGING:-none}${CHANGING:+, $CHANGING_TERM, window $changing_win, depth $changing_depth}"
 		echo "live: ${LIVE:-configured}"
+		echo "rest: ${REST}s"
 	} >"$out/meta"
 	cp "$qws" "$out/qws"
 
@@ -232,6 +250,9 @@ run() {
 		done
 		if ((SWEEP > 0)); then
 			sweep "$log"
+		fi
+		if ((REST > 0)); then
+			hold_still "$log" "$out" "$a"
 		fi
 		if ((held > 0)); then
 			xdotool key Right
@@ -432,6 +453,20 @@ live() {
 		printf 'S live done_ms     '
 		cat "${logs[@]}" | jq -r 'select(.message == "Live") | .done_ms' | pct
 	fi
+	# The rest variant: the passes of every window and the frames of cause
+	# live while the overlay is held still, and the activation with the
+	# fewest passes a second
+	for d in "$@"; do
+		[[ -f $d/rest ]] || continue
+		while read -r a l0 l1 t0 t1; do
+			sed -n "$((l0 + 1)),${l1}p" "$d/log.json" |
+				awk -v ms=$((t1 - t0)) '/"message":"Live"/ { p++ }
+					/"message":"Frame"/ && /"cause":"live"/ { f++ }
+					END { print p + 0, f + 0, ms }'
+		done <"$d/rest"
+	done | awk 'NF == 3 && $3 > 0 { p += $1; f += $2; ms += $3; n++; r = $1 * 1000 / $3; if (n == 1 || r < low) low = r }
+		END { if (n) printf "R at rest          %d passes, %d frames of cause live in %.1f s of %d activations: %.1f passes a second, the fewest %.1f\n",
+			p, f, ms / 1000, n, p * 1000 / ms, low }'
 	for d in "$@"; do
 		if [[ -f $d/cpu ]]; then
 			cat "$d/cpu"
