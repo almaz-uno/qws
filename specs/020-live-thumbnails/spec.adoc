@@ -320,9 +320,12 @@ All of it on `glx` with `appearance.thumbnail.live: true`; otherwise as in
   once a `live_interval`, the window that has waited longest first, one
   window a pass: a pass no sooner than the `live_interval` divided by the
   number of windows taking passes — waiting, or passed within the
-  interval — after the one before it. A fence and a flush follow each
-  pass; once the fence has signalled, tested by the snapshotter, the
-  texture is published as the window's picture.
+  interval — after the one before it. While the switcher presents frames
+  one after another — a step, a fade — a pass due is made right after the
+  end of a frame, in the pause before the next, waiting 10 ms at most for
+  one. A fence and a flush follow each pass; once the fence has signalled,
+  tested by the snapshotter, the texture is published as the window's
+  picture.
 . *Not live:* a window not viewable keeps its snapshot; a window whose size
   changes while shown keeps its last live picture until the next
   activation; a window the GPU will not bind (018) keeps its snapshot.
@@ -412,9 +415,10 @@ Run with the carousel and with the grid, with `live: true` and with
 | The schedule: `TestLiveSchedule` — while shown, a change is averaged
   without settle at most once a `live_interval`, the window that waited
   longest first, no two passes closer than the `live_interval` divided by
-  the windows taking passes; a window not viewable, or of a changed size,
-  is not; no snapshot with a read back while shown; hidden, the schedule
-  of 008 (`TestSchedule` unchanged).
+  the windows taking passes, and while frames come one after another
+  after the end of one, or 10 ms; a window not viewable, or of a changed
+  size, is not; no snapshot with a read back while shown; hidden, the
+  schedule of 008 (`TestSchedule` unchanged).
 
 | K6
 | Fallback: with the shared context made to fail, live thumbnails are off,

@@ -54,6 +54,11 @@ type Picture struct {
 // a pass a frame holds back is tried again
 const livePoll = 500 * time.Microsecond
 
+// liveHold is how long, at most, a pass due waits for the end of a frame
+// while frames come one after another: made right after a frame, it runs on
+// the GPU in the pause before the next, not beside it
+const liveHold = 10 * time.Millisecond
+
 // liveSession is what SetLive asks for: the overlay of the switcher shown, 0
 // for none, and the live interval
 type liveSession struct {
@@ -184,7 +189,11 @@ func (s *Snapshotter) BeginFrame(windows []xproto.Window) map[xproto.Window]Pict
 func (s *Snapshotter) EndFrame(fence uintptr) uintptr {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.inFrame = false
+	s.inFrame, s.lastEnd = false, time.Now()
+	select {
+	case s.frameEnd <- struct{}{}:
+	default:
+	}
 	if fence == 0 {
 		return 0
 	}
@@ -242,17 +251,34 @@ func (s *Snapshotter) liveWait(now time.Time) time.Duration {
 		if s.liveRetry.After(due) {
 			due = s.liveRetry
 		}
+		if s.framesFlowing(now) {
+			// For the end of a frame, or the hold at most
+			due = due.Add(s.hold)
+		}
 		d = min(d, max(0, due.Sub(now)))
 	}
 	return d
 }
 
-// liveTick publishes the passes done and makes the next one, if due
-func (s *Snapshotter) liveTick(now time.Time) {
+// framesFlowing reports whether the switcher presents frames one after
+// another: one ended less than liveHold ago
+func (s *Snapshotter) framesFlowing(now time.Time) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return now.Sub(s.lastEnd) < s.hold
+}
+
+// liveTick publishes the passes done and makes the next one, if due: right
+// after the end of a frame, afterFrame, while frames come one after another,
+// or once it has waited liveHold for one
+func (s *Snapshotter) liveTick(now time.Time, afterFrame bool) {
 	s.publishDone()
 	s.emptyTrash()
 	w, due, ok := s.nextLive(now)
 	if !ok || due.After(now) || s.liveRetry.After(now) {
+		return
+	}
+	if !afterFrame && s.framesFlowing(now) && now.Before(due.Add(s.hold)) {
 		return
 	}
 	if s.livePass(w, now) {

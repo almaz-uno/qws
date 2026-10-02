@@ -55,7 +55,14 @@ sooner than the interval divided by the number of windows taking passes —
 waiting, or passed within the interval — after the one before it, the
 `spread` of the probe; each followed by a fence and a flush. Counting only
 the windows waiting, a window passed alone would hold the pass of another
-back by a whole interval, and its lag past the bound of K7. After a pass is
+back by a whole interval, and its lag past the bound of K7. While frames
+come one after another — one ended less than 10 ms ago — a pass due waits
+for `EndFrame`, which wakes the loop, and is made right after the frame,
+in the pause before the next, or once it has waited 10 ms: passes at any
+moment ran beside a frame on the GPU in about one case in six, and
+`BenchmarkLiveBeside` found 2.2–2.5 % of the frames presented in more than
+2 ms with them, 0.2–0.9 % with the passes after the frames, 0.04–0.13 %
+for the clients alone (research). After a pass is
 published the snapshotter tells the selector (below). Windows changed
 since their snapshot when live begins wait for a pass from the time they
 changed.
@@ -188,10 +195,12 @@ order of its events is kept.
   true.
 
 | `pkg/carousel/live_test.go`, `pkg/snapshot/live_test.go`,
-  `internal/config/config_test.go`, `cmd/qws/root_test.go`
+  `pkg/ui/live_test.go`, `internal/config/config_test.go`,
+  `cmd/qws/root_test.go`
 | `TestLiveThumbnails`, `TestLiveCovers`, `TestLiveFallback`,
   `BenchmarkLiveFrame`; `TestSharedLive`, `TestLiveSchedule`,
-  `BenchmarkLivePass`; `TestThumbnailKeys`, the flags.
+  `BenchmarkLivePass`, `BenchmarkLiveBeside`; `TestLiveFrames`,
+  `TestLiveOff`; `TestThumbnailKeys`, the flags.
 
 | `specs/001-rendering-speed/measure.sh`
 | Session S5: the window that changes, `live` on and off in turn; the

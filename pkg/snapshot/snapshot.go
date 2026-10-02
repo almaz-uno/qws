@@ -61,10 +61,12 @@ type Snapshotter struct {
 	inFrame   bool
 	presFence uintptr
 	woken     bool
+	lastEnd   time.Time // of the last frame
 	liveWant  liveSession
 
 	paused   atomic.Bool
 	liveWake chan struct{} // SetLive was called
+	frameEnd chan struct{} // EndFrame was called
 	events   chan xgb.Event
 	refresh  chan chan struct{}
 	quit     chan struct{}
@@ -79,6 +81,7 @@ type Snapshotter struct {
 	cpu       *composite.Capturer
 	live      liveSession     // the live thumbnails taken; overlay 0: none
 	lastPass  time.Time       // the last live pass
+	hold      time.Duration   // liveHold; 0 in a test: no pass waits for a frame
 	liveRetry time.Time       // a pass a frame held back is tried again then
 	trash     []*liveTextures // live textures to delete once no frame is drawn
 }
@@ -148,6 +151,8 @@ func New(interval time.Duration, scaling string) (*Snapshotter, error) {
 		thumbGen: make(map[xproto.Window]uint64),
 		pics:     make(map[xproto.Window]Picture),
 		liveWake: make(chan struct{}, 1),
+		frameEnd: make(chan struct{}, 1),
+		hold:     liveHold,
 		events:   make(chan xgb.Event, 256),
 		refresh:  make(chan chan struct{}),
 		quit:     make(chan struct{}),
@@ -312,6 +317,10 @@ func (s *Snapshotter) run(ready chan<- error) {
 			s.handle(ev)
 		case <-s.liveWake:
 			s.setLive()
+		case <-s.frameEnd:
+			if s.live.overlay != 0 {
+				s.liveTick(time.Now(), true)
+			}
 		case done := <-s.refresh:
 			s.captureChanged(time.Now(), causeActivation, true)
 			close(done)
@@ -335,7 +344,7 @@ func (s *Snapshotter) run(ready chan<- error) {
 func (s *Snapshotter) tick(now time.Time) {
 	switch {
 	case s.live.overlay != 0:
-		s.liveTick(now)
+		s.liveTick(now, false)
 	case !s.paused.Load():
 		s.captureChanged(now, causeChange, false)
 	}

@@ -128,7 +128,9 @@ func (s *shareThread) run(fn func()) {
 func newShareThread(t testing.TB) *shareThread {
 	s := &shareThread{do: make(chan func())}
 	ready := make(chan error)
+	exited := make(chan struct{})
 	go func() {
+		defer close(exited)
 		runtime.LockOSThread()
 		off, err := glx.NewOffscreen()
 		if err != nil {
@@ -149,7 +151,11 @@ func newShareThread(t testing.TB) *shareThread {
 	if err := <-ready; err != nil {
 		t.Skipf("no offscreen GLX: %v", err)
 	}
-	t.Cleanup(func() { close(s.do) })
+	// The context is destroyed before the test goes on
+	t.Cleanup(func() {
+		close(s.do)
+		<-exited
+	})
 	return s
 }
 
