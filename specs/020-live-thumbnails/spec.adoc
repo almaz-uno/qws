@@ -289,11 +289,11 @@ All of it on `glx` with `appearance.thumbnail.live: true`; otherwise as in
   as its share context, on the presenter's own Xlib display, as now. If
   that fails, the presenter is created as now and live thumbnails are off,
   "Live thumbnails off: …" at info level, once.
-. *Live textures.* The snapshotter keeps, for each window it has averaged
-  on the GPU, a thumbnail texture of the size of its snapshot, two in
-  turn, so that it writes one while the presenter draws the other. A
-  snapshot taken while the switcher is hidden is averaged into it and read
-  back from it, as now.
+. *Live textures.* The snapshotter keeps, for each window it has passed
+  live, a thumbnail texture of the size of its snapshot, two in turn, so
+  that it writes one while the presenter draws the other. A snapshot is
+  averaged and read back as now, in the one framebuffer of 008: a window
+  never passed live — on a hidden workspace — gets no live textures.
 . *While shown* — while the overlay is mapped, from before the first frame
   of an activation to the end of its fade-out — the snapshotter takes no
   snapshot on change; with 011 merged, it takes no live pass either while
@@ -302,8 +302,10 @@ All of it on `glx` with `appearance.thumbnail.live: true`; otherwise as in
   its live texture without a read back — no settle of 100 ms — at most
   once a `live_interval`, the window that has waited longest first, one
   window a pass: a pass no sooner than the `live_interval` divided by the
-  number of windows waiting after the one before it. A fence and a flush
-  follow each pass.
+  number of windows taking passes — waiting, or passed within the
+  interval — after the one before it. A fence and a flush follow each
+  pass; once the fence has signalled, tested by the snapshotter, the
+  texture is published as the window's picture.
 . *Not live:* a window not viewable keeps its snapshot; a window whose size
   changes while shown keeps its last live picture until the next
   activation; a window the GPU will not bind (018) keeps its snapshot.
@@ -390,9 +392,9 @@ Run with the carousel and with the grid, with `live: true` and with
 | The schedule: `TestLiveSchedule` — while shown, a change is averaged
   without settle at most once a `live_interval`, the window that waited
   longest first, no two passes closer than the `live_interval` divided by
-  the windows waiting; a window not viewable, or of a changed size, is not;
-  no snapshot with a read back while shown; hidden, the schedule of 008
-  (`TestSchedule` unchanged).
+  the windows taking passes; a window not viewable, or of a changed size,
+  is not; no snapshot with a read back while shown; hidden, the schedule
+  of 008 (`TestSchedule` unchanged).
 
 | K6
 | Fallback: with the shared context made to fail, live thumbnails are off,

@@ -16,27 +16,49 @@ textures the snapshotter writes — and the fences after them — are objects of
 the presenter's context too (research, "Sharing"). Nothing else crosses: the
 presenter never binds a pixmap and never touches a window texture.
 
-*Live textures.* Each window the snapshotter has averaged on the GPU gets
-two thumbnail textures of the size of its snapshot, written in turn, with a
-framebuffer each. A snapshot of 008 is averaged into the next of them and
-read back from it, as now from the one target all windows share; a live
-pass averages into it and makes a fence, without the read back. A pass
-writes the texture of the two the presenter is not drawing, and waits
-first, on the GPU, for a fence of the frames the presenter has presented
-so far — as the uploads of 013 waited for a texture the presenter had
-drawn. A generation number counts the pictures of a window, so that the
-selector can tell a live texture newer than the snapshot a card was drawn
-from.
+*Live textures.* A window gets, at its first live pass, two thumbnail
+textures of the size of its snapshot, written in turn, with a framebuffer
+each; a pass averages into one and makes a fence, without the read back.
+Snapshots keep the one target of 008 and are read back from it: a window
+that is never passed while the switcher is shown — most of them, on hidden
+workspaces — gets no live textures, some 1.1 MB of the GPU's memory a
+window of E1 saved. A generation number counts the pictures of a window,
+snapshots and passes, so that the selector can tell a live picture newer
+than the snapshot a card was drawn from; the snapshots do not change
+during an activation (below), so the newest snapshot is the card's.
 
-*The live schedule.* Between `SetLive(overlay)`, which the selector calls
-when it maps its overlay, and `SetLive(0)`, when it unmaps it at the end of
-the fade-out, the loop of the snapshotter takes the windows that changed in
-the order they first changed, each at most once a `live_interval`, without
-the settle of 100 ms. One window a pass, the passes spread: a pass no
-sooner than the `live_interval` divided by the number of windows waiting
-after the one before it — the `spread` of the probe — each followed by a
-fence and a flush; the presenter tests the fence and never waits for it.
-After a pass the snapshotter tells the selector (below).
+*Fences.* The commands of the two contexts run in no order of each other
+(research of 013, "What the specifications allow"). The snapshotter tests
+the fence of a pass on its own thread, at most every 0.5 ms while a pass is
+under way, and only once it has signalled publishes the texture as the
+window's picture: the presenter draws complete pictures and tests no
+fence. A pass writes the texture published before the last publication —
+the one the presenter drew until then — so it must come after every frame
+that may draw it. The selector takes the pictures of a frame from the
+snapshotter (`BeginFrame`) and gives back, once the frame is presented, a
+fence the presenter made after it if it drew a live picture (`EndFrame`);
+a pass is not made while a frame that took the pictures before the
+window's last publication is being drawn, and waits otherwise, on the GPU,
+for the presenter's last fence — as the uploads of 013 waited for a
+texture the presenter had drawn. Textures of a window gone, or of a size
+no longer its, are deleted once no frame is being drawn: a frame may bind
+them, and a name deleted may be given again.
+
+*The live schedule.* Between `SetLive(overlay, interval)`, which the
+selector calls when it maps its overlay, and `SetLive(0, 0)`, when it unmaps
+it at the end of the fade-out, the loop of the snapshotter takes the
+windows that changed, each at most once an interval, without the settle of
+100 ms; of those due, the one that changed first. The interval is
+`live_interval`, or the refresh period of the overlay's monitor where it is
+0: the selector knows it. One window a pass, the passes spread: a pass no
+sooner than the interval divided by the number of windows taking passes —
+waiting, or passed within the interval — after the one before it, the
+`spread` of the probe; each followed by a fence and a flush. Counting only
+the windows waiting, a window passed alone would hold the pass of another
+back by a whole interval, and its lag past the bound of K7. After a pass is
+published the snapshotter tells the selector (below). Windows changed
+since their snapshot when live begins wait for a pass from the time they
+changed.
 
 *The pause of 011.* Without #35 merged, `SetLive` replaces `Pause` around
 an activation with `live: true` on `glx`. With it, the snapshotter is
@@ -82,17 +104,18 @@ connection, and the order of its events is kept.
   apart from a failure to create.
 
 | `pkg/snapshot/gpu.go`
-| The thumbnail drawn into a texture the caller gives, read back or not.
+| The average drawn into a framebuffer the caller gives, read back or not.
 
 | `pkg/snapshot/live.go`
-| New: the live textures of a window, their generation and fences; the
-  live schedule; `SetLive`, `Live(window)`; the `ClientMessage`; the records
-  "Live".
+| New: the live textures of a window, their generations and fences; the
+  live schedule; `SetLive`, `Share`, `BeginFrame` and `EndFrame`; the
+  `ClientMessage`; the records "Live".
 
-| `pkg/snapshot/snapshot.go`, `pkg/snapshot/schedule.go`
-| The loop runs the live schedule while live; `Pause` stays for `live:
-  false`. After #35: `pausedNow` leaves the own overlay out of `Shown`
-  while live.
+| `pkg/snapshot/snapshot.go`
+| The loop runs the live schedule while live, and no snapshot on change;
+  the generations of the snapshots. After #35: the live passes are paused
+  by `Shown` with the own overlay left out, the snapshots by `pausedNow` as
+  #35 makes it.
 
 | `pkg/x11/switchers.go` — after #35 only
 | `Shown` gets the window to leave out, 0 for none; `TestSwitchers` with
