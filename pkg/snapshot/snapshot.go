@@ -124,7 +124,7 @@ var newOffscreen = glx.NewOffscreen
 // scaling is the algorithm of pkg/composite, for the windows neither the GPU
 // nor RENDER can take.
 func New(interval time.Duration, scaling string) (*Snapshotter, error) {
-	conn, err := xgb.NewConn()
+	conn, err := x11.NewConn()
 	if err != nil {
 		return nil, fmt.Errorf("snapshot: %w", err)
 	}
@@ -156,21 +156,22 @@ func New(interval time.Duration, scaling string) (*Snapshotter, error) {
 	return s, nil
 }
 
-// initX sets up the extensions and watches the client list
+// initX checks the extensions, set up with the connection
+// (specs/021-xgb-extension-init), and watches the client list
 func (s *Snapshotter) initX(scaling string) error {
-	if err := xcomposite.Init(s.conn); err != nil {
+	if err := x11.CheckExtension(s.conn, "Composite"); err != nil {
 		return fmt.Errorf("Composite: %w", err)
 	}
 	if _, err := xcomposite.QueryVersion(s.conn, 0, 4).Reply(); err != nil {
 		return fmt.Errorf("Composite: %w", err)
 	}
-	if err := xfixes.Init(s.conn); err != nil {
+	if err := x11.CheckExtension(s.conn, "XFIXES"); err != nil {
 		return fmt.Errorf("XFIXES: %w", err)
 	}
 	if _, err := xfixes.QueryVersion(s.conn, 5, 0).Reply(); err != nil {
 		return fmt.Errorf("XFIXES: %w", err)
 	}
-	if err := damage.Init(s.conn); err != nil {
+	if err := x11.CheckExtension(s.conn, "DAMAGE"); err != nil {
 		return fmt.Errorf("DAMAGE: %w", err)
 	}
 	if _, err := damage.QueryVersion(s.conn, 1, 1).Reply(); err != nil {

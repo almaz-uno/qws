@@ -5,7 +5,7 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/jezek/xgb"
+	"github.com/almaz-uno/qws/pkg/x11"
 	"github.com/jezek/xgb/xproto"
 )
 
@@ -19,7 +19,7 @@ import (
 // halved on one side only, or not at all. Needs an X display with RENDER and
 // MIT-SHM, not a GPU or a compositor: the pixmaps are made here.
 func TestRenderThumbnail(t *testing.T) {
-	conn, err := xgb.NewConn()
+	conn, err := x11.NewConn()
 	if err != nil {
 		t.Skipf("no X display: %v", err)
 	}

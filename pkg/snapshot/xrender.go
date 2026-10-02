@@ -6,6 +6,7 @@ import (
 	"image"
 	"math"
 
+	"github.com/almaz-uno/qws/pkg/x11"
 	"github.com/jezek/xgb"
 	"github.com/jezek/xgb/render"
 	"github.com/jezek/xgb/shm"
@@ -30,20 +31,20 @@ type xrender struct {
 
 const filterBilinear = "bilinear"
 
-// newXRender sets up RENDER and MIT-SHM on the connection; an error without
-// them
+// newXRender sets up the RENDER path on a connection of x11.NewConn; an error
+// without RENDER or MIT-SHM
 func newXRender(conn *xgb.Conn, root xproto.Window) (*xrender, error) {
 	// The pixels are read as the bytes of a little-endian a8r8g8b8: BGRA
 	if xproto.Setup(conn).ImageByteOrder != xproto.ImageOrderLSBFirst {
 		return nil, errors.New("RENDER: images of the X server are not LSBFirst")
 	}
-	if err := render.Init(conn); err != nil {
+	if err := x11.CheckExtension(conn, "RENDER"); err != nil {
 		return nil, fmt.Errorf("RENDER: %w", err)
 	}
 	if _, err := render.QueryVersion(conn, 0, 11).Reply(); err != nil {
 		return nil, fmt.Errorf("RENDER: %w", err)
 	}
-	if err := shm.Init(conn); err != nil {
+	if err := x11.CheckExtension(conn, "MIT-SHM"); err != nil {
 		return nil, fmt.Errorf("MIT-SHM: %w", err)
 	}
 	if _, err := shm.QueryVersion(conn).Reply(); err != nil {
