@@ -25,9 +25,10 @@ import (
 // most once a live interval, of those due the window that has waited longest
 // first, and no pass closer to the one before than the interval divided by
 // the windows taking passes, and while frames come one after another after
-// the end of one; a window not viewable, whose size changed, or not shown in
-// the last frame, is not passed; while live no snapshot is taken on change,
-// and hidden the snapshots of 008 are (TestSchedule)
+// the end of one; a window not viewable, whose size changed, taken from its
+// frame's pixmap, or not shown in the last frame, is not passed; while live
+// no snapshot is taken on change, and hidden the snapshots of 008 are
+// (TestSchedule)
 func TestLiveSchedule(t *testing.T) {
 	t0 := time.Unix(1000, 0)
 	const interval = 33 * time.Millisecond
@@ -102,6 +103,7 @@ func TestLiveSchedule(t *testing.T) {
 		"frame unmapped": {mapped: true, frame: 2, bound: viewable.bound, liveDue: viewable.liveDue},
 		"size changed":   {mapped: true, stale: true, bound: viewable.bound, liveDue: viewable.liveDue},
 		"not bound":      {mapped: true, liveDue: viewable.liveDue},
+		"from its frame": {mapped: true, via: 2, bound: viewable.bound, liveDue: viewable.liveDue},
 		"unchanged":      {mapped: true, bound: viewable.bound},
 		"pass under way": {mapped: true, bound: viewable.bound, liveDue: viewable.liveDue, live: &liveTextures{pending: 1}},
 	} {

@@ -377,9 +377,11 @@ func (s *Snapshotter) nextLive(now time.Time) (*window, time.Time, bool) {
 
 // livePassable reports whether the window waits a pass that can be made: it
 // changed, is viewable, keeps the pixmap of its snapshot bound — a window
-// whose size changed keeps its last picture — and has no pass under way
+// whose size changed keeps its last picture — and has no pass under way. A
+// window taken from its frame's pixmap (specs/022-uncaptured-windows) has no
+// texture of its own, and takes none.
 func (w *window) livePassable() bool {
-	return w.liveDue.dirty && w.viewable() && !w.stale && w.bound != nil &&
+	return w.liveDue.dirty && w.viewable() && !w.stale && w.via == 0 && w.bound != nil &&
 		(w.live == nil || w.live.pending == 0)
 }
 
