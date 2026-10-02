@@ -19,6 +19,7 @@ import (
 // what it is told
 type fakeSource struct {
 	pics            map[xproto.Window]snapshot.Picture
+	shown           []xproto.Window
 	begun, inFrame  bool
 	fence, previous uintptr
 	overlay         xproto.Window
@@ -29,8 +30,8 @@ func (f *fakeSource) SetLive(overlay xproto.Window, interval time.Duration) {
 	f.overlay, f.interval = overlay, interval
 }
 
-func (f *fakeSource) BeginFrame([]xproto.Window) map[xproto.Window]snapshot.Picture {
-	f.begun, f.inFrame = true, true
+func (f *fakeSource) BeginFrame(shown []xproto.Window) map[xproto.Window]snapshot.Picture {
+	f.begun, f.inFrame, f.shown = true, true, shown
 	return f.pics
 }
 
@@ -91,10 +92,11 @@ func (livePresenter) Close()                      {}
 // TestLiveFrames checks the live thumbnails of the selector
 // (specs/020-live-thumbnails): a frame at rest takes the pictures, draws
 // those of the size of their cards' thumbnails, gives the snapshotter the
-// presenter's fence and releases the one it replaces; a frame's record has
-// the lag of the latest pass it draws for the first time, and only then;
-// the ClientMessage of the snapshotter asks for a frame at rest, which
-// waits a refresh period after the frame before
+// presenter's fence and releases the one it replaces, and the windows of the
+// cards in view, the same slice while the selection stays; a frame's record
+// has the lag of the latest pass it draws for the first time, and only then;
+// the ClientMessage of the snapshotter asks for a frame at rest, which waits
+// a refresh period after the frame before
 func TestLiveFrames(t *testing.T) {
 	goFont := filepath.Join(t.TempDir(), "goregular.ttf")
 	if err := os.WriteFile(goFont, goregular.TTF, 0o644); err != nil {
@@ -110,7 +112,7 @@ func TestLiveFrames(t *testing.T) {
 		},
 		period: 7 * time.Millisecond,
 	}
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 7; i++ {
 		s.windows = append(s.windows, x11.WindowInfo{
 			ID:      xproto.Window(10 + i),
 			Name:    "Terminal",
@@ -118,15 +120,29 @@ func TestLiveFrames(t *testing.T) {
 		})
 	}
 	s.selectedIndex, s.hoverIndex = 2, -1
-	changed := time.Now().Add(-20 * time.Millisecond)
-	src := &fakeSource{pics: map[xproto.Window]snapshot.Picture{
-		11: {Texture: 101, Width: 512, Height: 271, Gen: 3, Changed: changed},
-		12: {Texture: 102, Width: 512, Height: 271, Gen: 5, Changed: changed.Add(5 * time.Millisecond)},
-		13: {Texture: 103, Width: 400, Height: 271, Gen: 4, Changed: changed}, // of another size
-	}}
+	src := &fakeSource{}
 	p := &fakePresenter{}
 	s.live = liveThumbnails{snap: src, presenter: p, atom: 77, drawn: map[xproto.Window]uint64{}}
 
+	// The cards come into view, without pictures: those at offsets -2 to 3
+	// reach into the frame of 1260, the one at 4 does not
+	s.liveBegin()
+	s.liveEnd(time.Now())
+	shown := map[xproto.Window]bool{}
+	for _, id := range src.shown {
+		shown[id] = true
+	}
+	if len(shown) != 6 || shown[16] {
+		t.Errorf("the windows in view %v, want 10 to 15", src.shown)
+	}
+	first := src.shown
+
+	changed := time.Now().Add(-20 * time.Millisecond)
+	src.pics = map[xproto.Window]snapshot.Picture{
+		11: {Texture: 101, Width: 512, Height: 271, Gen: 3, Changed: changed},
+		12: {Texture: 102, Width: 512, Height: 271, Gen: 5, Changed: changed.Add(5 * time.Millisecond)},
+		13: {Texture: 103, Width: 400, Height: 271, Gen: 4, Changed: changed}, // of another size
+	}
 	frame := func() time.Time {
 		s.liveBegin()
 		s.liveRest()
@@ -147,6 +163,9 @@ func TestLiveFrames(t *testing.T) {
 	}
 
 	end := frame()
+	if len(src.shown) == 0 || &src.shown[0] != &first[0] {
+		t.Error("the windows in view given anew while the selection stays")
+	}
 	if src.fence != 1 {
 		t.Errorf("the snapshotter has fence %d, want the presenter's 1", src.fence)
 	}
@@ -167,6 +186,15 @@ func TestLiveFrames(t *testing.T) {
 	if lag := s.takeLag(); lag <= 0 || lag > time.Second {
 		t.Errorf("lag %v of a new pass", lag)
 	}
+
+	// The grid: every tile in view
+	s.config.LayoutMode = "grid"
+	s.liveBegin()
+	s.liveEnd(time.Now())
+	if len(src.shown) != len(s.windows) {
+		t.Errorf("%d tiles in view, want all %d", len(src.shown), len(s.windows))
+	}
+	s.config.LayoutMode = "carousel"
 
 	// The wake of the snapshotter
 	if s.liveEvent(xproto.ClientMessageEvent{Type: 76}) {

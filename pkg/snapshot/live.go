@@ -194,16 +194,19 @@ func (s *Snapshotter) Share() *glx.Share {
 }
 
 // BeginFrame takes, for a frame the presenter is about to draw, the live
-// pictures of the windows that are newer than their snapshots. Until
-// EndFrame, no pass writes the textures it gave.
-func (s *Snapshotter) BeginFrame(windows []xproto.Window) map[xproto.Window]Picture {
+// pictures that are newer than their windows' snapshots, of every window: a
+// card on its way out of the frame draws its own. Until EndFrame, no pass
+// writes the textures it gave. shown are the windows the switcher shows,
+// those the passes are for until the next frame; the snapshotter keeps the
+// slice, which the caller does not change after.
+func (s *Snapshotter) BeginFrame(shown []xproto.Window) map[xproto.Window]Picture {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.inFrame, s.fetchSeq, s.woken = true, s.seq, false
-	s.shown = windows
+	s.shown = shown
 	var pics map[xproto.Window]Picture
-	for _, id := range windows {
-		if p, ok := s.pics[id]; ok && p.Gen > s.thumbGen[id] {
+	for id, p := range s.pics {
+		if p.Gen > s.thumbGen[id] {
 			if pics == nil {
 				pics = make(map[xproto.Window]Picture)
 			}

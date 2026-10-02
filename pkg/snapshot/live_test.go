@@ -373,8 +373,9 @@ func pass(t testing.TB, s *Snapshotter, g *glThread, w *window) bool {
 // its own, as the presenter's is, reads a window's live picture — the area
 // average of its pixmap, within 1 per channel — and, after the pixmap is drawn
 // anew and averaged again, the new picture. A pass that would write the
-// texture a frame being drawn took is not made until the frame ends; a live
-// picture older than the window's snapshot is not given. Needs an X display
+// texture a frame being drawn took is not made until the frame ends; a frame
+// gets the pictures of the windows it does not show as well; a live picture
+// older than the window's snapshot is not given. Needs an X display
 // with GLX_EXT_texture_from_pixmap and a driver that shares objects between
 // two displays.
 func TestSharedLive(t *testing.T) {
@@ -458,6 +459,12 @@ func TestSharedLive(t *testing.T) {
 		t.Fatal("the third pass not made once the frame ended")
 	}
 	read("drawn anew twice", images[2])
+	end()
+
+	// The pictures of every window, those of the windows not shown with them
+	if pics := s.BeginFrame(nil); len(pics) != 1 {
+		t.Errorf("%d pictures for a frame that shows no window, want the window's", len(pics))
+	}
 	end()
 
 	// A snapshot taken since: the live picture is not newer than it

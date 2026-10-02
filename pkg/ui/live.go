@@ -12,13 +12,14 @@ import (
 // The live thumbnails of specs/020-live-thumbnails as the switcher shows
 // them. While its overlay is shown in full — from the end of its appearance
 // to the start of its disappearance — the snapshotter averages the windows
-// that change into pictures the presenter's context shares; each frame takes
-// the pictures newer than the snapshots of their cards (BeginFrame), draws
-// them over the thumbnails — over the frame at rest, or among the items of a
-// scene — and gives back the fence the presenter made after it (EndFrame). At
-// rest the switcher blocks on its X connection: the snapshotter wakes it with
-// a ClientMessage, and a frame is presented again with the pictures, no
-// sooner than a refresh period after the one before.
+// of the cards and tiles in view that change into pictures the presenter's
+// context shares; each frame takes the pictures newer than the snapshots of
+// their cards (BeginFrame), draws them over the thumbnails — over the frame
+// at rest, or among the items of a scene — and gives back the fence the
+// presenter made after it (EndFrame). At rest the switcher blocks on its X
+// connection: the snapshotter wakes it with a ClientMessage, and a frame is
+// presented again with the pictures, no sooner than a refresh period after
+// the one before.
 
 // causeLive is the cause of a frame at rest presented again for a live
 // picture, in the frame records
@@ -50,6 +51,11 @@ type liveThumbnails struct {
 	changed time.Time
 	drawn   map[xproto.Window]uint64 // the generation each window last drew
 	lag     time.Duration            // of the last frame, for its record; 0: none
+
+	// The windows of the cards and tiles in view at rest, for the passes,
+	// kept while the layers' generation, the layout and the selection stay
+	shown    []xproto.Window
+	shownKey [3]int
 
 	// The live items of the frame at rest, kept while what they depend on
 	// stays: the layers' generation and the layout, and for the carousel the
@@ -130,20 +136,45 @@ func (s *Selector) liveEvent(ev xproto.ClientMessageEvent) bool {
 	return true
 }
 
-// liveBegin takes the pictures of the windows shown for the frame about to
-// be presented
+// liveBegin takes the pictures for the frame about to be presented, and
+// tells the snapshotter the windows in view
 func (s *Selector) liveBegin() {
 	if !s.liveOn() {
 		return
 	}
-	ids := make([]xproto.Window, len(s.windows))
-	for i, w := range s.windows {
-		ids[i] = w.ID
-	}
-	s.live.pics = s.live.snap.BeginFrame(ids)
+	s.live.pics = s.live.snap.BeginFrame(s.liveShown())
 	s.live.begun, s.live.wanted = true, false
 	s.live.changed = time.Time{}
 	clear(s.live.drawing)
+}
+
+// liveShown is the windows whose cards or tiles are in view at rest: every
+// tile of the grid; the cards of the carousel with a live rectangle at the
+// selection, eleven at most — those the snapshotter passes. A slice given
+// is never changed: the snapshotter keeps it.
+func (s *Selector) liveShown() []xproto.Window {
+	key := [3]int{s.layers.gen, s.selectedIndex, 0}
+	if s.grid() {
+		key = [3]int{s.layers.gen, -1, 1}
+	}
+	if s.live.shown != nil && s.live.shownKey == key {
+		return s.live.shown
+	}
+	var data []carousel.WindowData
+	if !s.grid() {
+		data = s.prepareWindowData()
+	}
+	shown := make([]xproto.Window, 0, len(s.windows))
+	for i, w := range s.windows {
+		if !s.grid() {
+			if _, ok := carousel.CardLive(data, i, float64(i-s.selectedIndex), s.config); !ok {
+				continue
+			}
+		}
+		shown = append(shown, w.ID)
+	}
+	s.live.shown, s.live.shownKey = shown, key
+	return shown
 }
 
 // liveEnd follows the frame presented, which ended at end: the presenter's
