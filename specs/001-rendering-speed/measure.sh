@@ -15,7 +15,11 @@
 # With CHANGING=<output> it is session S5 of specs/020-live-thumbnails: before
 # the session a terminal printing a line every 20 ms is started, floating on
 # the workspace shown on that output — DP-4 on ws1 — viewable all along, and
-# focus goes back where it was; it is stopped with the instance. With
+# focus goes back where it was; it is stopped with the instance. The terminal
+# is CHANGING_TERM: mate-terminal by default, a window of depth 32 under the
+# compositor of ws1, which takes live passes; or xterm, of depth 24 and drawn
+# in the pixmap of its frame, which takes none. meta has its window and
+# depth. With
 # LIVE=true or LIVE=false the instance runs with appearance.thumbnail.live so
 # (a build that knows the key); unset, as configured. Each run writes the CPU
 # time of the instance over each activation, from the key press to 0.3 s
@@ -45,6 +49,7 @@ SWEEP=${SWEEP:-0}
 REPEAT_DELAY=${REPEAT_DELAY:-500}
 REPEAT_RATE=${REPEAT_RATE:-33}
 CHANGING=${CHANGING:-}
+CHANGING_TERM=${CHANGING_TERM:-mate-terminal}
 LIVE=${LIVE:-}
 
 # Presses of the held key: the first, and the repeats after the delay
@@ -132,17 +137,34 @@ warm_up() {
 
 # The window of S5 of specs/020-live-thumbnails: a terminal printing a line
 # every 20 ms, floating on the workspace shown on output $1; focus goes back
-# to the window it was on. Its PID is in changing_pid.
+# to the window it was on. Its PID is in changing_pid, its window and depth in
+# changing_win and changing_depth.
 changing_pid=
+changing_win=
+changing_depth=
 start_changing() {
-	local output=$1 prev i
+	local output=$1 prev i loop='while :; do date +%T.%N; sleep 0.02; done'
 	prev=$(i3-msg -t get_tree | jq -r '.. | objects | select(.focused == true) | .window // empty')
-	xterm -class QwsS5 -geometry 100x30 -e bash -c 'while :; do date +%T.%N; sleep 0.02; done' &
+	case $CHANGING_TERM in
+	mate-terminal)
+		# A process of its own, not a window of the author's terminals
+		mate-terminal --disable-factory --class QwsS5 --geometry 100x30 -e "bash -c '$loop'" &
+		;;
+	xterm) xterm -class QwsS5 -geometry 100x30 -e bash -c "$loop" & ;;
+	*)
+		echo "CHANGING_TERM is mate-terminal or xterm, not $CHANGING_TERM" >&2
+		exit 2
+		;;
+	esac
 	changing_pid=$!
 	for ((i = 0; i < 500; i++)); do
-		i3-msg -t get_tree | jq -e '.. | objects | select(.window_properties.class? == "QwsS5")' >/dev/null && break
+		changing_win=$(i3-msg -t get_tree |
+			jq -r 'first(.. | objects | select(.window_properties.class? == "QwsS5") | .window) // empty')
+		[[ -n $changing_win ]] && break
 		sleep 0.01
 	done
+	[[ -n $changing_win ]] || { echo "no window of class QwsS5" >&2; exit 1; }
+	changing_depth=$(xwininfo -id "$changing_win" | awk '/Depth:/ { print $2 }')
 	i3-msg -q '[class="QwsS5"] floating enable, move container to output '"$output"
 	if [[ -n $prev ]]; then
 		i3-msg -q "[id=$prev] focus"
@@ -174,7 +196,7 @@ run() {
 		echo "held: ${HOLD}s, $held keys"
 		echo "sweep: $SWEEP"
 		echo "keys per activation: $((STEPS + held))"
-		echo "changing: ${CHANGING:-none}"
+		echo "changing: ${CHANGING:-none}${CHANGING:+, $CHANGING_TERM, window $changing_win, depth $changing_depth}"
 		echo "live: ${LIVE:-configured}"
 	} >"$out/meta"
 	cp "$qws" "$out/qws"
