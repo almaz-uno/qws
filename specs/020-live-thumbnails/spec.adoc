@@ -41,14 +41,16 @@ these textures over the thumbnail of the window's card or tile. Nothing is
 read back and nothing is drawn by the CPU for a change. `cpu`, and `glx`
 where the presenter cannot share the textures, keep the snapshots of today.
 
-The specification is a delta to `develop` at `6fd664a` (1.3.1). Unchanged:
-the snapshots while the switcher is hidden (008, 018) and before the first
-frame of an activation; every frame of `cpu`, and the digests of Σ; the
+The specification is a delta to `develop` at `6fd664a` (1.3.1), written
+before 011 (pull request #35) was merged; the branch was then merged with
+`develop` at `759c6d3` (1.3.2), which has it, and the change is now a delta
+to that. Unchanged: the snapshots while the switcher is hidden (008, 018)
+and before the first frame of an activation; their pause for the switchers
+of other instances (011); every frame of `cpu`, and the digests of Σ; the
 frames of `glx` while no shown window has changed since its snapshot; the
 layers and the animations of 007 and 010; the existing configuration keys
-and their meaning, `behavior.snapshot_interval` among them. The change may
-land after 011 (pull request #35, the patch 1.3.2); D5 says how it reads
-with and without it.
+and their meaning, `behavior.snapshot_interval` among them. D5 says how it
+reads with and without 011.
 
 == Decisions
 
@@ -190,7 +192,7 @@ read and have no effect under `cpu`.
 Since 007 the snapshotter takes no snapshot on change while its switcher
 is shown: `cmd/qws/root.go` calls `Pause(true)` before `Show` and
 `Pause(false)` at the end of the fade-out. Specification 011 (pull request
-#35, to go out as the patch 1.3.2) pauses the snapshots for the switcher of
+#35, released as the patch 1.3.2) pauses the snapshots for the switcher of
 any instance as well: its snapshotter is paused while `paused` is set or
 `x11.Switchers.Shown()` — any overlay listed in the root property
 `_QWS_SWITCHERS` is mapped — and each instance lists its own overlay there
@@ -227,7 +229,8 @@ How it reads against each base:
   passes in between, paused or not. With `live: false`, under `cpu`, or
   where live thumbnails are off (D7), `Pause` alone, as now.
 
-| after #35 is merged
+| after #35 is merged — `759c6d3`, 1.3.2, the base the branch is merged
+  with
 | The same; and the live passes are paused by `Switchers.Shown` with the
   overlay `SetLive` gives left out — it gets a window to leave out — so
   that they stop for the other instances' overlays only; the snapshots on
@@ -239,7 +242,7 @@ Made in the implementation, 2026-10-02: `root.go` keeps calling `Pause`
 with live thumbnails on, rather than not at all, as the table first read.
 Live passes run whatever `paused` says, so the pause now stops only the
 snapshots on change, from before the window list of an activation is taken
-to the end of its fade-out, as in 1.3.1: the snapshots its cards are drawn
+to the end of its fade-out, as before: the snapshots its cards are drawn
 from stay the snapshotter's newest during the activation, and a live
 picture is drawn exactly when it is newer than the newest snapshot of its
 window. Without the pause, a snapshot taken between the list and the
@@ -261,7 +264,7 @@ Two keys under `appearance.thumbnail`, beside `width`, `height` and
 | `appearance.thumbnail.live`
 | `true`
 | Thumbnails follow their windows while the switcher is shown, on `glx`.
-  `false`: snapshots, as in 1.3.1.
+  `false`: snapshots, as in 1.3.2.
 
 | `appearance.thumbnail.live_interval`
 | `33ms`
@@ -300,7 +303,7 @@ contexts on one Xlib display, which Mesa may need, is an open decision.
 == Behavior
 
 All of it on `glx` with `appearance.thumbnail.live: true`; otherwise as in
-1.3.1.
+1.3.2.
 
 . *Sharing.* The presenter's GL context is created with the snapshotter's
   as its share context, on the presenter's own Xlib display, as now. If
@@ -313,8 +316,9 @@ All of it on `glx` with `appearance.thumbnail.live: true`; otherwise as in
   never passed live — on a hidden workspace — gets no live textures.
 . *While shown* — while the overlay is mapped, from before the first frame
   of an activation to the end of its fade-out — the snapshotter takes no
-  snapshot on change; with 011 merged, it takes no live pass either while
-  the overlay of another instance is mapped (D5). A viewable window shown
+  snapshot on change, and no live pass either while the overlay of another
+  instance is mapped (D5, 011); its own overlay, listed among the
+  switchers as well, does not pause them. A viewable window shown
   in a card or tile that changes is bound again and averaged into
   its live texture without a read back — no settle of 100 ms — at most
   once a `live_interval`, the window that has waited longest first, one
@@ -352,7 +356,7 @@ No key, variable or flag is renamed or removed; `snapshot_interval` keeps
 its meaning. A configuration without the two keys gets live thumbnails on
 `glx` — a change the user sees, with two new keys: a minor version
 (constitution, "Releases and versions"). `live: false` restores the
-thumbnails of 1.3.1. `README.md`, `doc/configuration.asciidoc` and
+thumbnails of 1.3.2. `README.md`, `doc/configuration.asciidoc` and
 `config.yaml.example` describe the keys in the same change.
 
 == Metrics
@@ -418,7 +422,11 @@ Run with the carousel and with the grid, with `live: true` and with
   the windows taking passes, and while frames come one after another none
   in the 4 ms before the end of a frame; a window not viewable, of a
   changed size or not shown, is not; no snapshot with a read back while
-  shown; hidden, the schedule of 008 (`TestSchedule` unchanged).
+  shown; hidden, the schedule of 008 (`TestSchedule` unchanged). No live
+  pass while the switcher of another instance is shown, and none paused by
+  its own overlay (`TestLivePause`, `TestSwitchersOwnOverlay` of
+  `pkg/x11`); the tests of 011 unchanged but for `Shown` taking the overlay
+  to leave out.
 
 | K6
 | Fallback: with the shared context made to fail, live thumbnails are off,

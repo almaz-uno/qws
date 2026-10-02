@@ -78,14 +78,17 @@ a pass is published the snapshotter tells the selector (below). Windows
 changed since their snapshot when live begins wait for a pass from the
 time they changed.
 
-*The pause of 011.* `Pause` stays around an activation, as in 1.3.1, and
+*The pause of 011.* `Pause` stays around an activation, as before, and
 stops the snapshots on change only: between `SetLive(overlay)` and
 `SetLive(0)` the loop of the snapshotter takes live passes, paused or not
-(D5, made in the implementation). With #35 merged, the live passes are
-paused by the overlays of `_QWS_SWITCHERS` other than the one `SetLive`
-gave it — `Switchers.Shown` gets a window to leave out — and the snapshots
-by `pausedNow` of #35 as it is: the change is the condition of `liveTick`
-and the timer of `liveWait`.
+(D5, made in the implementation). With #35, merged in 1.3.2, the live
+passes are paused by the overlays of `_QWS_SWITCHERS` other than the one
+`SetLive` gave it — `Switchers.Shown` gets a window to leave out, and
+`othersShown` gives it the overlay of `SetLive` — and the snapshots by
+`pausedNow` of #35 as it is, the own overlay counted: the change is the
+condition of `liveTick` and of the timer of `liveWait`. The snapshotter
+holds the switchers behind an interface of its own, so that a test can
+give them.
 
 *Drawing.* The selector knows where each thumbnail lies: the geometry of a
 card at its offset — integer at rest, fractional in a step — and of a tile
@@ -151,13 +154,13 @@ order of its events is kept.
 
 | `pkg/snapshot/snapshot.go`
 | The loop runs the live schedule while live, and no snapshot on change;
-  the generations of the snapshots. After #35: the live passes are paused
+  the generations of the snapshots. With #35: the live passes are paused
   by `Shown` with the own overlay left out, the snapshots by `pausedNow` as
-  #35 makes it.
+  #35 makes it; `TestLivePause`.
 
-| `pkg/x11/switchers.go` — after #35 only
-| `Shown` gets the window to leave out, 0 for none; `TestSwitchers` with
-  an overlay left out.
+| `pkg/x11/switchers.go`, from #35
+| `Shown` gets the window to leave out, 0 for none;
+  `TestSwitchersOwnOverlay`.
 
 | `pkg/carousel/factory.go`, `pkg/carousel/present_glx.go`
 | `NewBackend` takes the context to share with; the presenter says whether
@@ -233,5 +236,5 @@ and CPU paths; `snapshot_interval`.
 Sharing first (`pkg/glx`, K4), then the live textures and their schedule
 (`pkg/snapshot`, K5), the drawing (`pkg/carousel`, K3), the selector and
 the configuration (K6, K10), and last the sessions on E1 (K7–K9, K11), with
-`live` on and off in turn. Should #35 be merged first, `pkg/x11` comes with
-the schedule.
+`live` on and off in turn. #35 was merged after the schedule: `pkg/x11`
+came with the merge of `develop` at `759c6d3`.
