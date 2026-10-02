@@ -3,7 +3,7 @@
 :toc-title: Contents
 :sectnums:
 :revdate: 2026-10-02
-:status: draft
+:status: implemented
 :issue: 62
 
 == What and why
@@ -175,9 +175,9 @@ and `via` their frames.
 
 == Results
 
-2026-10-02, ws1, off the screen: windows of the test off every monitor;
-the runs in `research.adoc`, "The change off the screen". K5 waits for the
-author on the desktop of E1.
+2026-10-02, ws1. K1–K4 and K6 off the screen, windows of the test off
+every monitor, the runs in `research.adoc`, "The change off the screen"; K5
+by the author on the desktop of E1.
 
 [cols="1,6"]
 |===
@@ -197,7 +197,11 @@ author on the desktop of E1.
   `TestNewAndClose` pass.
 | K4 | `BenchmarkFrameRender`, three runs of 200: p50 1.01–1.06 ms, p95
   1.44–1.55 ms.
-| K5 | Waits for the author.
+| K5 | The author, 2026-10-02, on E1, the build of the change
+  (`v1.3.2-3-g0c60538`) beside the service on Alt+F11: a window of depth 24
+  on a visible workspace, Dion or Telegram, had a current card — "it
+  works". The xterm was not looked at on its own; a child of the same
+  client is a case of K1.
 | K6 | `go vet ./...`, `go test ./...` and `make check-specs` on each
   commit, in a worktree of its own.
 |===

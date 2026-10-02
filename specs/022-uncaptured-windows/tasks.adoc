@@ -11,7 +11,6 @@
 . [x] T4. `namePixmap`, RENDER from a rectangle, the frame named anew; K1–K3
   with `TestCaptureFromFrame`, failing first without the change.
 . [x] T5. `BenchmarkFrameRender`; K4.
-. [ ] T6. Scenario E on E1, by the author; K5.
-. [ ] T7. `go vet ./...`, `go test ./...`, `make check-specs`; K6; the
-  results. The checks pass; the results off the screen are written, K5's
-  to come.
+. [x] T6. Scenario E on E1, by the author; K5.
+. [x] T7. `go vet ./...`, `go test ./...`, `make check-specs`; K6; the
+  results.
