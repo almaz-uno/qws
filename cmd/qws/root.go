@@ -76,6 +76,8 @@ func init() {
 	rootCmd.PersistentFlags().Int("appearance-thumbnail-width", defaultCfg.Appearance.Thumbnail.Width, "thumbnail width in pixels")
 	rootCmd.PersistentFlags().Int("appearance-thumbnail-height", defaultCfg.Appearance.Thumbnail.Height, "thumbnail height in pixels")
 	rootCmd.PersistentFlags().String("appearance-thumbnail-scaling-algorithm", defaultCfg.Appearance.Thumbnail.ScalingAlgorithm, "thumbnail scaling algorithm (nearest, bilinear, catmull-rom)")
+	rootCmd.PersistentFlags().Bool("appearance-thumbnail-live", defaultCfg.Appearance.Thumbnail.Live, "thumbnails follow their windows while the switcher is shown (glx renderer)")
+	rootCmd.PersistentFlags().Duration("appearance-thumbnail-live-interval", defaultCfg.Appearance.Thumbnail.LiveInterval, "a shown window that changed is averaged again at most this often (0 = once a refresh)")
 	rootCmd.PersistentFlags().Float64("appearance-spacing", defaultCfg.Appearance.Spacing, "distance between carousel items")
 	rootCmd.PersistentFlags().Float64("appearance-perspective", defaultCfg.Appearance.Perspective, "perspective effect factor (0.0-1.0)")
 	rootCmd.PersistentFlags().Int("appearance-grid-columns", defaultCfg.Appearance.Grid.Columns, "number of columns in grid layout (0 = auto)")
@@ -195,6 +197,12 @@ func applyFlags() {
 	}
 	if rootCmd.PersistentFlags().Changed("appearance-thumbnail-scaling-algorithm") {
 		cfg.Appearance.Thumbnail.ScalingAlgorithm, _ = rootCmd.PersistentFlags().GetString("appearance-thumbnail-scaling-algorithm")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-thumbnail-live") {
+		cfg.Appearance.Thumbnail.Live, _ = rootCmd.PersistentFlags().GetBool("appearance-thumbnail-live")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-thumbnail-live-interval") {
+		cfg.Appearance.Thumbnail.LiveInterval, _ = rootCmd.PersistentFlags().GetDuration("appearance-thumbnail-live-interval")
 	}
 	if rootCmd.PersistentFlags().Changed("appearance-spacing") {
 		cfg.Appearance.Spacing, _ = rootCmd.PersistentFlags().GetFloat64("appearance-spacing")
@@ -592,7 +600,7 @@ func handleKeyPress(ctx context.Context, conn *x11.Connection, e xproto.KeyPress
 	// Create or reuse selector
 	if selector == nil {
 		var err error
-		selector, err = ui.NewSelector(ctx, conn.Conn, conn.Root, windows, cfg.Appearance, cfg.Keybindings, cfg.Windows.Workspace, watcher)
+		selector, err = ui.NewSelector(ctx, conn.Conn, conn.Root, windows, cfg.Appearance, cfg.Keybindings, cfg.Windows.Workspace, watcher, snap)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to create selector")
 			return selector, nil
@@ -612,6 +620,10 @@ func handleKeyPress(ctx context.Context, conn *x11.Connection, e xproto.KeyPress
 		watcher.PauseSnapshots(true)
 		defer watcher.PauseSnapshots(false)
 	}
+	// No snapshot on change while the switcher is shown: from here, so that
+	// the snapshots of the cards stay those of the window list; the live
+	// thumbnails of specs/020-live-thumbnails run meanwhile, from the mapping
+	// of the overlay to the end of its fade-out
 	if snap != nil {
 		snap.Pause(true)
 		defer snap.Pause(false)

@@ -220,19 +220,30 @@ How it reads against each base:
 | Base | The change
 
 | `develop`, without #35
-| With `live: true` on `glx`, `root.go` does not call `Pause`; the
-  selector calls `SetLive(overlay)` of the snapshotter when it maps its
-  overlay, before the first frame, and `SetLive(0)` when it unmaps it, at
-  the end of the fade-out; the snapshotter takes live passes in between.
-  With `live: false`, under `cpu`, or where live thumbnails are off (D7),
-  `Pause` as now.
+| `root.go` calls `Pause` around an activation as now; with `live: true`
+  on `glx` the selector calls `SetLive(overlay)` of the snapshotter when it
+  maps its overlay, before the first frame, and `SetLive(0)` when it
+  unmaps it, at the end of the fade-out, and the snapshotter takes live
+  passes in between, paused or not. With `live: false`, under `cpu`, or
+  where live thumbnails are off (D7), `Pause` alone, as now.
 
 | after #35 is merged
-| The same; and the overlay `SetLive` gives is left out of
-  `Switchers.Shown`, which gets a window to leave out, so that the
-  snapshotter is paused by the other instances' overlays only. With
-  `live: false`, #35 as it is.
+| The same; and the live passes are paused by `Switchers.Shown` with the
+  overlay `SetLive` gives left out — it gets a window to leave out — so
+  that they stop for the other instances' overlays only; the snapshots on
+  change keep the pause of #35, `paused` or `Shown`. With `live: false`,
+  #35 as it is.
 |===
+
+Made in the implementation, 2026-10-02: `root.go` keeps calling `Pause`
+with live thumbnails on, rather than not at all, as the table first read.
+Live passes run whatever `paused` says, so the pause now stops only the
+snapshots on change, from before the window list of an activation is taken
+to the end of its fade-out, as in 1.3.1: the snapshots its cards are drawn
+from stay the snapshotter's newest during the activation, and a live
+picture is drawn exactly when it is newer than the newest snapshot of its
+window. Without the pause, a snapshot taken between the list and the
+mapping of the overlay would be newer than a card's.
 
 The overlay is made anew when the monitor changes; `SetLive` is called at
 each activation with the overlay of that activation.
@@ -347,9 +358,10 @@ L — lag:: For a live pass, the time from the snapshotter's reading of the
 DAMAGE event of the change it covers to the end of the presentation, P, of
 the first frame that draws it; the compositor shows the frame at its next
 vertical blank, which L does not count. The frame records of 001 and 007
-get a field `live`, the lag of the latest pass the frame draws for the
-first time; the snapshotter logs each pass at debug level, "Live", with the
-window and the time it took.
+get a field `live_ms`, the lag of the latest pass the frame draws for the
+first time, in the first record of the frame; a frame at rest presented
+again for a pass is a record "Frame" of cause `live`. The snapshotter logs
+each pass at debug level, "Live", with the window and the time it took.
 
 A1, A2, A3:: As in 007, session S2.
 

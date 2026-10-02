@@ -10,7 +10,9 @@ import (
 	"github.com/almaz-uno/qws/internal/config"
 	"github.com/almaz-uno/qws/pkg/carousel"
 	"github.com/almaz-uno/qws/pkg/focus"
+	"github.com/almaz-uno/qws/pkg/glx"
 	"github.com/almaz-uno/qws/pkg/keygrab"
+	"github.com/almaz-uno/qws/pkg/snapshot"
 	"github.com/almaz-uno/qws/pkg/x11"
 	"github.com/jezek/xgb"
 	"github.com/jezek/xgb/xproto"
@@ -69,10 +71,13 @@ type Selector struct {
 	animations          int                             // Animations so far, for the frame records
 	mapped              bool                            // The overlay is on the screen
 	chosenAt            time.Time                       // When the event that ended the activation was read
+	live                liveThumbnails                  // The live thumbnails (specs/020-live-thumbnails)
 }
 
-// NewSelector creates a new graphical window selector
-func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, windows []x11.WindowInfo, appearance config.Appearance, keybindings config.Keybindings, initialWorkspaceOpt string, watcher *focus.Watcher) (*Selector, error) {
+// NewSelector creates a new graphical window selector; snap, when not nil, is
+// the snapshotter whose pictures the live thumbnails show
+// (specs/020-live-thumbnails)
+func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, windows []x11.WindowInfo, appearance config.Appearance, keybindings config.Keybindings, initialWorkspaceOpt string, watcher *focus.Watcher, snap *snapshot.Snapshotter) (*Selector, error) {
 	// Try to get current monitor geometry, fallback to full screen on error
 	monitor, err := x11.GetCurrentMonitor(conn, root)
 	if err != nil {
@@ -210,7 +215,11 @@ func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, window
 	}
 
 	// Initialize renderer and presenter
-	renderer, presenter, err := carousel.NewBackend(appearance.Renderer, nil)
+	var share *glx.Share
+	if snap != nil && appearance.Thumbnail.Live {
+		share = snap.Share()
+	}
+	renderer, presenter, err := carousel.NewBackend(appearance.Renderer, share)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create renderer: %w", err)
 	}
@@ -219,6 +228,7 @@ func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, window
 	if a, ok := presenter.(carousel.Animator); ok {
 		s.animator = a
 	}
+	s.initLive(snap, presenter)
 	anim, warnings := parseAnimation(appearance.Animation)
 	for _, w := range warnings {
 		log.Warn().Msg(w)
@@ -417,6 +427,7 @@ func (s *Selector) Show() (*x11.WindowInfo, error) {
 		return nil, fmt.Errorf("failed to show window: %w", err)
 	}
 	s.mapped = true
+	s.setLive(true)
 
 	// Grab keyboard to receive all keyboard events
 	xproto.GrabKeyboard(
@@ -529,11 +540,15 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 				s.frame()
 				continue
 			}
-		case s.backgroundDue():
-			// Layers for the next step, or the frame at rest of the last one:
-			// taken between the events
+		case s.backgroundDue() || s.liveDue():
+			// Layers for the next step, or the frame at rest of the last one,
+			// or a frame for the live thumbnails: between the events
 			if event, _ = s.conn.PollForEvent(); event == nil {
-				s.uploadIdle()
+				if s.liveDue() {
+					s.liveIdle()
+				} else {
+					s.uploadIdle()
+				}
 				continue
 			}
 		default:
@@ -543,6 +558,10 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 			}
 		}
 
+		if e, ok := event.(xproto.ClientMessageEvent); ok && s.liveEvent(e) {
+			// A live picture published: not a cause of the frames of keys
+			continue
+		}
 		if _, ok := event.(xproto.KeyPressEvent); ok {
 			s.markFrameCause(causeKey)
 		} else {
@@ -714,6 +733,8 @@ func (s *Selector) render(thumbnails []image.Image) {
 	if appears {
 		s.beginFade(false, drawEnd, s.timing.start)
 	}
+	s.liveBegin()
+	s.liveRest()
 	var err error
 	if s.fade.active {
 		err = s.animator.PresentFaded(img, s.fadeAt(drawEnd))
@@ -724,6 +745,7 @@ func (s *Selector) render(thumbnails []image.Image) {
 		log.Error().Err(err).Msg("Failed to present frame")
 	}
 	end := time.Now()
+	s.liveEnd(end)
 	if appears {
 		// The appearance runs from the end of its first frame, which uploads
 		// a whole frame; the level of that frame stays
@@ -741,15 +763,19 @@ func (s *Selector) render(thumbnails []image.Image) {
 // holds it, so it is not drawn anew
 func (s *Selector) refresh(thumbnails []image.Image) {
 	start := time.Now()
+	s.liveBegin()
+	s.liveRest()
 	ok, err := s.presenter.Refresh()
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to refresh frame")
 	}
+	end := time.Now()
+	s.liveEnd(end)
 	if !ok {
 		s.render(thumbnails)
 		return
 	}
-	s.logRefresh(start, time.Now())
+	s.logRefresh(start, end)
 }
 
 // handleKeyPressSimple handles a key press event

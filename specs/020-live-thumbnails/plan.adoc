@@ -60,12 +60,14 @@ published the snapshotter tells the selector (below). Windows changed
 since their snapshot when live begins wait for a pass from the time they
 changed.
 
-*The pause of 011.* Without #35 merged, `SetLive` replaces `Pause` around
-an activation with `live: true` on `glx`. With it, the snapshotter is
+*The pause of 011.* `Pause` stays around an activation, as in 1.3.1, and
+stops the snapshots on change only: between `SetLive(overlay)` and
+`SetLive(0)` the loop of the snapshotter takes live passes, paused or not
+(D5, made in the implementation). With #35 merged, the live passes are
 paused by the overlays of `_QWS_SWITCHERS` other than the one `SetLive`
-gave it — `Switchers.Shown` gets a window to leave out — and its own
-`paused` is not set while live; with `live: false` the code of #35 is kept
-as it is.
+gave it — `Switchers.Shown` gets a window to leave out — and the snapshots
+by `pausedNow` of #35 as it is: the change is the condition of `liveTick`
+and the timer of `liveWait`.
 
 *Drawing.* The selector knows where each thumbnail lies: the geometry of a
 card at its offset — integer at rest, fractional in a step — and of a tile
@@ -98,12 +100,17 @@ selector to give the snapshotter, and deletes the one it replaces
 they are.
 
 *Waking at rest.* At rest the selector waits in `WaitForEvent` of its own
-connection. Once the fence of a pass has signalled — the snapshotter waits
-for it on its own thread — the snapshotter sends the overlay window a
-`ClientMessage` of the atom `_QWS_LIVE` through its own connection, at most
-one a refresh period; the selector reads it as any event and presents the
-frame shown with the live items over it. No goroutine reads the selector's
-connection, and the order of its events is kept.
+connection. Once a pass is published, the snapshotter sends the overlay
+window a `ClientMessage` of the atom `_QWS_LIVE` through its own
+connection, at most one between two frames of the selector (`BeginFrame`
+clears it); the selector reads it as any event, not as a cause of the
+frames of keys, and presents the frame shown — again, with `Refresh`, or
+the scene at the target while its frame at rest is drawn — with the live
+items over it, no sooner than a refresh period after the frame before: it
+polls its connection meanwhile, as for the uploads of 007. Such a frame is
+logged as a record "Frame" of cause `live`. In motion every frame takes
+the pictures anyway. No goroutine reads the selector's connection, and the
+order of its events is kept.
 
 == Files
 
@@ -155,17 +162,22 @@ connection, and the order of its events is kept.
 
 | `pkg/ui/live.go`
 | New: the live items of the layout shown, from the snapshotter's live
-  textures newer than the activation's snapshots; at rest the frame
-  presented again on `_QWS_LIVE`, no sooner than a period after the last.
+  pictures newer than the activation's snapshots, the geometry kept while
+  the layers, the selection and the hover stay; at rest the frame
+  presented again on `_QWS_LIVE`, no sooner than a period after the last;
+  the lag of a frame; the fallback said once.
 
-| `pkg/ui/selector.go`, `pkg/ui/animation.go`, `pkg/ui/timing.go`
+| `pkg/ui/selector.go`, `pkg/ui/animation.go`, `pkg/ui/fade.go`,
+  `pkg/ui/timing.go`
 | `SetLive` of the snapshotter when the overlay is mapped and unmapped; the
-  live items set before each frame; the event; the field `live` of the
-  frame records.
+  pictures taken before each frame and the fence given back after it; the
+  live items over the frame at rest, after each card of a scene of the
+  carousel and after the tiles of the grid; the event; the field `live_ms`
+  of the frame records.
 
 | `cmd/qws/root.go`
-| The snapshotter given to the selector, its context to the presenter; no
-  `Pause` with `live: true` on `glx`, `Pause` otherwise.
+| The snapshotter given to the selector, its context to the presenter;
+  `Pause` as now.
 
 | `internal/config/config.go`, `cmd/qws/root.go`
 | `appearance.thumbnail.live`, `appearance.thumbnail.live_interval`: the
