@@ -172,9 +172,11 @@ func nextPass(waiting []liveSchedule, n int, lastPass time.Time, interval time.D
 	return best, at, true
 }
 
-// SetLive starts the live thumbnails for the switcher whose overlay has been
-// mapped, a window passed at most once an interval, or, with overlay 0, ends
-// them. In between, no snapshot is taken on change.
+// SetLive starts the live thumbnails for the switcher whose overlay is
+// shown, a window passed at most once an interval, or, with overlay 0, ends
+// them. In between, no snapshot is taken on change. The windows passed are
+// those of the last frame begun: the switcher begins one before it starts
+// them.
 func (s *Snapshotter) SetLive(overlay xproto.Window, interval time.Duration) {
 	s.mu.Lock()
 	s.liveWant = liveSession{overlay, interval}
@@ -255,10 +257,6 @@ func (s *Snapshotter) setLive() {
 				w.liveDue.change(w.schedule.dirtyAt)
 			}
 		}
-		// The windows shown are those of the first frame
-		s.mu.Lock()
-		s.shown = nil
-		s.mu.Unlock()
 	case want.overlay == 0:
 		for _, w := range s.windows {
 			if w.live != nil && w.live.pending != 0 {

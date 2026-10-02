@@ -432,7 +432,6 @@ func (s *Selector) Show() (*x11.WindowInfo, error) {
 		return nil, fmt.Errorf("failed to show window: %w", err)
 	}
 	s.mapped = true
-	s.setLive(true)
 
 	// Grab keyboard to receive all keyboard events
 	xproto.GrabKeyboard(
@@ -496,6 +495,10 @@ func (s *Selector) Show() (*x11.WindowInfo, error) {
 	// composes
 	s.fade.pending = s.animator != nil && s.anim.show.any()
 	s.render(thumbnails)
+	if !s.fade.active {
+		// Shown at once
+		s.setLive(true)
+	}
 	s.prefetch()
 
 	// Event loop - wait for user input

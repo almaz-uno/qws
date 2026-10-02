@@ -623,6 +623,10 @@ func (s *Selector) frame() {
 		done := !s.fade.level.moving(now)
 		s.logAnimationFrame(&s.fade.animationLog, s.fade.kind(), s.fade.level.progress(now), done, drawStart, drawEnd, end)
 		s.fade.active = !done
+		if done && !s.fade.out {
+			// Shown in full
+			s.setLive(true)
+		}
 	}
 	if s.hover.active {
 		// The frame after the last that moved is at rest: the frame at rest, or

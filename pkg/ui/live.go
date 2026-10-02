@@ -10,7 +10,8 @@ import (
 )
 
 // The live thumbnails of specs/020-live-thumbnails as the switcher shows
-// them. While its overlay is mapped, the snapshotter averages the windows
+// them. While its overlay is shown in full — from the end of its appearance
+// to the start of its disappearance — the snapshotter averages the windows
 // that change into pictures the presenter's context shares; each frame takes
 // the pictures newer than the snapshots of their cards (BeginFrame), draws
 // them over the thumbnails — over the frame at rest, or among the items of a
@@ -98,13 +99,16 @@ func (s *Selector) liveOn() bool {
 	return s.live.snap != nil
 }
 
-// setLive starts the live passes for the overlay just mapped, or ends them
-// once it is unmapped
-func (s *Selector) setLive(mapped bool) {
+// setLive starts the live passes once the overlay is shown in full — at
+// the end of its appearance, or after its first frame when it appears at
+// once — or ends them as it starts to disappear, or is unmapped. The fades
+// take none: in S5 a pass beside the first frames of an appearance, which
+// upload the layers, held them up (D5)
+func (s *Selector) setLive(on bool) {
 	if !s.liveOn() {
 		return
 	}
-	if !mapped {
+	if !on {
 		s.live.snap.SetLive(0, 0)
 		s.live.wanted = false
 		return

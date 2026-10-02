@@ -90,6 +90,7 @@ func (s *Selector) FadeOut() []xgb.Event {
 		return nil
 	}
 
+	s.setLive(false)
 	s.beginFade(true, time.Now(), s.chosenAt)
 	var events []xgb.Event
 	for s.fade.active {
