@@ -2,7 +2,7 @@
 :toc: left
 :toc-title: Contents
 :sectnums:
-:revdate: 2026-10-01
+:revdate: 2026-10-02
 
 == Conditions
 
@@ -69,3 +69,54 @@ build did. Its p95, though, is 7.92 ms against 7.09: more intervals run a
 millisecond past the period without missing one. Neither the bursts nor the
 shift are explained here; the other sessions on ws1 at the time are the
 first suspects, and a run on an idle ws1 the way to tell.
+
+== On an idle ws1
+
+2026-10-02, 06:33–07:02, the other sessions done, `dnsmasq` quiet, load
+average 3.5–4.8; the build `v1.2.0-17-ge4adfb3`, this change merged with
+`develop` after 1.2.0 — specifications 012 and 018 and the dependency
+updates among it. First S2 of the build alone, the service stopped and
+nothing beside it; then S4 and S3 as before, two instances of the build in
+place of the service. The logs are in
+`~/.cache/qws-011-runs/20261002-0633-idle/` on ws1. From S4 on,
+`measure.sh` leaves out the frames that answer an Expose, which have no
+selection, in its wait for K5.
+
+The two instances took 534 snapshots on change, none while the measured
+switcher was shown — some 1220 s.
+
+[cols="3,3,3,3",options="header"]
+|===
+| Run | step | fade-in / fade-out | hover
+
+| S2, alone
+| 7.80, 0.15 %
+| 7.63, 0.45 % / 7.72, 0.24 %
+| —
+
+| S4
+| 7.83, 0.07 %
+| 7.80, 0 % / 7.73, 0 %
+| —
+
+| S3, grid
+| 7.84, 1.51 %
+| 7.85, 0 % / 7.74, 0 %
+| 7.82, 0.40 %
+
+| S3, carousel
+| 7.82, 0.08 %
+| 7.78, 0 % / 7.82, 0.24 %
+| 7.82, 0.26 %
+|===
+
+No bursts: the missed frames of the evening came from outside qws. Beside
+two instances of this change the step misses 0.07–0.08 % of its intervals,
+a seventh of 010 with nothing beside it (0.51 %); the grid 1.51 %, against
+3.7 % in 007, as its frame at rest is drawn on the CPU while it moves.
+
+The p95 stays at 7.8 ms in every run, the build alone included, against
+7.09 for 010's build alone in the evening: it is not the instances beside.
+Whether the build moved it — this change, or 012, 018 and the dependency
+updates merged with it — or the state of ws1 that morning, a run of 1.2.0
+alone under the same conditions would tell.
