@@ -138,6 +138,24 @@ more a live thumbnail (research), a window that does not change costs
 nothing, and 36 windows changing 30 times a second kept the frames as well
 as 4 did.
 
+The cards and tiles the switcher draws are those in view: every tile of
+the grid, and the cards of the carousel with a live rectangle at the
+selection — eleven at most, fewer where the frame is narrower than the
+strip. A window whose card is off the strip takes no pass; when a step
+brings its card into view, it takes one as soon as the spreading lets it.
+Found in S5, 2026-10-02: every window of the list took passes, those off
+the strip as well, and their pictures were drawn seconds after their
+changes, when their cards came back.
+
+A window drawn into the pixmap of its frame takes no pass either: of
+depth 24 in a frame of depth 24, it is not redirected apart from the
+frame, Composite names no pixmap of its own, and the snapshotter has no
+texture of it to average (specification 022, which takes its snapshots
+from the frame's pixmap by RENDER). Its card or tile keeps its snapshot.
+On ws1, 2026-10-02: Dion, Telegram, KeePassXC and Yandex Music, 4 of 35
+windows, and the xterm the first runs of S5 changed. Whether to give them
+passes is an open decision.
+
 === D3. What replaces the frame at rest byte for byte
 
 The frame of `glx` at rest can no longer be the frame `cpu` draws once,
@@ -223,11 +241,12 @@ How it reads against each base:
 
 | `develop`, without #35
 | `root.go` calls `Pause` around an activation as now; with `live: true`
-  on `glx` the selector calls `SetLive(overlay)` of the snapshotter when it
-  maps its overlay, before the first frame, and `SetLive(0)` when it
-  unmaps it, at the end of the fade-out, and the snapshotter takes live
-  passes in between, paused or not. With `live: false`, under `cpu`, or
-  where live thumbnails are off (D7), `Pause` alone, as now.
+  on `glx` the selector calls `SetLive(overlay)` of the snapshotter once
+  its overlay is shown in full — at the end of the fade-in, or after the
+  first frame when there is none — and `SetLive(0)` as the fade-out
+  starts, or when it unmaps the overlay without one, and the snapshotter
+  takes live passes in between, paused or not. With `live: false`, under
+  `cpu`, or where live thumbnails are off (D7), `Pause` alone, as now.
 
 | after #35 is merged — `759c6d3`, 1.3.2, the base the branch is merged
   with
@@ -250,6 +269,16 @@ mapping of the overlay would be newer than a card's.
 
 The overlay is made anew when the monitor changes; `SetLive` is called at
 each activation with the overlay of that activation.
+
+Changed after S5, 2026-10-02: `SetLive(overlay)` came when the overlay was
+mapped, before the first frame, and `SetLive(0)` at its unmapping. The
+first pass of an activation then ran right after its first frame, which
+uploads a whole frame and the layers, and held up the frames after it:
+the second frame of the carousel's fade-in presented in 10.0 ms on
+average against 5.4 with `live: false`, the fade-ins of the carousel and
+of the grid missing 10.4 and 15.2 % of their intervals against 6.3 and
+9.5. The fades now take no pass; their frames draw the pictures published
+before them. A switch released during the fade-in takes none at all.
 
 === D6. Configuration
 
@@ -314,13 +343,15 @@ All of it on `glx` with `appearance.thumbnail.live: true`; otherwise as in
   that it writes one while the presenter draws the other. A snapshot is
   averaged and read back as now, in the one framebuffer of 008: a window
   never passed live — on a hidden workspace — gets no live textures.
-. *While shown* — while the overlay is mapped, from before the first frame
-  of an activation to the end of its fade-out — the snapshotter takes no
-  snapshot on change, and no live pass either while the overlay of another
-  instance is mapped (D5, 011); its own overlay, listed among the
-  switchers as well, does not pause them. A viewable window shown
-  in a card or tile that changes is bound again and averaged into
-  its live texture without a read back — no settle of 100 ms — at most
+. *While shown* — while the overlay is shown in full, from the end of the
+  fade-in, or the first frame without one, to the start of the fade-out —
+  the snapshotter takes no snapshot on change, and no live pass either
+  while the overlay of another instance is mapped (D5, 011); its own
+  overlay, listed among the switchers as well, does not pause them. From
+  before the first frame to the end of the fade-out no snapshot is taken
+  on change either (D5). A viewable window of a card or tile in view (D2)
+  that changes is bound again and averaged into its live texture without
+  a read back — no settle of 100 ms — at most
   once a `live_interval`, the window that has waited longest first, one
   window a pass: a pass no sooner than the `live_interval` divided by the
   number of windows taking passes — waiting, or passed within the
@@ -332,7 +363,9 @@ All of it on `glx` with `appearance.thumbnail.live: true`; otherwise as in
   window's picture.
 . *Not live:* a window not viewable keeps its snapshot; a window whose size
   changes while shown keeps its last live picture until the next
-  activation; a window the GPU will not bind (018) keeps its snapshot.
+  activation; a window the GPU will not bind (018), and a window drawn
+  into the pixmap of its frame, which has no texture of its own (D2),
+  keep their snapshots; a window whose card is not in view takes no pass.
 . *Drawing.* A window whose live texture is newer than the snapshot its
   card or tile was drawn from has a live rectangle (D3). Every frame the
   presenter draws — the frame at rest, a scene of layers, a frame of a
@@ -364,7 +397,11 @@ thumbnails of 1.3.2. `README.md`, `doc/configuration.asciidoc` and
 L — lag:: For a live pass, the time from the snapshotter's reading of the
 DAMAGE event of the change it covers to the end of the presentation, P, of
 the first frame that draws it; the compositor shows the frame at its next
-vertical blank, which L does not count. The frame records of 001 and 007
+vertical blank, which L does not count. Only a window whose card or tile
+is in view (D2) counts, and from when its card came into view — with the
+layers of the activation it is drawn from — when that is later than the
+change: a card that comes back into view with an older picture counts
+from its coming back. The frame records of 001 and 007
 get a field `live_ms`, the lag of the latest pass the frame draws for the
 first time, in the first record of the frame; a frame at rest presented
 again for a pass is a record "Frame" of cause `live`. The snapshotter logs
@@ -377,9 +414,11 @@ C — CPU:: CPU time of the qws process over a session, from
 
 Session S5:: S2 of 007 on E1 — the overlay on DP-0 at 144 Hz, the service
 stopped — with a window on DP-4 changing all the time: a terminal printing
-a line every 20 ms, the window viewable on the visible workspace of DP-4.
-Run with the carousel and with the grid, with `live: true` and with
-`live: false` in turn, three times each.
+a line every 20 ms, the window viewable on the visible workspace of DP-4,
+of depth 32 with a pixmap of its own — a mate-terminal on E1; an xterm,
+drawn into the pixmap of its frame, takes no pass (D2). Run with the
+carousel and with the grid, with `live: true` and with `live: false` in
+turn, three times each.
 
 == Acceptance criteria
 
@@ -481,3 +520,11 @@ Run with the carousel and with the grid, with `live: true` and with
   the activation but for the selection and the hover.
 . Under `cpu`, semi-live thumbnails at a low rate, should the author want
   them there (D4).
+. The windows drawn into the pixmap of their frame (D2), 4 of 35 on ws1,
+  take no pass. Two ways to give them one, later: redirect each such
+  window, `CompositeRedirectWindow` by the snapshotter, so that it has a
+  pixmap and a texture of its own — which changes how the X server draws
+  the author's windows while qws runs (022, D1, option b); or a pass by
+  RENDER from the frame's pixmap, as 022 takes their snapshots, into a
+  pixmap of the snapshotter's own that it binds and averages on the GPU —
+  a copy in the X server a pass, and no read back. Neither measured.
