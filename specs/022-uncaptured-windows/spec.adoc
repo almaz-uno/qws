@@ -1,0 +1,182 @@
+= 022 — windows the snapshotter never captures
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-02
+:status: draft
+:issue: 62
+
+== What and why
+
+Some windows keep no thumbnail of the snapshotter (008) however they
+change (issue #62): Dion Desktop on ws1, by the author's report, and the
+xterm of S5 of specification 020, which printed a line every 20 ms on the
+visible workspace of DP-4 and was not captured once in 18 runs of 1.3.2,
+while every other window was — the warm-up of `measure.sh` shows each
+window in turn (research, "On E1").
+
+The cause, confirmed by a probe off the screen (research, "The probe"): the
+snapshotter names the pixmap of a client window with Composite's
+`NameWindowPixmap`, and the X server names only the pixmap of a window it
+redirects. A compositor redirects the children of the root window — the
+frames of i3 — and the X server redirects on its own a window whose visual
+differs from its parent's when one of the two is the 32-bit ARGB visual of
+Composite. A GTK or an Electron window of depth 32 in its frame is so
+redirected and has a pixmap of its own; a window of depth 24 — xterm, Dion,
+and the Qt windows of ws1, KeePassXC, Telegram, Yandex Music — is drawn into
+the pixmap of its frame and has none. `NameWindowPixmap` answers BadMatch,
+which 008 takes for a window not viewable after all: it tries again three
+times and then waits for the next change, which fails alike — silently,
+for good. On ws1, 4 of the 35 client windows. DAMAGE is not the cause: the
+damage of a client window reports drawing into its children, of its own
+client and of another, whatever its visual.
+
+The change: a viewable window whose pixmap cannot be named is taken from
+the pixmap of its nearest ancestor that can — its frame — by RENDER, the
+path of 018, from the rectangle where the window lies in it; without one,
+on the CPU, as 008 takes a window nothing else takes.
+
+The specification is a delta to `develop` at `759c6d3` (1.3.2). Unchanged:
+which windows are captured and when (008, 011); the windows with a pixmap of
+their own, captured on the GPU, or by RENDER where the GPU will not bind
+them (018), as before; thumbnails of at most 512×512; the configuration —
+no key, variable or flag changes.
+
+== Decisions
+
+None taken by the author yet. Each lists its options and the one
+recommended — for the author to confirm.
+
+=== D1. How a window without a pixmap of its own is taken
+
+[cols="1,3,3,3"]
+|===
+| | Option | For | Against
+
+| a
+| *From its frame's pixmap, by RENDER.* The pixmap of the nearest
+  ancestor redirected is named; the rectangle of the window in it is copied
+  in the X server into a pixmap of the window's size and scaled as 018
+  scales a window's own.
+| Reads only: nothing changes in how the X server and the compositor draw
+  the window. The path and its quality are those of 018: 1.6 ms at p50 on
+  E1, within a mean of 1.2 per channel of the area average.
+| The X server does the work, a copy of the window more than 018. The
+  window has no texture on the GPU, so no live thumbnail of 020.
+
+| b
+| *Redirected by qws.* The snapshotter redirects the window itself,
+  `CompositeRedirectWindow` automatic, and so gives it a pixmap of its own,
+  bound on the GPU as any other.
+| The GPU path of 008, and live thumbnails of 020, for every window.
+| Changes how the X server draws the author's windows for as long as qws
+  runs: a pixmap more a window — 14 MB for one of 2556×1357 — a copy into
+  the frame at each change, and the window unmapped and mapped again inside
+  the X server when redirected, which makes its client draw it anew. A patch
+  of 1.3 should not.
+
+| c
+| *On the CPU.* `GetImage` of the window, the path of 1.0.0.
+| Needs nothing.
+| 97–111 ms a window on E1 (018), the cost 008 removed.
+|===
+
+*Recommended: a*, with c where no ancestor's pixmap can be named — no
+compositor runs — for the author to confirm. Option b is left to 020 as an
+open decision: whether live thumbnails of such windows are worth redirecting
+them.
+
+=== D2. The frame's pixmap is not bound on the GPU
+
+The pixmap of a frame is the compositor's: picom binds it on ws1, and NVIDIA
+lets one GLX pixmap exist on a storage (018). Bound by qws, a compositor
+started or restarted after qws could not bind it and would not draw the
+window. *Recommended*, for the author to confirm: the frame's pixmap is
+taken by RENDER only, never bound on the GPU.
+
+=== D3. Where the window lies in the frame
+
+i3 moves a client window inside its frame — a title bar shown or hidden, a
+border — and ICCCM has it send the client synthetic ConfigureNotify events
+in root coordinates, which tell nothing of the frame. *Recommended*, for
+the author to confirm: the offset is asked of the X server
+(`TranslateCoordinates`) at each capture from the frame, one round trip;
+the frame's pixmap is named anew when the frame is configured — a new size
+is a new pixmap — or mapped, as a window's own is.
+
+== Behavior
+
+. *Naming.* A stale window's pixmap is named as in 008. When the X server
+  refuses with BadMatch and the window is viewable, the pixmap of its
+  nearest ancestor below the root that can be named is named instead — on
+  i3, its frame. A window not viewable is as in 008.
+. *Capture from an ancestor.* The rectangle of the window in the ancestor's
+  pixmap — its offset from the ancestor's origin, plus the ancestor's
+  border — is copied into a pixmap of the window's size and scaled by RENDER
+  as in 018, the picture of the ancestor's visual. The GPU is not tried. The
+  record "Snapshot" says `render` and the ancestor, `via`.
+. *Named anew* when the window or the ancestor is mapped or unmapped, the
+  window changes size, or the ancestor is configured.
+. *Without an ancestor* whose pixmap can be named, or without RENDER, the
+  window is taken on the CPU, as in 008 when a path fails, and logged so.
+. *Unchanged:* DAMAGE of the client window, which reports drawing into its
+  children; the schedule; the windows with a pixmap of their own.
+
+== Metrics
+
+S1 — cost of a snapshot:: As in 008 and 018: `ms` of the record "Snapshot"
+by path, and off the screen `BenchmarkFrameRender`: a client window of
+2556×1357 in a frame of 2560×1381, the rectangle copied and scaled.
+
+Scenario E:: On E1, the service replaced by the build or a second instance
+beside it: an xterm and Dion on the visible workspace, each changed — a
+line printed, a message shown — then the switcher shown: their cards show
+what they show, and the log has records "Snapshot" of them, `path` `render`
+and `via` their frames.
+
+== Acceptance criteria
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| `TestCaptureFromFrame` in `pkg/snapshot`: a client window of depth 24 in
+  an override-redirect frame of its visual off the screen — its picture in a
+  child of another client, or of its own — and one of another visual of
+  depth 24, and one two levels below the window the compositor redirects:
+  each captured, by RENDER from the ancestor, within a mean of 1.2 per
+  channel of the area average of what it shows; drawn anew, captured anew,
+  the new picture; the ancestor's pixmap not bound on the GPU. It fails
+  without the change: no thumbnail. Skipped without an X display, a
+  compositing manager, RENDER or offscreen GLX.
+
+| K2
+| DAMAGE: in the same test, drawing into a child of either client reports
+  damage of the client window.
+
+| K3
+| Unchanged: a window of depth 32 in a frame of another visual, its own
+  pixmap, captured on the GPU (the same test); `TestGPUThumbnail`,
+  `TestRenderThumbnail`, `TestFallback`, `TestSchedule`, `TestWait` and
+  `TestNewAndClose` pass.
+
+| K4
+| Cost: `BenchmarkFrameRender`, p95 ≤ 10 ms, as K2 of 018.
+
+| K5
+| Scenario E on E1: the cards of the xterm and of Dion follow their windows
+  — after a change and the snapshot's settle and interval, or at the next
+  activation.
+
+| K6
+| `go vet ./...`, `go test ./...` and `make check-specs` pass.
+|===
+
+== Open decisions
+
+. The decisions D1–D3, for the author to confirm.
+. Live thumbnails (020) of the windows without a pixmap of their own:
+  option b of D1, redirecting them, or none.
+. No compositor: every such window on the CPU, at some 100 ms a snapshot;
+  not seen on ws1.
