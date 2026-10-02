@@ -49,13 +49,14 @@ Made on the way, 2026-10-01, for the author to confirm:
   changes a few times a day, the activation does not wait for it;
 * the snapshots on the CPU of the focus watcher keep pausing for their own
   switcher only: they run without GLX, on none of the author's machines;
-* the loop of the snapshotter waits while paused, found on the way: in
-  1.1.0 and 1.2.0 a window that comes due while its switcher is shown arms
+* the loop of the snapshotter waits while paused, found on the way: since
+  1.1.0 a window that comes due while its switcher is shown arms
   the loop's timer in the past, and the loop wakes at once, skips the
   capture for the pause and arms it again — it spins on a CPU for as long
   as the switcher is shown (`pkg/snapshot`, `run` and `nextDue`); paused for
   every switcher, the other instance would spin as well;
-* a fix, without a key: the patch 1.2.1.
+* a fix, without a key: a patch — 1.3.1, as 1.2.1 and 1.3.0 went out
+  meanwhile.
 
 == Behavior
 

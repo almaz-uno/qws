@@ -110,6 +110,8 @@ switcher was shown — some 1220 s.
 | 7.82, 0.26 %
 |===
 
+Both sets of runs are of this branch before 1.3.0 was merged into it.
+
 No bursts: the missed frames of the evening came from outside qws. Beside
 two instances of this change the step misses 0.07–0.08 % of its intervals,
 a seventh of 010 with nothing beside it (0.51 %); the grid 1.51 %, against
