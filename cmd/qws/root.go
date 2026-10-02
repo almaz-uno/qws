@@ -622,8 +622,8 @@ func handleKeyPress(ctx context.Context, conn *x11.Connection, e xproto.KeyPress
 	}
 	// No snapshot on change while the switcher is shown: from here, so that
 	// the snapshots of the cards stay those of the window list; the live
-	// thumbnails of specs/020-live-thumbnails run meanwhile, from the mapping
-	// of the overlay to the end of its fade-out
+	// thumbnails of specs/020-live-thumbnails run meanwhile, from the end of
+	// the fade-in to the start of the fade-out
 	if snap != nil {
 		snap.Pause(true)
 		defer snap.Pause(false)

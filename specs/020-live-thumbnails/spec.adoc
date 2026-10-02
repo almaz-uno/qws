@@ -423,7 +423,11 @@ a line every 20 ms, the window viewable on the visible workspace of DP-4,
 of depth 32 with a pixmap of its own — a mate-terminal on E1; an xterm,
 drawn into the pixmap of its frame, takes no pass (D2). Run with the
 carousel and with the grid, with `live: true` and with `live: false` in
-turn, three times each.
+turn, three times each. Its rest variant: after the steps of each
+activation the overlay is held still, `REST` seconds of `measure.sh`, a
+second after the frame at rest of the last step; R is the live passes a
+second over those spans, of every window, and the frames of cause `live`
+with them.
 
 == Acceptance criteria
 
@@ -507,6 +511,15 @@ turn, three times each.
 
 | K12
 | `go vet ./...`, `go test ./...` and `make check-specs` pass.
+
+| K13
+| At rest: `TestLiveAtRest` in `pkg/snapshot` — the loop of the
+  snapshotter as qws runs it, a switcher presenting no frame but those its
+  passes ask for, a window drawn anew every 5 ms — draws a picture about
+  every `live_interval`, at least a third of those the time allows, each
+  by a frame of its own. In the rest variant of S5 with `live: true`, R at
+  least 20 passes a second, and no activation under 10 — provisional,
+  until the first measurement. The author's trial at rest is K11.
 |===
 
 == Open decisions
