@@ -425,7 +425,7 @@ log:
 | `QWS_APPEARANCE_THUMBNAIL_LIVE`
 | `bool`
 | `true`
-| Live thumbnails of the `glx` renderer: while the switcher is shown, a visible window that changes is averaged again on the GPU and its card or tile follows it; `false`: the snapshots taken before the switcher appeared, as in 1.3.2. No effect under `cpu`, nor where the GPU cannot share the thumbnails with the switcher, which the log says once (specification `020-live-thumbnails`)
+| Live thumbnails of the `glx` renderer: while the switcher is shown, a visible window that changes is averaged again on the GPU and its card or tile follows it; `false`: the snapshots taken before the switcher appeared, as in 1.3.3. No effect under `cpu`, nor where the GPU cannot share the thumbnails with the switcher, which the log says once (specification `020-live-thumbnails`)
 
 | `appearance.thumbnail.live_interval`
 | `--appearance-thumbnail-live-interval`

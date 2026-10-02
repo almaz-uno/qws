@@ -43,14 +43,17 @@ where the presenter cannot share the textures, keep the snapshots of today.
 
 The specification is a delta to `develop` at `6fd664a` (1.3.1), written
 before 011 (pull request #35) was merged; the branch was then merged with
-`develop` at `759c6d3` (1.3.2), which has it, and the change is now a delta
-to that. Unchanged: the snapshots while the switcher is hidden (008, 018)
-and before the first frame of an activation; their pause for the switchers
-of other instances (011); every frame of `cpu`, and the digests of Σ; the
-frames of `glx` while no shown window has changed since its snapshot; the
-layers and the animations of 007 and 010; the existing configuration keys
-and their meaning, `behavior.snapshot_interval` among them. D5 says how it
-reads with and without 011.
+`develop` at `759c6d3` (1.3.2), which has it, and at `9774075` (1.3.3),
+which has 021 — the extensions of xgb set up once a process, every
+connection made by `x11.NewConn` — and 022 — a window without a pixmap of
+its own taken from its frame's pixmap by RENDER; the change is now a delta
+to 1.3.3. Unchanged: the snapshots while the switcher is hidden (008, 018,
+022) and before the first frame of an activation; their pause for the
+switchers of other instances (011); every frame of `cpu`, and the digests
+of Σ; the frames of `glx` while no shown window has changed since its
+snapshot; the layers and the animations of 007 and 010; the existing
+configuration keys and their meaning, `behavior.snapshot_interval` among
+them. D5 says how it reads with and without 011.
 
 == Decisions
 
@@ -150,8 +153,10 @@ changes, when their cards came back.
 A window drawn into the pixmap of its frame takes no pass either: of
 depth 24 in a frame of depth 24, it is not redirected apart from the
 frame, Composite names no pixmap of its own, and the snapshotter has no
-texture of it to average (specification 022, which takes its snapshots
-from the frame's pixmap by RENDER). Its card or tile keeps its snapshot.
+texture of it to average: 022, in 1.3.3, takes its snapshots from the
+frame's pixmap by RENDER and never binds that pixmap on the GPU, and a
+window taken from its frame takes no pass. Its card or tile keeps its
+snapshot.
 On ws1, 2026-10-02: Dion, Telegram, KeePassXC and Yandex Music, 4 of 35
 windows, and the xterm the first runs of S5 changed. Whether to give them
 passes is an open decision.
@@ -248,8 +253,8 @@ How it reads against each base:
   takes live passes in between, paused or not. With `live: false`, under
   `cpu`, or where live thumbnails are off (D7), `Pause` alone, as now.
 
-| after #35 is merged — `759c6d3`, 1.3.2, the base the branch is merged
-  with
+| after #35 is merged — `759c6d3`, 1.3.2, and `9774075`, 1.3.3, the
+  bases the branch is merged with
 | The same; and the live passes are paused by `Switchers.Shown` with the
   overlay `SetLive` gives left out — it gets a window to leave out — so
   that they stop for the other instances' overlays only; the snapshots on
@@ -293,7 +298,7 @@ Two keys under `appearance.thumbnail`, beside `width`, `height` and
 | `appearance.thumbnail.live`
 | `true`
 | Thumbnails follow their windows while the switcher is shown, on `glx`.
-  `false`: snapshots, as in 1.3.2.
+  `false`: snapshots, as in 1.3.3.
 
 | `appearance.thumbnail.live_interval`
 | `33ms`
@@ -332,7 +337,7 @@ contexts on one Xlib display, which Mesa may need, is an open decision.
 == Behavior
 
 All of it on `glx` with `appearance.thumbnail.live: true`; otherwise as in
-1.3.2.
+1.3.3.
 
 . *Sharing.* The presenter's GL context is created with the snapshotter's
   as its share context, on the presenter's own Xlib display, as now. If
@@ -389,7 +394,7 @@ No key, variable or flag is renamed or removed; `snapshot_interval` keeps
 its meaning. A configuration without the two keys gets live thumbnails on
 `glx` — a change the user sees, with two new keys: a minor version
 (constitution, "Releases and versions"). `live: false` restores the
-thumbnails of 1.3.2. `README.md`, `doc/configuration.asciidoc` and
+thumbnails of 1.3.3. `README.md`, `doc/configuration.asciidoc` and
 `config.yaml.example` describe the keys in the same change.
 
 == Metrics
