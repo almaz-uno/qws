@@ -24,9 +24,10 @@ import (
 // shown, a change is averaged without the settle of a snapshot, a window at
 // most once a live interval, of those due the window that has waited longest
 // first, and no pass closer to the one before than the interval divided by
-// the windows taking passes; a window not viewable, or whose size changed, is
-// not passed; while live no snapshot is taken on change, and hidden the
-// snapshots of 008 are (TestSchedule)
+// the windows taking passes, and while frames come one after another after
+// the end of one; a window not viewable, whose size changed, or not shown in
+// the last frame, is not passed; while live no snapshot is taken on change,
+// and hidden the snapshots of 008 are (TestSchedule)
 func TestLiveSchedule(t *testing.T) {
 	t0 := time.Unix(1000, 0)
 	const interval = 33 * time.Millisecond
@@ -116,6 +117,14 @@ func TestLiveSchedule(t *testing.T) {
 	hs := &Snapshotter{windows: map[xproto.Window]*window{3: &viewable}, hold: liveHold,
 		live: liveSession{overlay: 7, interval: interval}}
 	now := t0.Add(ms(5))
+	if d := hs.liveWait(now); d != time.Hour {
+		t.Errorf("before the first frame: the timer in %v; want none, no window shown", d)
+	}
+	hs.shown = []xproto.Window{2}
+	if d := hs.liveWait(now); d != time.Hour {
+		t.Errorf("a window not shown: the timer in %v, want none", d)
+	}
+	hs.shown = []xproto.Window{2, 3}
 	hs.lastEnd = now.Add(-ms(1))
 	if d := hs.liveWait(now); d != liveHold-ms(5) {
 		t.Errorf("frames flowing: the timer in %v, want %v: the hold after the pass was due", d, liveHold-ms(5))

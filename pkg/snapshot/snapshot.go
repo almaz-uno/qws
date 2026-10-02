@@ -61,7 +61,8 @@ type Snapshotter struct {
 	inFrame   bool
 	presFence uintptr
 	woken     bool
-	lastEnd   time.Time // of the last frame
+	lastEnd   time.Time       // of the last frame
+	shown     []xproto.Window // the windows of the last frame, those the switcher shows
 	liveWant  liveSession
 
 	paused   atomic.Bool

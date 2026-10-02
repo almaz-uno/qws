@@ -171,6 +171,7 @@ func (s *Snapshotter) BeginFrame(windows []xproto.Window) map[xproto.Window]Pict
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.inFrame, s.fetchSeq, s.woken = true, s.seq, false
+	s.shown = windows
 	var pics map[xproto.Window]Picture
 	for _, id := range windows {
 		if p, ok := s.pics[id]; ok && p.Gen > s.thumbGen[id] {
@@ -222,6 +223,10 @@ func (s *Snapshotter) setLive() {
 				w.liveDue.change(w.schedule.dirtyAt)
 			}
 		}
+		// The windows shown are those of the first frame
+		s.mu.Lock()
+		s.shown = nil
+		s.mu.Unlock()
 	case want.overlay == 0:
 		for _, w := range s.windows {
 			if w.live != nil && w.live.pending != 0 {
@@ -288,12 +293,20 @@ func (s *Snapshotter) liveTick(now time.Time, afterFrame bool) {
 	}
 }
 
-// nextLive is the window due the next pass at now, and when
+// nextLive is the window due the next pass at now, and when: of the windows
+// the switcher shows, those of its last frame
 func (s *Snapshotter) nextLive(now time.Time) (*window, time.Time, bool) {
+	s.mu.Lock()
+	shown := s.shown
+	s.mu.Unlock()
 	var windows []*window
 	var waiting []liveSchedule
 	n := 0
-	for _, w := range s.windows {
+	for _, id := range shown {
+		w, ok := s.windows[id]
+		if !ok {
+			continue
+		}
 		if w.livePassable() {
 			windows = append(windows, w)
 			waiting = append(waiting, w.liveDue)

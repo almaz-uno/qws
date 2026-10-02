@@ -48,7 +48,10 @@ them, and a name deleted may be given again.
 selector calls when it maps its overlay, and `SetLive(0, 0)`, when it unmaps
 it at the end of the fade-out, the loop of the snapshotter takes the
 windows that changed, each at most once an interval, without the settle of
-100 ms; of those due, the one that changed first. The interval is
+100 ms; of those due, the one that changed first. Only the windows the
+switcher shows: those of its last frame, which `BeginFrame` gives — not a
+window on a workspace the filter of the switcher leaves out, viewable on
+another monitor. The interval is
 `live_interval`, or the refresh period of the overlay's monitor where it is
 0: the selector knows it. One window a pass, the passes spread: a pass no
 sooner than the interval divided by the number of windows taking passes —
