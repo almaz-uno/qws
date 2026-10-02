@@ -55,7 +55,7 @@ Made on the way, 2026-10-01, for the author to confirm:
   capture for the pause and arms it again — it spins on a CPU for as long
   as the switcher is shown (`pkg/snapshot`, `run` and `nextDue`); paused for
   every switcher, the other instance would spin as well;
-* a fix, without a key: a patch — 1.3.1, as 1.2.1 and 1.3.0 went out
+* a fix, without a key: a patch — 1.3.2, as 1.2.1, 1.3.0 and 1.3.1 went out
   meanwhile.
 
 == Behavior
