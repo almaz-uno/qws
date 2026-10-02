@@ -1,0 +1,174 @@
+= 021 — extensions of xgb set up once per process
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-02
+:issue: 61
+:status: draft
+
+== What and why
+
+qws can end with `fatal error: concurrent map read and map write` in
+`github.com/jezek/xgb.(*Conn).readResponses`, `xgb.go:557` of xgb 1.3.1 —
+the read of `xgb.NewEventFuncs` for an event. It was seen twice in 18 runs
+of S5 of specification 020 on E1 (2026-10-02), with a terminal printing a
+line every 20 ms beside the switcher; it is not in the journal of the
+service so far (issue #61). The Go runtime ends the process: it is a fatal
+error, not a panic, and no `recover` catches it.
+
+The cause, confirmed by the code of xgb and by a test that reproduces it
+(research): `xgb.NewEventFuncs` and `xgb.NewErrorFuncs`, the constructors of
+events and errors by their number, are maps of the package, shared by every
+connection of the process. The reader goroutine of each connection reads
+them, without a lock, for every event and error it reads; the `Init` of
+every extension package writes them, without a lock, whatever the
+connection it is given. `c.ExtLock` guards `c.Extensions` of one connection
+only. `x11.GetMonitors` calls `randr.Init` at every activation — from
+`Selector.Show`, and from `ui.NewSelector` at the first — while the
+snapshotter's connection reads the DAMAGE events of every window that
+changes and the window model's connection the events of the client windows.
+
+The race is older than the crash: `GetMonitors` has initialised RandR at
+each activation since multi-monitor support (`2eeb54f`, in 0.1.0),
+while the reader of the same connection read key and property events.
+Since 1.1.0 the snapshotter's connection (008) reads a stream of DAMAGE
+events, and every release since has it.
+
+The change: the tables of every extension qws uses are written once per
+process, when qws makes its first X connection, before that connection
+exists and while no reader of any connection runs; every connection gets
+the major opcodes of the extensions, which xgb keeps per connection; no
+extension is initialised after that, at an activation or anywhere else.
+The version check of RandR and the queries of the monitors stay at each
+activation.
+
+The specification is a delta to `develop` at `759c6d3` (1.3.2); the change
+goes out as patch 1.3.3, a fix with no new behaviour. Unchanged: the
+connections qws makes and the order `cmd/qws/root.go` makes them in; the
+extensions each part needs, the versions it asks for and what it falls back
+to without them — the snapshots of 1.0.0 without Composite, XFIXES or
+DAMAGE (008), the CPU without RENDER or MIT-SHM (018), `GetImage` without
+MIT-SHM, the whole screen without RandR; the configuration — no key,
+variable or flag changes.
+
+== Decisions
+
+Asked for, 2026-10-02 (issue #61):
+
+* each extension's tables written once per process, before any connection
+  reads events;
+* no extension initialised at an activation; the version check of RandR
+  and the queries of the monitors stay.
+
+Made on the way, 2026-10-02, for the author to confirm:
+
+* *A connection of its own for the setup.* The extensions are asked for
+  through a connection of the setup's own, which is closed, and whose
+  reader has ended, before the tables are written; the first connection of
+  qws is made after them. Initialising on the first connection of qws
+  before it selects any event would leave its reader running while the
+  tables are written, and the X server sends MappingNotify to every client
+  when the keyboard mapping changes — as at the start of a session, when
+  the service starts (research, "Designs").
+* *The loop of `Init`, not `Init`.* The tables are written as every `Init`
+  of xgb 1.3.1 writes them — the constructors of
+  `xgb.NewExtEventFuncs[name]` at `FirstEvent + n`, those of
+  `xgb.NewExtErrorFuncs[name]` at `FirstError + n` — since `Init` cannot be
+  run without a connection whose reader runs. The two maps are exported by
+  xgb "for use in the extension sub-packages".
+* *Every connection through `x11.NewConn`*, the model's too, which uses no
+  extension: whichever is made first sets the extensions up before it
+  exists, so the guarantee does not rest on the order of `root.go`. The
+  console programs `framecmp` and `glxoverlay`, which use no extension,
+  keep `xgb.NewConn`.
+* *The opcodes of the setup for every connection*, not a `QueryExtension`
+  per connection: they are the X server's, the same for every client of
+  it, and every connection is to the X server of `$DISPLAY`. A connection
+  gets the opcode of every extension present, used or not: `c.Extensions`
+  only lets xgb send the extension's requests.
+* *`x11.CheckExtension` in place of `Init`.* A part that needed an
+  extension needs it still and falls back as before without it; the error
+  reads "no extension DAMAGE on the connection" instead of xgb's "No
+  extension named DAMAGE could be found on on the server.". It fails too on
+  a connection `x11.NewConn` did not make.
+* *A failed setup is kept*: without an X server qws ends at its first
+  connection. The tables are written only once every query has its reply,
+  so a failure writes none.
+
+== Behavior
+
+. *The setup.* The first `x11.NewConn` of the process connects to the X
+  server, asks `QueryExtension` for Composite, DAMAGE, MIT-SHM, RANDR,
+  RENDER and XFIXES at once, closes that connection and waits for its
+  reader to end, writes the constructors of the events and errors of the
+  extensions present at the numbers the X server gave them, and then makes
+  its own connection. A later call makes its connection only.
+. *Connections.* Every connection `x11.NewConn` makes gets the major opcode
+  of every extension present. `x11.Connect`, `x11.NewModel` and
+  `snapshot.New` connect through it.
+. *No `Init`.* `GetMonitors`, `composite.NewCapturer`, the snapshotter's
+  setup and its RENDER path check an extension with `x11.CheckExtension`;
+  the version queries after it stay. No `Init` of an extension package of
+  xgb is left in qws.
+
+== Metrics
+
+Run T:: The test binary of `pkg/x11` — `go test -c`, and `go test -race -c`
+— run as `-test.run TestMonitorsUnderEvents -test.count=1 -test.v`, 20
+times without the race detector and 5 times with it, on E1 beside the
+service and picom. T-before builds `develop` at `759c6d3` with only the
+test file of this change added; T-after builds this change.
+
+== Acceptance criteria
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| The crash: `TestMonitorsUnderEvents` in `pkg/x11` — a second of
+  `GetMonitors` on a connection of `x11.Connect` while another connection
+  reads a flood of ClientMessages to a window of the test's own. T-before
+  fails in at least 15 runs of 20 with "concurrent map read and map write"
+  at `xgb.go:557`, and in 5 of 5 with a data race between `randr.Init` and
+  `readResponses`; T-after passes in 20 of 20 and 5 of 5.
+
+| K2
+| Once per process: `grep -rn '\.Init(' --include=*.go pkg cmd internal
+  console` finds the three `gl.Init` of OpenGL and nothing else;
+  `xgb.NewEventFuncs` and `xgb.NewErrorFuncs` are written in
+  `setupExtensions` alone, run once by `sync.OnceValues`; outside
+  `pkg/x11/extensions.go` and the two console programs, `xgb.NewConn` is
+  called by tests only.
+
+| K3
+| The same tables: on E1, every `Init` of the six run on a connection of
+  `x11.NewConn` after the setup leaves `xgb.NewEventFuncs` and
+  `xgb.NewErrorFuncs` as the setup wrote them — the same numbers, the same
+  constructors (a probe, research).
+
+| K4
+| Unchanged: `TestNewAndClose`, `TestRenderThumbnail`, `TestGPUThumbnail`,
+  `TestFallback`, `TestSwitchers` and `TestModelMatchesQueries` pass on E1
+  and none skips; `TestNewAndClose` logs "XSHM extension available" and not
+  "RENDER unavailable".
+
+| K5
+| `go vet ./...`, `go test ./...`, `go test -race ./pkg/x11 ./pkg/snapshot`
+  and `make check-specs` pass; `gofmt -l .` finds nothing.
+|===
+
+== Open decisions
+
+. S5 of 020 on the desktop of E1, where the crash was seen, is not run with
+  this change: it drives the desktop and is the author's to run. K1
+  reproduces the race without it.
+. Upstream: xgb writes and reads the tables without a lock up to 1.3.1, and
+  no issue of `jezek/xgb` is about it (2026-10-02). A report, or a patch
+  that would let this change go, is the author's decision.
+. The probe of K3 is not kept as a test: an update of xgb (012) that
+  changed what `Init` writes would go unnoticed until such a probe is run
+  again.
+. `doc/optimization.asciidoc` recommends an `shm.Init` in
+  `pkg/carousel/window.go`; done as written, it would bring an `Init` back
+  at run time. The recommendation is left as it is.

@@ -1,0 +1,17 @@
+= 021 — tasks
+:toc: left
+:toc-title: Contents
+:revdate: 2026-10-02
+
+. [x] T1. `TestMonitorsUnderEvents` on `develop`, before any other change:
+  T-before (research, "Reproduction").
+. [x] T2. The specification.
+. [ ] T3. `pkg/x11/extensions.go`; `Connect`, `NewModel` and `snapshot.New`
+  through `NewConn`; every `Init` replaced by `CheckExtension`; K2.
+. [ ] T4. T-after; K1.
+. [ ] T5. The probe of the tables; K3.
+. [ ] T6. The tests of the snapshotter, the model and the switchers with
+  `-v`, and the log of `TestNewAndClose`; K4.
+. [ ] T7. `go vet ./...`, `go test ./...`, `-race`, `gofmt -l .`,
+  `make check-specs`, each commit on its own in a clean worktree; K5; the
+  results.
