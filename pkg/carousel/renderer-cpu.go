@@ -10,6 +10,8 @@ import (
 	"sync"
 
 	"github.com/fogleman/gg"
+	"golang.org/x/image/font"
+	"golang.org/x/image/math/fixed"
 )
 
 const (
@@ -784,20 +786,19 @@ func CreateGradientBackground(width, height int, c1, c2 color.Color) image.Image
 
 // DrawGridLayout renders windows in a grid layout (like Windows task switcher)
 func DrawGridLayout(windowData []WindowData, selected int, hoverIndex int, cfg Config) *image.RGBA {
-	// Background - semi-transparent if enabled, fully transparent otherwise
-	dc := newCanvas(cfg)
-	top := drawHeader(dc, cfg)
-
-	if len(windowData) == 0 {
-		return getImageRGBA(dc)
+	// The heads of the tiles start before the canvas is made
+	// (specs/019-grid-speed)
+	var tiles *gridTiles
+	if len(windowData) > 0 {
+		tiles = startGridTiles(windowData, headerBand(cfg), selected, hoverIndex, cfg)
 	}
 
-	grid := layoutGrid(len(windowData), top, cfg)
+	// Background - semi-transparent if enabled, fully transparent otherwise
+	dc := newCanvas(cfg)
+	drawHeader(dc, cfg)
 
-	// Draw each window in its grid cell
-	for i, win := range windowData {
-		x, y := grid.tile(i)
-		drawGridTile(dc, &win, x, y, grid.tileW, grid.tileH, i == selected, i == hoverIndex, cfg)
+	if tiles != nil {
+		tiles.draw(dc)
 	}
 
 	return getImageRGBA(dc)
@@ -890,22 +891,41 @@ func (g gridLayout) tile(i int) (float64, float64) {
 	return x, y
 }
 
-// drawGridTile draws a single tile in grid layout
-func drawGridTile(dc *gg.Context, win *WindowData, x, y, w, h float64, isSelected bool, isHovered bool, cfg Config) {
+// drawGridTile draws a single tile in grid layout under the identity matrix:
+// its head, or the head drawn in advance if it can be used, then its tail. It
+// returns whether the head drawn in advance was used.
+func drawGridTile(dc *gg.Context, win *WindowData, x, y, w, h float64, isSelected bool, isHovered bool, cfg Config, head *tileHead) bool {
 	if win == nil {
-		return
+		return false
 	}
+	used := head != nil && head.drawTo(dc.Image().(*image.RGBA))
+	if !used {
+		drawGridTileHead(dc, win, x, y, w, h, isSelected, isHovered, cfg, nil)
+	}
+	drawGridTileTail(dc, win, x, y, w, h, isSelected, isHovered, cfg)
+	return used
+}
 
+// The thumbnail, the icon and the title of a grid tile
+const (
+	gridThumbPadding = 10.0 // around the thumbnail
+	gridTitleSpace   = 60.0 // below it, for the title (increased from 50 to 60)
+	gridIconSize     = 24.0 // the icon, in the top-left corner
+	gridIconPadding  = 8.0
+	gridTitleY       = 40.0 // the top of the title, from the bottom of the tile (moved down from 35 to 40 for better spacing)
+)
+
+// drawGridTileHead draws the part of a tile under its title: the shadow of a
+// selected or hovered tile, the background, the thumbnail with its border, the
+// icon and the bar under an urgent title (specs/019-grid-speed); thumb is the
+// thumbnail resampled in advance, or nil to draw it in place
+func drawGridTileHead(dc *gg.Context, win *WindowData, x, y, w, h float64, isSelected bool, isHovered bool, cfg Config, thumb *preparedImage) {
 	dc.Push()
 
 	// Draw shadow
 	if isSelected || isHovered {
 		dc.Push()
-		shadowOffset := cfg.ShadowOffset
-		if !isSelected {
-			shadowOffset = shadowOffset * 0.5 // Smaller shadow for hover
-		}
-		dc.Translate(x+shadowOffset, y+shadowOffset)
+		dc.Translate(x+gridShadowOffset(isSelected, cfg), y+gridShadowOffset(isSelected, cfg))
 		setColor(dc, cfg.ShadowColor, 0.6)
 		dc.DrawRoundedRectangle(0, 0, w, h, 8)
 		dc.Fill()
@@ -921,28 +941,15 @@ func drawGridTile(dc *gg.Context, win *WindowData, x, y, w, h float64, isSelecte
 	dc.Fill()
 
 	// Draw thumbnail
-	thumbPadding := 10.0
-	thumbW := w - 2*thumbPadding
-	thumbH := h - 60 // Reserve space for title at bottom (increased from 50 to 60)
-
 	if win.Thumbnail != nil {
-		// Scale thumbnail to fit
-		bounds := win.Thumbnail.Bounds()
-		imgW := float64(bounds.Dx())
-		imgH := float64(bounds.Dy())
-
-		scale := math.Min(thumbW/imgW, thumbH/imgH)
-		scaledW := imgW * scale
-		scaledH := imgH * scale
-
-		// Center thumbnail in tile
-		thumbX := thumbPadding + (thumbW-scaledW)/2
-		thumbY := thumbPadding + (thumbH-scaledH)/2
+		thumbX, thumbY, scaledW, scaledH, scale := gridThumbnail(win.Thumbnail.Bounds(), w, h)
 
 		dc.Push()
 		dc.Translate(thumbX, thumbY)
 		dc.Scale(scale, scale)
-		dc.DrawImage(win.Thumbnail, 0, 0)
+		if thumb == nil || !thumb.drawTo(dc.Image().(*image.RGBA)) {
+			dc.DrawImage(win.Thumbnail, 0, 0)
+		}
 		dc.Pop()
 
 		// Draw border around thumbnail
@@ -954,35 +961,37 @@ func drawGridTile(dc *gg.Context, win *WindowData, x, y, w, h float64, isSelecte
 
 	// Draw icon (if available) in top-left corner
 	if win.Icon != nil {
-		iconSize := 24.0
-		iconPadding := 8.0
-		bounds := win.Icon.Bounds()
-		imgW := float64(bounds.Dx())
-		imgH := float64(bounds.Dy())
-
-		if imgW > 0 && imgH > 0 {
-			iconScale := math.Min(iconSize/imgW, iconSize/imgH)
-
+		if iconScale, ok := gridIconScale(win.Icon.Bounds()); ok {
 			dc.Push()
-			dc.Translate(iconPadding, iconPadding)
+			dc.Translate(gridIconPadding, gridIconPadding)
 			dc.Scale(iconScale, iconScale)
 			dc.DrawImage(win.Icon, 0, 0)
 			dc.Pop()
 		}
 	}
 
+	// Draw title background if urgent
+	if win.Title != "" && win.Urgent {
+		titleY := h - gridTitleY
+		setColor(dc, cfg.UrgentTitleBackground, 0.9)
+		dc.DrawRoundedRectangle(5, titleY-5, w-10, 30, 4)
+		dc.Fill()
+	}
+
+	dc.Pop()
+}
+
+// drawGridTileTail draws the part of a tile over its head: the title, the
+// workspace and the frame
+func drawGridTileTail(dc *gg.Context, win *WindowData, x, y, w, h float64, isSelected bool, isHovered bool, cfg Config) {
+	dc.Push()
+	dc.Translate(x, y)
+
 	// Draw title at bottom
-	titleY := h - 40 // Moved down from h-35 to h-40 for better spacing
+	titleY := h - gridTitleY
 	titleMaxWidth := w - 20
 
 	if win.Title != "" {
-		// Draw title background if urgent
-		if win.Urgent {
-			setColor(dc, cfg.UrgentTitleBackground, 0.9)
-			dc.DrawRoundedRectangle(5, titleY-5, w-10, 30, 4)
-			dc.Fill()
-		}
-
 		// Load font with fallback support
 		fontFace := cfg.face(float64(cfg.FontSize))
 		if fontFace != nil {
@@ -990,7 +999,7 @@ func drawGridTile(dc *gg.Context, win *WindowData, x, y, w, h float64, isSelecte
 			setColor(dc, cfg.TextColor, 1.0)
 
 			// Truncate title if too long
-			title := truncateTitle(win.Title, titleMaxWidth, dc, cfg.FontSize)
+			title := truncateTitle(win.Title, titleMaxWidth, fontFace)
 			dc.DrawStringAnchored(title, w/2, titleY+8, 0.5, 0)
 		}
 	}
@@ -1021,25 +1030,85 @@ func drawGridTile(dc *gg.Context, win *WindowData, x, y, w, h float64, isSelecte
 	dc.Pop()
 }
 
-// truncateTitle truncates title to fit within maxWidth
-func truncateTitle(title string, maxWidth float64, dc *gg.Context, fontSize int) string {
+// gridShadowOffset is the offset of the shadow of a selected or a hovered
+// tile
+func gridShadowOffset(isSelected bool, cfg Config) float64 {
+	if !isSelected {
+		return cfg.ShadowOffset * 0.5 // Smaller shadow for hover
+	}
+	return cfg.ShadowOffset
+}
+
+// gridThumbnail is where drawGridTileHead puts a thumbnail of bounds b in a
+// tile of size w×h: its top-left corner, relative to the tile's, its size and
+// its scale
+func gridThumbnail(b image.Rectangle, w, h float64) (x, y, scaledW, scaledH, scale float64) {
+	thumbW := w - 2*gridThumbPadding
+	thumbH := h - gridTitleSpace // Reserve space for title at bottom
+
+	// Scale thumbnail to fit
+	imgW := float64(b.Dx())
+	imgH := float64(b.Dy())
+	scale = math.Min(thumbW/imgW, thumbH/imgH)
+	scaledW = imgW * scale
+	scaledH = imgH * scale
+
+	// Center thumbnail in tile
+	x = gridThumbPadding + (thumbW-scaledW)/2
+	y = gridThumbPadding + (thumbH-scaledH)/2
+	return x, y, scaledW, scaledH, scale
+}
+
+// gridIconScale is the scale drawGridTileHead draws an icon of bounds b at;
+// false when it draws none
+func gridIconScale(b image.Rectangle) (float64, bool) {
+	imgW := float64(b.Dx())
+	imgH := float64(b.Dy())
+	if imgW <= 0 || imgH <= 0 {
+		return 0, false
+	}
+	return math.Min(gridIconSize/imgW, gridIconSize/imgH), true
+}
+
+// truncateTitle truncates title to fit within maxWidth, as measured by
+// MeasureString of a gg.Context with the face: the title, or else the longest
+// of its prefixes that fits with "..." after it.
+//
+// MeasureString sums the advances of the runes and the kerning of each pair
+// in 26.6 fixed point and takes the whole pixels of the sum. The sum for a
+// prefix with the dots is therefore the sum for the prefix, the kerning to the
+// first dot and the sum for the dots: each rune is measured once rather than
+// once for each prefix tried (specs/019-grid-speed).
+func truncateTitle(title string, maxWidth float64, face font.Face) string {
 	runes := []rune(title)
 	if len(runes) == 0 {
 		return title
 	}
+	// width is the width MeasureString gives for a sum of advances
+	width := func(advance fixed.Int26_6) float64 { return float64(advance >> 6) }
+
+	// sums[k] is the advance of runes[:k]
+	sums := make([]fixed.Int26_6, len(runes)+1)
+	for k, c := range runes {
+		sums[k+1] = sums[k]
+		if k > 0 {
+			sums[k+1] += face.Kern(runes[k-1], c)
+		}
+		advance, _ := face.GlyphAdvance(c)
+		sums[k+1] += advance
+	}
 
 	// Measure full title
-	w, _ := dc.MeasureString(title)
-	if w <= maxWidth {
+	if width(sums[len(runes)]) <= maxWidth {
 		return title
 	}
 
-	// Binary search for optimal length
+	// The longest prefix that fits with the dots
+	dot, _ := face.GlyphAdvance('.')
+	dots := 3*dot + 2*face.Kern('.', '.')
 	for length := len(runes) - 1; length > 0; length-- {
-		truncated := string(runes[:length]) + "..."
-		w, _ := dc.MeasureString(truncated)
-		if w <= maxWidth {
-			return truncated
+		if width(sums[length]+face.Kern(runes[length-1], '.')+dots) <= maxWidth {
+			return string(runes[:length]) + "..."
 		}
 	}
 

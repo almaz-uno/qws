@@ -90,13 +90,15 @@ func TestTagNames(t *testing.T) {
 	})
 }
 
-// TestJoinedKeys checks K4: a file written with joined names, as config init
-// wrote it, is read with a warning per joined key, and a key with
-// underscores wins over its joined form
+// TestJoinedKeys checks K4 of specs/002-config-names as specs/015-no-joined-keys
+// changes it (K1, K2): a file written with joined names, as config init
+// wrote it, has its joined keys not read — the keys they stand for keep their
+// defaults — with a warning per joined key naming the key to use, and a key
+// with underscores wins over its joined form
 func TestJoinedKeys(t *testing.T) {
 	clearEnvironment(t)
-	want := changedConfig(t)
-	data, err := yaml.Marshal(joined(reflect.ValueOf(*want)))
+	written := changedConfig(t)
+	data, err := yaml.Marshal(joined(reflect.ValueOf(*written)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,16 +107,36 @@ func TestJoinedKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("read\n%+v\nwritten\n%+v", got, want)
+	// Every field differs from its default: a joined one read would show
+	want := *written
+	unjoined(reflect.ValueOf(&want).Elem(), reflect.ValueOf(*Default()))
+	if !reflect.DeepEqual(*got, want) {
+		t.Errorf("read\n%+v\nwant\n%+v", *got, want)
 	}
-	if n := len(joinedKeys()); len(warnings) != n {
-		t.Errorf("%d warnings, want %d: %v", len(warnings), n, warnings)
+	keys := joinedKeys()
+	if len(warnings) != len(keys) {
+		t.Errorf("%d warnings, want %d: %v", len(warnings), len(keys), warnings)
 	}
 	for _, w := range warnings {
-		if !strings.Contains(w, "rename it") {
-			t.Errorf("warning %q does not say what to do", w)
+		named := false
+		for k, key := range keys {
+			named = named || strings.Contains(w, "key "+k+" ") && strings.HasSuffix(w, "rename it to "+key)
 		}
+		if !strings.Contains(w, "no longer read") || !named {
+			t.Errorf("warning %q does not say the key is not read and which to use", w)
+		}
+	}
+
+	got, warnings, err = Load(writeFile(t, "behavior:\n  snapshotinterval: 7s\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Behavior.SnapshotInterval != Default().Behavior.SnapshotInterval {
+		t.Errorf("snapshot interval %v, want the default %v", got.Behavior.SnapshotInterval, Default().Behavior.SnapshotInterval)
+	}
+	if len(warnings) != 1 || warnings[0] !=
+		"configuration key behavior.snapshotinterval is no longer read: rename it to behavior.snapshot_interval" {
+		t.Errorf("warnings %q, want one naming behavior.snapshot_interval", warnings)
 	}
 
 	got, warnings, err = Load(writeFile(t, "behavior:\n  snapshot_interval: 2s\n  snapshotinterval: 7s\n"))
@@ -131,11 +153,13 @@ func TestJoinedKeys(t *testing.T) {
 
 // Criteria of specs/010-animation-options
 
-// TestAnimationDefaults checks K1: the defaults the author chose
+// TestAnimationDefaults checks K1: the defaults the author chose, and those
+// of the keys of specs/014-appearance-keys
 func TestAnimationDefaults(t *testing.T) {
 	want := Animation{
 		Enabled: true, Duration: 150 * time.Millisecond, Step: true,
 		Show: []string{"fade", "zoom"}, Hide: []string{"fade", "zoom"}, Hover: []string{"fade", "zoom"},
+		OverlayZoom: 0.92, HoverZoom: 1.05,
 	}
 	if got := Default().Appearance.Animation; !reflect.DeepEqual(got, want) {
 		t.Errorf("defaults %+v, want %+v", got, want)
@@ -165,6 +189,7 @@ func TestAnimationSources(t *testing.T) {
 	want := Animation{
 		Enabled: false, Duration: 80 * time.Millisecond, Step: false,
 		Show: []string{"fade", "zoom"}, Hide: []string{"zoom"}, Hover: []string{"fade", "zoom"},
+		OverlayZoom: 0.92, HoverZoom: 1.05,
 	}
 	if got := cfg.Appearance.Animation; !reflect.DeepEqual(got, want) {
 		t.Errorf("file: %+v, want %+v", got, want)
@@ -183,9 +208,53 @@ func TestAnimationSources(t *testing.T) {
 	want = Animation{
 		Enabled: true, Duration: 300 * time.Millisecond, Step: true,
 		Show: []string{"zoom"}, Hide: []string{"fade", "zoom"}, Hover: []string{"none"},
+		OverlayZoom: 0.92, HoverZoom: 1.05,
 	}
 	if got := cfg.Appearance.Animation; !reflect.DeepEqual(got, want) {
 		t.Errorf("environment: %+v, want %+v", got, want)
+	}
+}
+
+// Criteria of specs/014-appearance-keys
+
+// TestAppearanceKeys checks K5: the defaults of the header, the hover
+// duration and the zoom factors keep the picture and the animations of 1.2.0;
+// each key is read from a file, and from its QWS_ variable over the file
+func TestAppearanceKeys(t *testing.T) {
+	def := Default().Appearance
+	if !def.Header.Enabled || def.Animation.HoverDuration != 0 ||
+		def.Animation.OverlayZoom != 0.92 || def.Animation.HoverZoom != 1.05 {
+		t.Errorf("defaults: header %+v, hover duration %v, zooms %v, %v; want shown, 0, 0.92, 1.05",
+			def.Header, def.Animation.HoverDuration, def.Animation.OverlayZoom, def.Animation.HoverZoom)
+	}
+
+	clearEnvironment(t)
+	file := writeFile(t, "appearance:\n  header:\n    enabled: false\n  animation:\n"+
+		"    hover_duration: 90ms\n    overlay_zoom: 0.8\n    hover_zoom: 1.2\n")
+	cfg, warnings, err := Load(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := cfg.Appearance.Animation
+	if cfg.Appearance.Header.Enabled || a.HoverDuration != 90*time.Millisecond || a.OverlayZoom != 0.8 || a.HoverZoom != 1.2 {
+		t.Errorf("file: header %+v, hover duration %v, zooms %v, %v; want hidden, 90ms, 0.8, 1.2",
+			cfg.Appearance.Header, a.HoverDuration, a.OverlayZoom, a.HoverZoom)
+	}
+	if len(warnings) != 0 {
+		t.Errorf("warnings %v, want none", warnings)
+	}
+
+	t.Setenv("QWS_APPEARANCE_HEADER_ENABLED", "true")
+	t.Setenv("QWS_APPEARANCE_ANIMATION_HOVER_DURATION", "40ms")
+	t.Setenv("QWS_APPEARANCE_ANIMATION_OVERLAY_ZOOM", "0.5")
+	t.Setenv("QWS_APPEARANCE_ANIMATION_HOVER_ZOOM", "1.5")
+	if cfg, _, err = Load(file); err != nil {
+		t.Fatal(err)
+	}
+	a = cfg.Appearance.Animation
+	if !cfg.Appearance.Header.Enabled || a.HoverDuration != 40*time.Millisecond || a.OverlayZoom != 0.5 || a.HoverZoom != 1.5 {
+		t.Errorf("environment: header %+v, hover duration %v, zooms %v, %v; want shown, 40ms, 0.5, 1.5",
+			cfg.Appearance.Header, a.HoverDuration, a.OverlayZoom, a.HoverZoom)
 	}
 }
 
@@ -210,9 +279,11 @@ func changedConfig(t *testing.T) *Config {
 			},
 			WindowBackground: WindowBackground{Enabled: false, Opacity: 0.5, BorderRadius: 7},
 			WindowPadding:    WindowPadding{Horizontal: "5%", Vertical: "6%"},
+			Header:           Header{Enabled: false},
 			Animation: Animation{
 				Enabled: false, Duration: 300 * time.Millisecond, Step: false,
 				Show: []string{"zoom"}, Hide: []string{"fade"}, Hover: []string{},
+				HoverDuration: 70 * time.Millisecond, OverlayZoom: 0.8, HoverZoom: 1.2,
 			},
 		},
 		Behavior: Behavior{SnapshotInterval: 1500 * time.Millisecond, ShowDelay: 20 * time.Millisecond},
@@ -234,6 +305,19 @@ func changedConfig(t *testing.T) *Config {
 	}
 	same(reflect.ValueOf(*cfg), def, "Config")
 	return cfg
+}
+
+// unjoined sets every field of want under a multi-word name — one config
+// init wrote joined — to its value in def
+func unjoined(want, def reflect.Value) {
+	for i := 0; i < want.NumField(); i++ {
+		f := want.Type().Field(i)
+		if strings.ToLower(f.Name) != f.Tag.Get("mapstructure") {
+			want.Field(i).Set(def.Field(i))
+		} else if f.Type.Kind() == reflect.Struct {
+			unjoined(want.Field(i), def.Field(i))
+		}
+	}
 }
 
 // joined is v as yaml.v3 marshals it without tags: fields named by their

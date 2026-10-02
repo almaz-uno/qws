@@ -137,6 +137,37 @@ func BenchmarkE1Frame(b *testing.B) {
 	}
 }
 
+// BenchmarkE1Grid draws the frame of E1 in the grid, without and with the
+// header, and the tiles layer of the animation for the latter
+// (specs/019-grid-speed)
+func BenchmarkE1Grid(b *testing.B) {
+	goFont := filepath.Join(b.TempDir(), "goregular.ttf")
+	if err := os.WriteFile(goFont, goregular.TTF, 0o644); err != nil {
+		b.Fatal(err)
+	}
+	zerolog.SetGlobalLevel(zerolog.InfoLevel)
+	defer zerolog.SetGlobalLevel(zerolog.TraceLevel)
+	byName := map[string]scene{}
+	for _, s := range scenes() {
+		byName[s.name] = s
+	}
+	for _, name := range []string{"grid-e1-24-second", "grid-e1-header"} {
+		sc := byName[name]
+		b.Run(name, func(b *testing.B) {
+			for range b.N {
+				drawScene(sc, []string{goFont})
+			}
+		})
+	}
+	sc := byName["grid-e1-header"]
+	cfg := sceneConfig(sc, []string{goFont})
+	b.Run("grid-e1-header-tiles", func(b *testing.B) {
+		for range b.N {
+			GridTiles(sc.windows, cfg)
+		}
+	})
+}
+
 // drawScene draws a scene the way Selector.render does
 func drawScene(sc scene, fonts []string) *image.RGBA {
 	cfg := sceneConfig(sc, fonts)

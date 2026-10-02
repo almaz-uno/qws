@@ -1,0 +1,11 @@
+= 003 — tasks
+:toc: left
+:toc-title: Contents
+:revdate: 2026-10-01
+
+. [x] T1. Before: where the time goes (research).
+. [x] T2. The icon by its headers and the icons by class kept; K2.
+. [x] T3. The model; K1, K3.
+. [x] T4. Into qws, with the fallback.
+. [x] T5. After: K4, K5 by S1 on E1 (section "Results").
+. [x] T6. Results.

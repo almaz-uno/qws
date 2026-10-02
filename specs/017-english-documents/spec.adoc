@@ -1,0 +1,226 @@
+= 017 — documents in English
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-01
+:status: implemented
+:issue: 40
+
+== What and why
+
+Section "Language" of the constitution makes English the language of the
+documentation (`AGENTS.md`), and its open question "Non-English documents"
+names four documents that are not in it: they are either translated or the
+rule gets an exception. On `develop` at `f90abc7`, the lines with Cyrillic
+are:
+
+[cols="3,1,1"]
+|===
+| File | Lines with Cyrillic | Lines
+
+| `doc/optimization.asciidoc` | 307 | 770
+| `doc/font-fallback.md` | 29 | 85
+| `doc/windows-switcher.asciidoc` | 4 | 2669
+| `doc/configuration.asciidoc` | 1 | 1153
+| `pkg/carousel/scenes_test.go` | 5 | 337
+|===
+
+The four lines of `doc/windows-switcher.asciidoc` are a heading, a sentence
+and two code comments; the line of `doc/configuration.asciidoc` is a sentence
+on font fallback. `pkg/carousel/scenes_test.go` is not a document: its five
+lines are window titles, the input of a test.
+
+The change:
+
+. translates the four documents;
+. leaves the titles of `pkg/carousel/scenes_test.go` as they are, and the
+  constitution says why;
+. closes the open question.
+
+Unchanged: the program and its tests; what the documents say, stale or not
+(section "Open decisions"); their structure, markup, code, identifiers,
+commands, paths, numbers, units and links; the other documents.
+
+== Decisions
+
+* *Translated, no exception.* The constitution names these documents as the
+  description of behavior and the record of design decisions (section
+  "Documentation is part of the change, not its consequence"), and decisions
+  are made from them; a part of them a reader of English cannot read is a
+  part nobody checks against the code. Specification 001 already had to take
+  over the content of a document in Russian instead of merging it
+  (`research.adoc`, "Prototype"). An exception would make the rule of
+  "Language" a list of files.
+* *Line for line.* Every line with Cyrillic is replaced by its translation,
+  and no other line changes. The number of lines stays, the diff reads as
+  pairs of an original and its translation, and another change of the same
+  document merges unless it edits one of those lines.
+* *A translation, not a revision.* A passage keeps what it says, also where
+  it no longer matches the code: a revision is a decision of its own, and
+  inside a translation it could not be reviewed as one. What was found stale
+  is listed in "Open decisions". One word is not kept: `doc/font-fallback.md`
+  called `MultiFallbackFace` a class in one sentence and a type in another,
+  and the translation says type in both.
+* *Prose and comments.* Prose, headings, table cells and the comments in code
+  blocks are translated; identifiers, commands, paths, outputs, numbers and
+  units are kept, as are the emoji marks of the status table. The register
+  is that of `specs/`.
+* *Test data stays.* The titles of `portableWindows` and `hostWindows` in
+  `pkg/carousel/scenes_test.go` are what scene set Σ of specification 001 is
+  drawn with: the SHA-256 of every frame is recorded in
+  `pkg/carousel/testdata/scenes.json`. The portable titles draw Cyrillic
+  with the Go font alone; the host ones mix it with glyphs only DejaVu Sans
+  has, so that the fallback changes fonts within a title. Translated, they
+  would change the frames and the digests and drop the Cyrillic the test is
+  there for. Such strings are not text written for a reader.
+
+== Constitution
+
+Section "Language" gets, after its rule:
+
+[quote]
+____
+Strings a test feeds to the program are data, not text for a reader, and keep
+their language: the Cyrillic window titles of `pkg/carousel/scenes_test.go`,
+on which font fallback is checked (specification `017-english-documents`).
+____
+
+The open question "Non-English documents" is removed.
+
+== Acceptance criteria
+
+The checks run in the root of the repository. Lines with Cyrillic, per
+tracked file:
+
+[source,bash]
+----
+git ls-files | while read f; do
+	n=$(grep -cP '[\x{0400}-\x{04FF}]' "$f" 2>/dev/null)
+	[ "${n:-0}" -gt 0 ] && echo "$n $f"
+done
+----
+
+The shape of a line: its leading characters that are neither letters nor
+backquotes — indentation, heading and list marks, table bars, comment marks —
+and its counts of backquotes, of `**` and of bars:
+
+[source,bash]
+----
+shape() { perl -CSD -ne 'chomp; my ($p) = /^([^\p{L}`]*)/; my $b = () = /`/g;
+	my $s = () = /\*\*/g; my $u = () = /\|/g; print "$p\t$b\t$s\t$u\n"'; }
+for f in doc/optimization.asciidoc doc/font-fallback.md \
+	doc/windows-switcher.asciidoc doc/configuration.asciidoc; do
+	diff <(git show f90abc7:"$f" | shape) <(shape < "$f") || echo "$f differs"
+done
+----
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| No Cyrillic but the test data: the command of lines with Cyrillic prints
+  `5 pkg/carousel/scenes_test.go` and nothing else.
+
+| K2
+| Line for line: `git diff --diff-algorithm=histogram --numstat f90abc7 --
+  doc/` gives each of the four documents as many lines added as removed, as
+  many as it had lines with Cyrillic at `f90abc7` — 307, 29, 4, 1. With K1,
+  every line with Cyrillic, and no other, is replaced by one line.
+
+| K3
+| Structure: the comparison of shapes prints nothing — every line keeps its
+  marks, its inline code and its emphasis.
+
+| K4
+| `asciidoctor -o /dev/null --failure-level WARN` exits 0 on
+  `doc/optimization.asciidoc`, `specs/constitution.adoc` and this
+  specification, and with `-a source-highlighter!` on
+  `doc/configuration.asciidoc` and `doc/windows-switcher.asciidoc`: they set
+  `:source-highlighter: rouge`, and on a host without the optional gem
+  `rouge` that alone is warned of, at `f90abc7` as well.
+
+| K5
+| The test data is that of `f90abc7`: `git diff --quiet f90abc7 --
+  pkg/carousel/scenes_test.go pkg/carousel/testdata/scenes.json` exits 0;
+  `make check-specs`, `go vet ./...` and `go test ./...` pass.
+
+| K6
+| Section "Language" of `specs/constitution.adoc` has the rule of section
+  "Constitution", and the open question "Non-English documents" is gone.
+|===
+
+== Results
+
+2026-10-01, ws1 (Debian 12, bash 5.2.15, perl 5.36.0, Asciidoctor 2.0.26,
+go 1.26.0), the change on `f90abc7`.
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | `5 pkg/carousel/scenes_test.go` alone.
+| K2 | 307, 29, 4 and 1 lines added and removed in
+  `doc/optimization.asciidoc`, `doc/font-fallback.md`,
+  `doc/windows-switcher.asciidoc` and `doc/configuration.asciidoc`; the
+  number of lines of each is that of `f90abc7`. The default algorithm, Myers,
+  pairs some blank lines between translated ones differently and counts 315
+  in `doc/optimization.asciidoc`; histogram counts the lines that differ.
+| K3 | Nothing printed.
+| K4 | Exit status 0 for each of the five.
+| K5 | `git diff --quiet` exits 0; `make check-specs`, `go vet ./...` and
+  `go test ./...` pass, the tests run without `DISPLAY`, so the ones that
+  need X skip, as in workflow `test`.
+| K6 | Sections "Language" and "What the constitution does not regulate".
+|===
+
+== Open decisions
+
+Found stale while translating, and translated as they stand. Whether each
+document is revised or deleted is a decision of its own (constitution,
+"Documentation is part of the change, not its consequence").
+
+`doc/optimization.asciidoc`, written 2026-01-23, before specifications 001,
+007 and 008:
+
+* "Two backends — CPU (`renderer-cpu.go`) and OpenGL
+  (`renderer-opengl.go`)": `renderer-opengl.go` was removed by specification
+  001 (`538e5c8`). The backends are `cpu` and `glx`, the default; frames are
+  always drawn by the CPU renderer, and `glx` presents them through GLX,
+  without `PutImage` (`pkg/carousel/factory.go`). Output through `PutImage`,
+  and optimization #3, XSHM for output, concern `cpu` alone.
+* Optimization #4: `DrawImage()` still ends in `Sync()`, but its strips are
+  checked after all of them are sent — one round trip, not one per strip
+  (`pkg/carousel/window.go`).
+* Optimization #1, doubtful: the thumbnails of `win.Preview` are captured
+  scaled, at most 512×512, and kept between activations — by the snapshots
+  of `pkg/snapshot` (specification 008) and the cache of `focus.Watcher`
+  (`cmd/qws/root.go`); what every frame redoes is the resampling to the size
+  of the tile (`pkg/carousel/prepared.go`).
+* Optimization #2, "not implemented": a `sync.Pool` recycles the scratch
+  pixels of prepared images (`pkg/carousel/prepared.go`), not the frame.
+* "The collected profiles are in `profiles/`", and
+  `profiles/cpu_20260119_152345.prof` with its pair: the directory is ignored
+  by git, and the files are not in the repository.
+* "Before optimization (estimate)": the figures have no method or conditions
+  (constitution, "Decisions rest on measurements"); the measured ones are in
+  specification 001. The timing proposed under "Methods of measurement"
+  exists in another form: `pkg/ui/timing.go` logs the latency of a frame at
+  debug level.
+* "Not recommended: CGO-based libraries — complicate the build": the build
+  needs cgo since specification 001 (GLX, `go-gl/gl`). "Current
+  dependencies" names three of the ten direct ones of `go.mod`, and lists
+  `zerolog`, in use, under "Recommended additions".
+
+`doc/font-fallback.md`, written 2026-01-13:
+
+* Its links `pkg/carousel/...` are relative to `doc/` and resolve to
+  `doc/pkg/carousel/...`, which does not exist.
+* "Usage": the type is used in `pkg/carousel/renderer-cpu.go`, not
+  `renderer.go`, through `Config.face`, which takes the face from a
+  `FontSet` or the shared cache (specification 007); `Close()` does nothing.
+
+Specification 001 removed `renderer-opengl.go` and left
+`doc/optimization.asciidoc` describing it, while the constitution has a
+document that no longer matches the code updated or deleted in the same
+change; the revision would close that gap as well.

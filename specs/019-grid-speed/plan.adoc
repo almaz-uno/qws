@@ -1,0 +1,92 @@
+= 019 — plan
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-01
+
+== Approach
+
+*Head and tail.* `drawGridTile` is split into `drawGridTileHead` — the
+shadow, the background, the thumbnail and its border, the icon, the urgent
+bar — and `drawGridTileTail` — the title, the workspace, the frame. Each
+pushes the state of the context, translates to the tile and pops it, so
+every operation keeps its matrix; the order of the operations of a tile is
+the order of `develop`, the urgent bar having been the first thing of the
+title. The geometry both use — the place and scale of the thumbnail, of the
+icon, the offset of the shadow — is computed by functions of their own
+(`gridThumbnail`, `gridIconScale`, `gridShadowOffset`), with the arithmetic
+of `develop`.
+
+*The heads* (`pkg/carousel/gridheads.go`). `startGridTiles` lays the tiles
+out, computes for each the rectangle of its head (`gridHeadBounds`), leaves
+out the tiles whose rectangles meet another, takes a scratch canvas of the
+size of the frame and starts the jobs, one a head, in the order of the
+tiles, on `GOMAXPROCS/2` goroutines. A job resamples the thumbnail
+(`prepareOpaque`), waits for the canvas, fills its rectangle of the scratch
+canvas with the pixel the canvas has at its corner, and draws the head there
+with a context of its own. `draw` reads those pixels once the canvas and the
+header are drawn, lets the jobs go on, and draws the tiles in order: a tile
+waits for its job, copies its head into the canvas if the canvas is that
+pixel all over the rectangle (`tileHead.drawTo`) or draws it in place, then
+draws its tail.
+
+*The title* is truncated from the sums of the advances and kernings of its
+prefixes, computed once. *`MultiFallbackFace`* keeps the results of
+`GlyphAdvance` in a map.
+
+== Why it is exact
+
+For a tile i, let R be the rectangle of its head and c the pixel the job
+filled it with. Every operation of the head writes only pixels of R
+(`gridHeadBounds`), each as a function of that pixel alone, of the operation
+and of the size of the canvas (research, "What keeps the bytes"). The scratch
+canvas has the size of the frame, and in R it held c and only what the head
+of i wrote: the rectangles of the heads drawn there do not meet. So if the
+canvas, when the tile comes, is c all over R, drawing the head in place
+would turn R into what the scratch holds in R and leave the rest of the
+canvas as it is — which is what the copy does. If it is not, the head is
+drawn in place. Either way the canvas after the head is that of `develop`
+at the same point; the tail and the tiles after it are drawn in place, in
+the same order.
+
+The thumbnail of a job is resampled apart by the argument of specification
+001: an opaque image in _src_ mode, the same affected rectangle, its written
+pixels copied. The truncation compares the same widths: integer sums
+(research). The advances kept are those the face would return again.
+
+== Files
+
+[cols="2,5"]
+|===
+| File | What changes
+
+| `pkg/carousel/renderer-cpu.go`
+| `DrawGridLayout` starts the heads before the canvas; `drawGridTile` split
+  into head and tail; the geometry functions; `truncateTitle` by sums.
+
+| `pkg/carousel/gridheads.go`
+| New: the heads, their bounds, the scratch canvas, the workers.
+
+| `pkg/carousel/layers.go`
+| `GridTiles` draws through the heads.
+
+| `pkg/carousel/fontfallback.go`
+| `GlyphAdvance` keeps its results.
+
+| `pkg/carousel/scenes_test.go`
+| `BenchmarkE1Grid`.
+
+| `pkg/carousel/gridheads_test.go`
+| New: `TestGridHeads`, K2.
+
+| `pkg/carousel/parallel_test.go`
+| Frames and tiles layers of the grid among the jobs, K3.
+|===
+
+Reused: `prepareOpaque`, `placement` and `preparedImage.drawTo` of
+specification 001; `headerBand` and `layoutGrid`; the `FontSet` discipline of
+007 — the jobs draw no text and use no face.
+
+Unchanged: `testdata/scenes.json`; the carousel's drawing; `README.md` and
+`doc/`, which say nothing of how long the grid takes; `RELEASE-NOTES.adoc`,
+written at the release.

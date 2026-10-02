@@ -100,12 +100,16 @@ func init() {
 	rootCmd.PersistentFlags().Float64("appearance-window-background-border-radius", defaultCfg.Appearance.WindowBackground.BorderRadius, "window background corner radius in pixels")
 	rootCmd.PersistentFlags().String("appearance-window-padding-horizontal", defaultCfg.Appearance.WindowPadding.Horizontal, "horizontal padding from screen edges (e.g., \"5%\" or \"50px\")")
 	rootCmd.PersistentFlags().String("appearance-window-padding-vertical", defaultCfg.Appearance.WindowPadding.Vertical, "vertical padding from screen edges (e.g., \"5%\" or \"50px\")")
+	rootCmd.PersistentFlags().Bool("appearance-header-enabled", defaultCfg.Appearance.Header.Enabled, "show the hostname and the version at the top left of the switcher")
 	rootCmd.PersistentFlags().Bool("appearance-animation-enabled", defaultCfg.Appearance.Animation.Enabled, "animate the switcher (glx renderer); false: every change at once")
 	rootCmd.PersistentFlags().Duration("appearance-animation-duration", defaultCfg.Appearance.Animation.Duration, "duration of every animation (0 = at once)")
 	rootCmd.PersistentFlags().Bool("appearance-animation-step", defaultCfg.Appearance.Animation.Step, "animate the step of the selection")
 	rootCmd.PersistentFlags().StringSlice("appearance-animation-show", defaultCfg.Appearance.Animation.Show, "effects of the appearance (fade, zoom, none)")
 	rootCmd.PersistentFlags().StringSlice("appearance-animation-hide", defaultCfg.Appearance.Animation.Hide, "effects of the disappearance (fade, zoom, none)")
 	rootCmd.PersistentFlags().StringSlice("appearance-animation-hover", defaultCfg.Appearance.Animation.Hover, "effects of the hover frame (fade, zoom, none)")
+	rootCmd.PersistentFlags().Duration("appearance-animation-hover-duration", defaultCfg.Appearance.Animation.HoverDuration, "duration of the hover animation (0 = that of --appearance-animation-duration)")
+	rootCmd.PersistentFlags().Float64("appearance-animation-overlay-zoom", defaultCfg.Appearance.Animation.OverlayZoom, "scale the switcher zooms from as it appears and to as it disappears")
+	rootCmd.PersistentFlags().Float64("appearance-animation-hover-zoom", defaultCfg.Appearance.Animation.HoverZoom, "scale the hover frame zooms from as it comes and to as it goes")
 
 	// Behavior
 	rootCmd.PersistentFlags().Duration("behavior-snapshot-interval", defaultCfg.Behavior.SnapshotInterval, "background thumbnail refresh interval")
@@ -264,6 +268,9 @@ func applyFlags() {
 	if rootCmd.PersistentFlags().Changed("appearance-window-padding-vertical") {
 		cfg.Appearance.WindowPadding.Vertical, _ = rootCmd.PersistentFlags().GetString("appearance-window-padding-vertical")
 	}
+	if rootCmd.PersistentFlags().Changed("appearance-header-enabled") {
+		cfg.Appearance.Header.Enabled, _ = rootCmd.PersistentFlags().GetBool("appearance-header-enabled")
+	}
 	if rootCmd.PersistentFlags().Changed("appearance-animation-enabled") {
 		cfg.Appearance.Animation.Enabled, _ = rootCmd.PersistentFlags().GetBool("appearance-animation-enabled")
 	}
@@ -281,6 +288,15 @@ func applyFlags() {
 	}
 	if rootCmd.PersistentFlags().Changed("appearance-animation-hover") {
 		cfg.Appearance.Animation.Hover, _ = rootCmd.PersistentFlags().GetStringSlice("appearance-animation-hover")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-animation-hover-duration") {
+		cfg.Appearance.Animation.HoverDuration, _ = rootCmd.PersistentFlags().GetDuration("appearance-animation-hover-duration")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-animation-overlay-zoom") {
+		cfg.Appearance.Animation.OverlayZoom, _ = rootCmd.PersistentFlags().GetFloat64("appearance-animation-overlay-zoom")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-animation-hover-zoom") {
+		cfg.Appearance.Animation.HoverZoom, _ = rootCmd.PersistentFlags().GetFloat64("appearance-animation-hover-zoom")
 	}
 
 	// Behavior
@@ -415,6 +431,15 @@ func run(cmd *cobra.Command, args []string) error {
 		defer snap.Close()
 	}
 
+	// The windows of an activation from a model kept by events
+	// (specs/003-window-list); without it, collected at each activation
+	model, err := x11.NewModel()
+	if err != nil {
+		log.Info().Err(err).Msg("Window model unavailable, the list is collected at each activation")
+	} else {
+		defer model.Close()
+	}
+
 	// Create Focus Watcher to track active windows
 	watcher, err := focus.NewWatcher(ctx, conn.Conn, conn.Root, mruList, capturer, cfg.Behavior.SnapshotInterval)
 	if err != nil {
@@ -481,7 +506,7 @@ func run(cmd *cobra.Command, args []string) error {
 		switch e := event.(type) {
 		case xproto.KeyPressEvent:
 			var read []xgb.Event
-			selector, read = handleKeyPress(ctx, conn, e, selector, mruList, watcher, snap)
+			selector, read = handleKeyPress(ctx, conn, e, selector, mruList, watcher, snap, model)
 			pending = append(read, pending...)
 		case xproto.PropertyNotifyEvent:
 			// Handle focus changes via PropertyNotify
@@ -501,7 +526,7 @@ func run(cmd *cobra.Command, args []string) error {
 // It returns the selector, to preserve its state, and the events read while
 // the switcher faded out, for the main loop to handle.
 func handleKeyPress(ctx context.Context, conn *x11.Connection, e xproto.KeyPressEvent, selector *ui.Selector,
-	mruList *mru.MRUList, watcher *focus.Watcher, snap *snapshot.Snapshotter) (*ui.Selector, []xgb.Event) {
+	mruList *mru.MRUList, watcher *focus.Watcher, snap *snapshot.Snapshotter, model *x11.Model) (*ui.Selector, []xgb.Event) {
 	start := time.Now()
 
 	// Apply show delay if configured
@@ -516,7 +541,19 @@ func handleKeyPress(ctx context.Context, conn *x11.Connection, e xproto.KeyPress
 		IgnoreSkipTaskbar: cfg.Windows.IgnoreSkipTaskbar,
 		SortMinimizedLast: cfg.Windows.SortMinimizedLast,
 	}
-	windows, err := conn.GetWindowListFiltered(filterOpts)
+	var windows []x11.WindowInfo
+	var err error
+	listStart := time.Now()
+	if model != nil {
+		windows, err = model.List(filterOpts)
+	} else {
+		windows, err = conn.GetWindowListFiltered(filterOpts)
+	}
+	log.Debug().
+		Bool("model", model != nil).
+		Int("windows", len(windows)).
+		Dur("ms", time.Since(listStart)).
+		Msg("Window list")
 	if err != nil {
 		return selector, nil
 	}

@@ -1,0 +1,19 @@
+= 013 — tasks
+:toc: left
+:toc-title: Contents
+:revdate: 2026-10-02
+
+. [x] T1. What GLX, OpenGL and NVIDIA allow for shared contexts and their
+  fences; the probe off the screen (research).
+. [x] T2. The misses of 1.2.0 by pause, from the runs of S2 of 007, by the
+  new line of `measure.sh summary` — the reference of K4.
+. [x] T3. `glx.Context.NewShared`.
+. [x] T4. The uploader in the GLX presenter, the fallback to the presenter's
+  context; K1, K2, K6 by tests, K7.
+. [x] T5. `BenchmarkPacedFrames` on E1, K3:
+  `go test -run '^$' -bench PacedFrames -benchtime 36000x -timeout 20m ./pkg/carousel`.
+. [x] T6. S2 on E1 — K4, K5, the log of K6 — with the author away, the
+  runs of this change and of 1.2.0 in turn, three each, the service stopped,
+  the overlay on DP-0 at 144 Hz (research, "On the screen").
+. [x] T7. The results of K4–K6 in `spec.adoc`, the runs in `research.adoc`;
+  K4 and K5 not met: dropped by the author, 2026-10-02.

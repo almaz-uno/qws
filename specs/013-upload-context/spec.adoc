@@ -1,0 +1,241 @@
+= 013 — uploads from a context of their own
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-02
+:status: dropped
+:issue: 55
+
+== What and why
+
+On `glx` the animation composes layers on the GPU (specification 007). The
+card layers, and the frame at rest in pieces of 64 rows, go to the GPU in
+the pauses between frames, at most a megabyte a pause and no later than 3 ms
+before the frame is due — in the GL context that presents the frames.
+Session S2 met K2 of 007 at p95, 7.09–7.10 ms against a period of 6.94 ms,
+but not in full: 0.45–0.51 % of the intervals of the carousel missed a
+vertical blank. Of the 283 missed in three runs, 211 came after a pause that
+uploaded: 1.37 % of such pauses against 0.13 % of the others, and a piece of
+630 KB cost most of it already — 0.96 %, against 1.53 % for more (research).
+Open decision 3 of 007: the uploads from a GL context of their own.
+
+The change: the uploads of `SetLayer` and `StageFrame` are made in a second
+GL context that shares the textures of the presenter's, current on a pbuffer
+on a thread of its own; fences order the commands of the two contexts. Where
+no such context can be made, the presenter uploads in its own, as in 1.2.0.
+
+The specification is a delta to `develop` at `f90abc7` (1.2.0). Unchanged:
+the frames at rest of both renderers, byte for byte, and the scene set Σ with
+its digests; the scenes of the animation — a frame shows every layer set
+before it; the loop of the animation — its pauses, their megabyte, the spin
+of the last 3 ms; the configuration; `cpu`.
+
+== Decisions
+
+Asked, 2026-10-01: the uploads of the animation in a GL context of their own,
+on a thread of their own, sharing the textures of the presenter's; the
+staging of the frame at rest there too; each upload followed by a fence that
+the presenter checks without blocking before a texture is first drawn; a
+fallback to the uploads of today where no shared context can be made; the
+rest of the loop kept as is.
+
+Made on the way, 2026-10-01, for the author to confirm:
+
+* *A display of its own.* The context of the uploads is created on an Xlib
+  display of its own, as the context of the snapshots (008), not on the
+  presenter's: NVIDIA shares the objects of direct contexts of one process
+  across displays (research), and no display is then used by two threads.
+  Its X errors are counted, not fatal, by a handler that passes the errors of
+  other displays on, as that of 008.
+* *A frame shows every layer set before it.* The presenter checks the fence
+  of an upload without blocking when a frame first draws its texture; when
+  it has not signalled, the frame waits for it on the GPU — `glWaitSync` in
+  the presenter's context — rather than drawing the layer as missing. Left
+  out, a card would vanish for a frame, or the grid lose its tiles, and the
+  loop's idea of a layer held — set, not uploaded — would have to change with
+  it. The CPU of the loop waits only for the uploader to issue the job, which
+  takes it some 0.3 ms for a layer. How often a frame waits is logged.
+* *The staging of the frame at rest goes to the uploader as a whole*: the
+  copy of the texture of the last frame that a new staging starts with, and
+  the pieces. The two textures pass between the contexts, so their writes
+  and reads are ordered by fences both ways (section "Behavior").
+* *The loop is kept*: the megabyte a pause and the 3 ms before a frame stay
+  the limits of 007, so that S2 compares the context alone. Whether they can
+  go is open.
+* *Through a pixel buffer.* In the uploader's context a layer goes through
+  its pixel buffer, as the pieces of the frame at rest do, not from the
+  memory of the process as in 1.2.0: uploads from memory in a second context
+  held the frames back by a millisecond at the median, through a pixel
+  buffer by a fifth of that (research, "The probe"). In the presenter's
+  context, the fallback, the layers go as in 1.2.0.
+
+== Behavior
+
+All of it on `glx`, where the animation runs; `cpu` presents as before.
+
+. *The uploader.* When the presenter creates its GL objects, at the first
+  `Bind`, it starts a thread with a direct GLX 4.6 core context created with
+  the presenter's as its share context, current on a pbuffer of 1×1. The log
+  says, at debug level, `Uploads in a context of their own`, or `Uploads in
+  the context of the presenter` with the reason; then the presenter uploads
+  in its own, as in 1.2.0.
+. *Jobs.* `SetLayer` and `StageFrame` queue a job and return. The uploader
+  runs the jobs in order, each followed by a fence and a flush; the layers
+  and the pieces go through its pixel buffer. `StageFrame` counts the bytes
+  it queued, as it counted those it uploaded, and reports the frame staged in
+  full when its last piece is queued.
+. *Order.*
+.. A frame that draws a layer, or presents the frame staged, first takes the
+   fence of its job: signalled, it draws; not, it waits for it on the GPU.
+.. A job that writes a texture the presenter has drawn — the staging
+   texture, which was the texture of a frame before the two were swapped, or
+   a layer set anew — waits first, on the GPU, for a fence of the frames
+   presented so far.
+.. A frame presented whole while a frame at rest is staged writes the
+   texture of the last frame only once the copy of the staging has read it.
+.. Textures are deleted — `DropLayers` — or made anew for a window of
+   another size only after the jobs queued so far have completed; the CPU
+   waits for that, at an activation or a change of the layout, not during
+   frames.
+
+== Metrics
+
+As in 007, with a field more in the frame records of animations:
+`upload_waits`, the uploads not yet complete when the frame drew what they
+upload — it waited for them.
+
+M1 — misses by pause:: The intervals of the carousel above 1.5 periods, per
+pause before the frame, by what the pause uploaded — `uploaded_kb` 0, up to
+640 KB, more — frames at rest and stalls over 50 ms apart, as in the research
+of 007. `measure.sh summary`, line `A1 carousel by pause`.
+
+M2 — a frame on the GPU, off the screen:: `BenchmarkPacedFrames`: frames of
+a scene of 23 card layers on a base of 2520×1400 presented to a window off
+the screen every 1/144 s, layers set and pieces of a frame at rest staged in
+every second pause, in blocks of 400 frames that take turns — no uploads,
+the uploads in the presenter's context, in the uploader's. Per mode, by timer
+queries, at p95: how long the first command of a frame waits on the GPU after
+it is issued, "queued", and how long the frame then takes there, to the end
+of its swap; and the share of frames presented, to the end of `glFinish`, in
+more than 2 ms, and of frames that waited for an upload.
+
+== Acceptance criteria
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| At rest byte for byte: `TestGLXPresenterMatchesCPU`, subtests `uploader`
+  and `presenter` — for every scene of Σ the frame presented, the frame
+  staged in pieces with frames presented between them (`checkStaged`), and
+  the scene of layers (`checkLayerScene`), as in 007; `TestScenes` with the
+  digests of `testdata/scenes.json` unchanged; `TestLayers`,
+  `TestParallelDrawing`.
+
+| K2
+| Layers beside the frames: `TestGLXLayerSetAnew` — a scene drawn right
+  after `SetLayer` shows the image just set, byte for byte, also with the
+  layer set anew between presented frames and after layers dropped while
+  their uploads were under way.
+
+| K3
+| Off the screen, on E1: M2 over 36000 frames — with the uploader, a frame
+  queued and on the GPU at p95 no more than 0.1 ms longer each than without
+  uploads, and frames over 2 ms no more frequent than without uploads by
+  more than 0.5 percentage points; the uploads in the presenter's context
+  for reference.
+
+| K4
+| On the screen: S2 on E1, three runs of the carousel — M1 after a pause
+  that uploaded no more frequent than after a pause that did not, by more
+  than 0.1 percentage points, the three runs together (1.2.0 in the runs of
+  007: 1.37 % against 0.13 %).
+
+| K5
+| The animation as before or better: in the same runs, K2 of 007 at p95 —
+  A1 p95 ≤ 7.44 ms, at least 18 frames in a step — and the missed intervals
+  of the carousel at most half those of 1.2.0 run in turn with them in the
+  same session — proposed, to be confirmed with the author after the first
+  measurement; K3–K6 of 007.
+
+| K6
+| Fallback: without a shared context the presenter uploads in its own, the
+  frames byte for byte — `TestGLXPresenterMatchesCPU/presenter`, the uploader
+  made to fail; and the log of S2 says `Uploads in a context of their own`.
+
+| K7
+| `go vet ./...`, `go test ./...`, `go test -race ./pkg/carousel` and `make
+  check-specs` pass.
+|===
+
+== Results
+
+2026-10-01 and 2026-10-02, E1 (ws1); the probe, the benchmark and the runs
+in `research.adoc`. Off the screen the change could be checked for what it
+must not break; on the screen, S2 of 007 with 1.2.0 run in turn with it,
+for what it was to mend.
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | `TestGLXPresenterMatchesCPU/uploader` and `/presenter`,
+  `TestScenes`, `TestLayers`, `TestParallelDrawing` pass on E1;
+  `scenes.json` unchanged.
+| K2 | `TestGLXLayerSetAnew` passes on E1.
+| K3 | Two runs of `BenchmarkPacedFrames`, the desktop busy: in the first
+  met — queued 0.50 against 0.78 ms, on the GPU 1.78 against 1.91 ms, over
+  2 ms 6.10 against 8.39 %; in the second queued and on the GPU met, 0.87
+  against 0.79 ms and 1.69 against 1.67 ms, over 2 ms short by 0.06 points,
+  5.09 against 4.53 %. The presenter's context in the same runs: over 2 ms
+  1.4 and 2.1 points above no uploads. The runs without uploads differ by
+  3.9 points among themselves.
+| K4 | Not met. S2, three runs of the carousel: after a pause that
+  uploaded 31 of 28 376 intervals missed, 0.109 %, after one that did not 4
+  of 66 461, 0.006 % — above by 0.103 points, the bound 0.1. 1.2.0 in turn
+  with it: 41 of 28 412, 0.144 %, and 2 of 66 385.
+| K5 | Not met. Missed intervals of the carousel 57 of 98 333 against 65 of
+  98 296 for 1.2.0, not half; A1 p95 7.86 ms in every run of both, above
+  7.44 for 1.2.0 as well; 23 frames in a step at p50; K5 of 007 — every
+  activation on its window — and A2, response p95 7.57–7.59 ms against
+  7.52–7.61, as 1.2.0.
+| K6 | `TestGLXPresenterMatchesCPU/presenter` passes; each log of S2 says
+  `Uploads in a context of their own`.
+| K7 | `go vet ./...`, `go test ./...`, `go test -race ./pkg/carousel
+  ./pkg/ui` and `scripts/check-specs.sh` pass on E1.
+|===
+
+== Why it is dropped
+
+The author's decision, 2026-10-02, after S2. What the change set out to
+mend was mostly gone: 1.2.0 itself missed 0.066 % of the intervals of the
+carousel in these runs, against 0.45–0.51 % in those of 007. Of what was
+left, the misses after a pause that uploaded, the change took away 10 of 41
+— within the spread of the runs, from 7 to 19 a run — and K4 and K5 are
+not met. For that it would add a GL context on an Xlib display of its own,
+a goroutine with its queue and fences, a third X error handler in the chain
+and a method of `Animator`.
+
+The code is not merged. The patch against `f90abc7`, the change but for its
+specification, is kept outside the repository, in
+`~/.cache/qws-013-upload-context.patch` on ws1; with the probe and
+`BenchmarkPacedFrames` in it, it is where to start should misses after
+uploads come back.
+
+== Open decisions
+
+Should the change be taken up again:
+
+. The limits of the pauses: with the uploads in a context of their own, the
+  megabyte a pause and the end 3 ms before a frame may be needless — to be
+  seen after K4.
+. Should frames wait on the GPU for uploads often — `upload_waits` in S2 —
+  a frame could draw a layer not yet uploaded as missing, or its neighbour
+  in place of it, rather than wait.
+. The grid, whose tiles layer and frame at rest are 14 MB each: measured by
+  S2 with `LAYOUT=grid` along with the carousel, no criterion of its own.
+. NVIDIA moves the uploads of the second context mostly, not wholly, beside
+  the frames: a frame that comes while one is under way starts some
+  hundreds of microseconds late (research). Smaller jobs — a layer in
+  pieces, as the frame at rest — would bound that, should S2 call for it.

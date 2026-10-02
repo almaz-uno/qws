@@ -230,9 +230,12 @@ func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, window
 		Bool("composes", s.animator != nil).
 		Dur("duration", anim.duration).
 		Dur("step", anim.step).
+		Dur("hover_duration", anim.hoverDuration).
 		Interface("show", anim.show).
 		Interface("hide", anim.hide).
 		Interface("hover", anim.hover).
+		Float64("overlay_zoom", anim.overlayZoom).
+		Float64("hover_zoom", anim.hoverZoom).
 		Msg("Animations")
 
 	// Apply initial workspace filtering based on configuration
@@ -277,8 +280,13 @@ func (s *Selector) UpdateWindows(windows []x11.WindowInfo) {
 }
 
 // SetHeader sets what the header of the overlay shows: the hostname and the
-// version of qws (specs/005-host-and-version)
+// version of qws (specs/005-host-and-version) — nothing, and the grid takes
+// the whole window, when appearance.header.enabled is false
+// (specs/014-appearance-keys)
 func (s *Selector) SetHeader(hostname, version string) {
+	if !s.appearance.Header.Enabled {
+		hostname, version = "", ""
+	}
 	s.config.Hostname = hostname
 	s.config.Version = version
 }

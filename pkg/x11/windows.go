@@ -8,7 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
+	"github.com/jezek/xgb"
 	"github.com/jezek/xgb/xproto"
 )
 
@@ -166,43 +168,11 @@ func findBestIcon(data []uint32) image.Image {
 			break // Not enough data
 		}
 
-		// Calculate score (prefer icons close to target size)
-		size := width
-		if height > width {
-			size = height
-		}
-		score := 0
-		if size >= targetSize {
-			// Prefer larger icons, but not too large
-			score = 1000 - (size - targetSize)
-		} else {
-			// Smaller icons get lower score
-			score = size * 10
-		}
+		score := iconScore(width, height, targetSize)
 
 		// Create image if this is the best so far
 		if bestImg == nil || score > bestScore {
-			img := image.NewRGBA(image.Rect(0, 0, width, height))
-
-			// Copy pixel data (ARGB format with premultiplied alpha)
-			for y := 0; y < height; y++ {
-				for x := 0; x < width; x++ {
-					pixel := data[pos+2+y*width+x]
-					a := uint8((pixel >> 24) & 0xFF)
-					r := uint8((pixel >> 16) & 0xFF)
-					g := uint8((pixel >> 8) & 0xFF)
-					b := uint8(pixel & 0xFF)
-
-					// Store RGBA directly
-					offset := img.PixOffset(x, y)
-					img.Pix[offset+0] = r
-					img.Pix[offset+1] = g
-					img.Pix[offset+2] = b
-					img.Pix[offset+3] = a
-				}
-			}
-
-			bestImg = img
+			bestImg = decodeIcon(data[pos+2:pos+2+pixelsNeeded], width, height)
 			bestScore = score
 		}
 
@@ -211,6 +181,129 @@ func findBestIcon(data []uint32) image.Image {
 	}
 
 	return bestImg
+}
+
+// iconScore is how well an icon of width×height suits: close to the target
+// size, larger rather than smaller
+func iconScore(width, height, targetSize int) int {
+	size := width
+	if height > width {
+		size = height
+	}
+	if size >= targetSize {
+		// Prefer larger icons, but not too large
+		return 1000 - (size - targetSize)
+	}
+	// Smaller icons get lower score
+	return size * 10
+}
+
+// decodeIcon makes an image of the ARGB pixels of an icon of _NET_WM_ICON
+func decodeIcon(pixels []uint32, width, height int) *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+
+	// Copy pixel data (ARGB format with premultiplied alpha)
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			pixel := pixels[y*width+x]
+			a := uint8((pixel >> 24) & 0xFF)
+			r := uint8((pixel >> 16) & 0xFF)
+			g := uint8((pixel >> 8) & 0xFF)
+			b := uint8(pixel & 0xFF)
+
+			// Store RGBA directly
+			offset := img.PixOffset(x, y)
+			img.Pix[offset+0] = r
+			img.Pix[offset+1] = g
+			img.Pix[offset+2] = b
+			img.Pix[offset+3] = a
+		}
+	}
+	return img
+}
+
+// iconRange reads a range of a CARDINAL property in 32-bit units: the values
+// read and how many remain after them
+type iconRange func(offset, length uint32) (values []uint32, remaining uint32, err error)
+
+// readIconByHeaders reads the icon findBestIcon would choose, reading the
+// sizes of the icons first and then the pixels of that one alone
+// (specs/003-window-list): the same image, a fraction of the bytes
+func readIconByHeaders(read iconRange) (image.Image, error) {
+	const targetSize = 48
+	var (
+		bestScore, bestW, bestH int
+		bestOffset              uint32
+		found                   bool
+	)
+	offset := uint32(0)
+	for {
+		header, remaining, err := read(offset, 2)
+		if err != nil {
+			return nil, err
+		}
+		if len(header) < 2 {
+			break
+		}
+		width, height := int(header[0]), int(header[1])
+		if width <= 0 || height <= 0 || width > 512 || height > 512 {
+			break // Invalid dimensions
+		}
+		pixelsNeeded := width * height
+		if uint32(pixelsNeeded) > remaining {
+			break // Not enough data
+		}
+		if score := iconScore(width, height, targetSize); !found || score > bestScore {
+			found, bestScore, bestW, bestH, bestOffset = true, score, width, height, offset
+		}
+		offset += 2 + uint32(pixelsNeeded)
+	}
+	if !found {
+		return nil, nil
+	}
+	pixels, _, err := read(bestOffset+2, uint32(bestW*bestH))
+	if err != nil {
+		return nil, err
+	}
+	if len(pixels) < bestW*bestH {
+		return nil, nil
+	}
+	return decodeIcon(pixels, bestW, bestH), nil
+}
+
+// propertyRange reads a range of the CARDINAL property of the window
+func propertyRange(conn *xgb.Conn, window xproto.Window, atom xproto.Atom) iconRange {
+	return func(offset, length uint32) ([]uint32, uint32, error) {
+		prop, err := xproto.GetProperty(conn, false, window, atom, xproto.AtomCardinal, offset, length).Reply()
+		if err != nil {
+			return nil, 0, err
+		}
+		values := make([]uint32, prop.ValueLen)
+		for i := range values {
+			values[i] = xgb.Get32(prop.Value[4*i:])
+		}
+		return values, prop.BytesAfter / 4, nil
+	}
+}
+
+// classIcons are the icons found on disk by class, kept for the life of the
+// process: looking them up reads the desktop files and the icon directories,
+// some 12 ms a class (specs/003-window-list)
+var classIcons = struct {
+	sync.Mutex
+	icons map[string]image.Image
+}{icons: make(map[string]image.Image)}
+
+// iconByClass is findIconByClass, each class looked up once
+func iconByClass(wmClass string) image.Image {
+	classIcons.Lock()
+	defer classIcons.Unlock()
+	if icon, ok := classIcons.icons[wmClass]; ok {
+		return icon
+	}
+	icon := findIconByClass(wmClass)
+	classIcons.icons[wmClass] = icon
+	return icon
 }
 
 // FilterWindowsByWorkspace filters windows by workspace option
@@ -276,7 +369,7 @@ func (c *Connection) GetWindowListFiltered(opts WindowFilterOptions) ([]WindowIn
 		// If no icon from _NET_WM_ICON, try to find from WM_CLASS
 		if icon == nil {
 			if wmClass, err := c.GetWindowClass(win); err == nil {
-				icon = findIconByClass(wmClass)
+				icon = iconByClass(wmClass)
 			}
 		}
 
