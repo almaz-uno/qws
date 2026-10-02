@@ -101,12 +101,9 @@ func drawCard(windowData []WindowData, index, offset int, r image.Rectangle, cfg
 // but for the frame of the tile under the frame over it
 // (specs/007-animation).
 func GridTiles(windowData []WindowData, cfg Config) *image.RGBA {
+	tiles := startGridTiles(windowData, headerBand(cfg), -1, -1, cfg)
 	dc := gg.NewContext(cfg.Width, cfg.Height)
-	g := layoutGrid(len(windowData), headerBand(cfg), cfg)
-	for i := range windowData {
-		x, y := g.tile(i)
-		drawGridTile(dc, &windowData[i], x, y, g.tileW, g.tileH, false, false, cfg)
-	}
+	tiles.draw(dc)
 	img := getImageRGBA(dc)
 	b := opaqueBounds(img)
 	if b.Empty() {

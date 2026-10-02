@@ -1,0 +1,195 @@
+= 019 — grid speed
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-01
+:status: implemented
+:issue: 51
+
+== What and why
+
+The CPU draws a frame of the grid of E1 in 350–385 ms, against 55–75 ms for
+the carousel (specification 007, research, "The grid"). With `cpu` every
+step of the grid waits for such a frame; with `glx` the step moves on time,
+but its frame at rest comes 208–449 ms after the frame before it, and the
+tiles layer of the animation, `GridTiles`, costs as much again.
+Specification 001 made the carousel fast by means that keep every byte; the
+grid kept drawing its tiles one after another, every thumbnail resampled in
+place and every long title measured once for each prefix tried (research,
+"Where the time goes").
+
+The change draws the same bytes in about a ninth of the time. The part of
+each tile under its title is drawn in parallel, apart from the canvas, and
+copied in when the canvas allows it; a title is truncated measuring each of
+its runes once; a face keeps the advances of its glyphs.
+
+The specification is a delta to `develop` at `575d2ee`. Unchanged: every
+pixel of every frame and layer `cpu` draws — the grid, the carousel, the
+layers of the animation — and so of `glx`; the layout of the grid; the
+configuration, its keys, environment variables, flags and defaults. Nothing
+a user can see changes but the time the grid takes to draw.
+
+== Decisions
+
+Made on the way, 2026-10-01, for the author to confirm; each keeps every
+byte, as `TestScenes` checks:
+
+* *The heads of the tiles.* The part of a tile under its title — the shadow
+  of a selected or a hovered tile, the background, the thumbnail and its
+  border, the icon, the bar under an urgent title — is its head; the title,
+  the workspace and the frame are its tail. The heads are drawn in parallel
+  into a scratch canvas of the size of the frame, each in a rectangle that
+  holds every pixel it writes, filled first with the pixel of the canvas
+  under it. A tile then copies its head into the canvas if the canvas is
+  still that pixel in the whole rectangle; otherwise it draws the head in
+  place, as before. Tiles whose rectangles meet draw theirs in place. The
+  tail is drawn in place, in order. Why the bytes are the same: research,
+  "What keeps the bytes", and plan, "Why it is exact".
+* *Half of the CPUs* draw the heads, `GOMAXPROCS/2`, at least one: the
+  frame of E1 takes as long as with a worker on every CPU, for less CPU, and
+  the other half stays with the drawing and the loop of the animation
+  (research, "Workers").
+* *The thumbnails are resampled before the canvas is made*, with
+  `prepareOpaque` of specification 001; the heads start when the canvas and
+  the header are drawn.
+* *The scratch canvas* comes from a `sync.Pool`, not a cache kept for good:
+  14 MB a frame more to allocate after a collection, none held by an idle
+  instance.
+* *`MultiFallbackFace` keeps what `GlyphAdvance` returned* for each rune,
+  without a lock: a face is already used by one drawing at a time (`FontSet`,
+  specification 007). The carousel and the header measure through it too.
+
+== Behavior
+
+. `DrawGridLayout` and `GridTiles` return the same bytes as on `develop` for
+  any windows, selection, hover and configuration.
+. `DrawGridLayout` lays the tiles out with `headerBand` before it makes the
+  canvas — the value `drawHeader` returns, as `GridTiles` and `GridTile`
+  already do — and starts the heads; it then makes the canvas, draws the
+  header and draws the tiles in order, each after its head is drawn.
+  `GridTiles` does the same on its transparent canvas, without a header.
+. A drawing of the grid runs up to `GOMAXPROCS/2` goroutines of its own and
+  returns after all of them have ended.
+. `truncateTitle` takes the face instead of the context, and measures each
+  rune of the title once.
+
+Outside the specification: the carousel's drawing, but for the faces it
+shares; the presentation; the exact options of research, "Exact options
+not taken"; anything that changes a pixel (research, "What would change
+pixels").
+
+== Metrics
+
+M1 — the time of a frame of the grid:: The wall time of one call of
+`DrawGridLayout` on the scene `grid-e1-24-second`, and on `grid-e1-header`,
+of Σ: `BenchmarkE1Grid` in `pkg/carousel`, on ws1, `-benchtime 20x`, the test
+binaries of `develop` and of the change run in turn, three times two runs of
+each.
+
+M2 — the time of the tiles layer:: As M1, for `GridTiles` of
+`grid-e1-header`: `BenchmarkE1Grid/grid-e1-header-tiles`.
+
+M3 — the time of a frame of the carousel:: As M1, `BenchmarkE1Frame` of
+specification 005.
+
+The CPU time of a frame and the bytes it allocates are reported, without a
+criterion.
+
+== Acceptance criteria
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| The picture: `TestScenes` passes with `pkg/carousel/testdata/scenes.json`
+  unchanged — the digests of the 24 scenes of Σ, 12 of them of the grid,
+  recorded by specification 001. `TestGLXPresenterMatchesCPU` and
+  `TestLayers` pass.
+
+| K2
+| The heads: `TestGridHeads` — for the grid scenes of Σ and for eight
+  configurations beyond them, which put the tiles too close for their heads,
+  the shadow into the next tile, a workspace wider than its tile, odd
+  thumbnails and icons, tiles smaller than their margins, the corners of a
+  large window radius, and a transparent and a square window background —
+  `DrawGridLayout` and `GridTiles` give the bytes of the tiles drawn one
+  after another with every head in place; in the first six of those
+  configurations some head is drawn in place; and no pixel a head changes
+  lies outside its rectangle.
+
+| K3
+| Drawing in parallel: `TestParallelDrawing`, with frames and tiles layers
+  of the grid among its jobs, passes, also under `go test -race`.
+
+| K4
+| M1 ≤ 60 ms for each of the two scenes in every run: about a sixth of
+  `develop`, comparable to the carousel's 55–75 ms on E1.
+
+| K5
+| M2 ≤ 75 ms in every run.
+
+| K6
+| M3 of the change no greater than the greatest of `develop` in the same
+  session.
+
+| K7
+| `go vet ./...`, `go test ./...` and `make check-specs` pass.
+|===
+
+== Results
+
+2026-10-01, ws1; the runs in `research.adoc`, "Before and after".
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | `TestScenes`: all 24 scenes of Σ, the host scenes with them; the file
+  of digests unchanged. `TestGLXPresenterMatchesCPU`, a compositor running,
+  and `TestLayers`. A byte flipped in the heads copied in fails all 12 grid
+  scenes (research, "Checks of the checks").
+| K2 | `TestGridHeads`: 12 scenes of Σ and 8 configurations; heads drawn in
+  place in `tight`, `far-shadow`, `wide-workspace`, `odd-images`, `small`
+  and `corners`. Each of its safeguards undone fails at least one case.
+| K3 | `TestParallelDrawing`, and under `-race` with `TestScenes`,
+  `TestLayers` and `TestGridHeads`.
+| K4 | M1: `grid-e1-24-second` 42.6–48.0 ms against 383.1–390.2;
+  `grid-e1-header` 42.7–45.1 ms against 370.7–383.9.
+| K5 | M2: 51.7–55.2 ms against 378.3–393.6.
+| K6 | M3: `carousel-e1-24-second` 31.7–33.0 ms against 34.8–38.6;
+  `carousel-e1-header` 31.8–33.1 against 35.1–37.8 — faster by the advances
+  of its titles.
+| K7 | `go vet ./...`, `go test ./...`, `make check-specs`.
+|===
+
+Reported:
+
+* CPU time of a frame of `grid-e1-24-second`, 428 ms against 399, and of the
+  tiles layer 432 against 387: the heads resample on threads that share
+  cores. Allocations of a frame 19.4–22.2 MB against 16.0, of the tiles
+  layer 34.4–35.5 against 28.6: the scratch canvas.
+* With `GOMAXPROCS` 8 on ws1, the threads of the Steam Deck, a frame takes
+  81.5–84.8 ms, the tiles layer 89.5–90.1.
+
+On the desktop of E1, 2026-10-01/02, the binaries of `develop` and of the
+change in turn (research, "On the desktop"):
+
+* S2 and S3 of the grid under `glx`: a step from its key to its frame at
+  rest in 152.8 ms against 533.7–536.6 ms; the frame at rest 6.94 ms after
+  the frame before it against 381–383 ms; 29–64 intervals above 1.5 periods
+  in a run against 475–480, 5–8 of them over 50 ms against 465–480. The
+  hover is on time with both.
+* An activation in the grid, M1 warm, 334.5–361.8 ms against
+  771.0–786.3 ms; under `cpu` a step, M2, 103.0 ms against 551.6 ms.
+
+Not checked: ws7, the Steam Deck.
+
+== Open decisions
+
+. The exact options of research, "Exact options not taken": the heads kept
+  across frames, which would leave a step two heads to draw, wait for the
+  live thumbnails reserved as specification 020; the weights of `Transform`
+  once per column and row would copy the kernel of `x/image/draw`;
+  `opaqueBounds` of the tiles layer.
+. The decisions above, for the author to confirm.

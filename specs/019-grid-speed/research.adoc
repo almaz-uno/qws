@@ -1,0 +1,326 @@
+= 019 — research
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-01
+
+Facts the specification rests on. Code references are to `develop` at
+`f90abc7`; `575d2ee`, which the change is based on, changes nothing the grid
+is drawn with.
+
+== Measurement environment
+
+[cols="1,3"]
+|===
+| Host | ws1 — the host of E1 (specification 001): Intel Core i9-7920X, 12
+  cores, 24 threads; Debian 12, Linux 6.12; Go 1.26.0
+| What is measured | The drawing code alone, in-process, without an X server:
+  `BenchmarkE1Grid` in `pkg/carousel` (added by this change, before any
+  other change) and `BenchmarkE1Frame` of specification 005
+| Scenes | Of Σ (specification 001): `grid-e1-24-second` — the frame of E1,
+  2520×1400, 24 windows, the second selected, the Go font;
+  `grid-e1-header` — the same with the header of specification 005; the
+  tiles layer of the animation, `GridTiles`, of `grid-e1-header`
+| Load | The desktop of the author and another agent's builds ran meanwhile:
+  load average about 2.5. Comparisons are made in one session, the binaries
+  interleaved.
+|===
+
+`go test ./pkg/carousel -run '^$' -bench BenchmarkE1Grid -benchtime 20x`.
+Profiles: `-cpuprofile profiles/…`, `go tool pprof -top` and `-peek`; they
+are not committed (`profiles/` is ignored by git).
+
+Σ has 24 windows where E1 had 29 in the measurements of specification 007;
+the grid of 24 has 4 rows of 6 tiles of 396.7×325 px, that of 29 has 5 rows
+of 256 px. The benchmark gives 371–394 ms for a frame, the order of the
+350–385 ms of 007.
+
+== Where the time goes
+
+CPU profile of 20 frames of `grid-e1-24-second`, `develop`, per frame:
+
+[cols="4,1",options="header"]
+|===
+| Function | ms
+
+| `DrawGridLayout`, with the profile running | 401
+| — `gg.(*Context).DrawImage` → `x/image/draw.(*Kernel).Transform` | 269
+| — — `transform_RGBA_RGBA_Src` — the 24 thumbnails, opaque, so _src_ | 265
+| — — `image.(*RGBA).Opaque` — the check that makes it _src_ | 4
+| — — the icons, 48–64 px in Σ, to 24 px | < 1
+| — `truncateTitle` → `MeasureString` → `truetype.(*GlyphBuf).Load` | 82.5
+| — `gg.(*Context).Fill` — the backgrounds, the shadow, the urgent bar | 22.5
+| — `gg.(*Context).DrawStringAnchored` — the titles and the workspaces | 13
+| — `gg.(*Context).Stroke` — the borders and the frames | 6
+| — `newCanvas` — the copy of the window background | 7
+|===
+
+The tiles layer, `GridTiles`, is the same work with `opaqueBounds`, 6 ms,
+and `crop`, 4 ms, for 385 ms.
+
+*Truncation.* `truncateTitle` measures the title, then every prefix with
+`"..."` from the longest down until one fits. `MeasureString` gets the
+advance of every rune from the face, and truetype loads and hints the glyph
+for every call (`truetype.(*face).GlyphAdvance`): the title of Σ that does
+not fit, 76 runes in a tile 357 px wide, takes some 40 prefixes, and its 4
+tiles about 10 000 glyph loads a frame, 8 µs each.
+
+*Resampling by size.* A program of `x/image/draw` alone, `BiLinear.Transform`
+as gg calls it, 50 runs each:
+
+[cols="3,1",options="header"]
+|===
+| Image | ms
+
+| thumbnail 512×288 to 377×212 — a tile of Σ on E1 | 10.2
+| thumbnail 512×512 to 196×196 — a tile of 29 on E1 | 11.9
+| icon NRGBA 48×48 to 24×24 | 0.13
+| 64×64 | 0.20
+| 128×128 | 0.64
+| 256×256 | 2.26
+| 512×512 | 8.87
+|===
+
+When it shrinks, the kernel widens its support to the scale, so the cost
+goes with the pixels of the source. The icons of Σ are small; on E1 an
+application that gives only a large `_NET_WM_ICON`, or whose icon is found as
+a file by `WM_CLASS`, costs nearly as much as a thumbnail, in every tile of
+the grid at once.
+
+== What keeps the bytes
+
+Read in `fogleman/gg` v1.3.0, `golang/freetype` and `x/image` v0.34.0.
+
+* *A thumbnail is opaque* — the snapshots of specification 008 read back
+  alpha 1.0 — so `Transform` resamples it in _src_ mode and writes pixels
+  that do not depend on the canvas (specification 001, `prepareOpaque`).
+* *The icon of a tile lies on its thumbnail*: the icon at 8–32 px from the
+  corner of the tile, the thumbnail from 10 px. `prepareOnUniform` of 001,
+  which needs one colour under the icon, does not apply.
+* *An operation of gg writes a pixel as a function of the pixel under it.*
+  A fill and a stroke compose a colour over the pixel by the coverage of the
+  path (`raster.RGBAPainter`); the rasterizer gives spans only where the
+  coverage is not zero, within the cells of the path. `Transform` writes the
+  pixels of `adr`, the bounds of the canvas within those of the transformed
+  source, and reads only the pixel it writes. Text is glyph masks composed
+  through `Transform`.
+* *The coverage depends on the size of the canvas*: `gg.NewContextForRGBA`
+  makes `raster.NewRasterizer(w, h)`, which picks how finely to split curves
+  by the size (`SetBounds`: `splitScale2`, `splitScale3`). Nor can a tile be
+  drawn at another place: gg rounds `x·64` toward zero (`fix`), and `x+px`
+  rounds differently from `(x−n)+px`. On a canvas of the size of the frame,
+  at the same coordinates, a tile gets the same pixels.
+* *Of a tile, the part under the title has bounds computed from geometry*:
+  the shadow and the background, rounded rectangles; the thumbnail and the
+  icon, the rectangle `placement` gives; the border, a stroke one pixel wide;
+  the urgent bar. The arcs of gg are quadratic curves through the midpoint,
+  whose control point is at 1.0012 of the radius — `2 − cos(π/64)` — from
+  the centre. *The part over it is text*: its ink depends on the glyphs, and
+  the workspace is not truncated at all, so it can reach the next tile.
+* *A title is truncated by sums.* `MeasureString` (`x/image/font`) sums, in
+  26.6 fixed point, the kerning of each pair and the advance of each rune,
+  and gg takes `float64(sum >> 6)`. The sum for a prefix with the dots is the
+  sum for the prefix, the kerning from its last rune to `.`, three advances of
+  `.` and two kernings between dots; integer addition, so in any order.
+* *The advance of a glyph is a function of the rune for a face* — which the
+  drawing code already rests on. Faces are cached across frames, and the
+  FontSets of specification 007 start with fresh ones: `TestParallelDrawing`
+  compares the frames of fresh faces with those of faces used by the
+  drawings before it. The hinter of truetype resets the graphics state for
+  every glyph (`hinter.run`) and the twilight zone for every load
+  (`hinter.init`); it keeps the CVT and the storage area, and a font whose
+  glyph programs left there something another glyph read would make the
+  frames of today depend on what was drawn before them — the digests of Σ on
+  the order of the tests.
+* *The translucent images of a frame, apart from the canvas.* For an
+  `*image.RGBA` and an `*image.NRGBA`, `Transform` in _src_ mode into an
+  `*image.RGBA64` (`transform_RGBA64Image_RGBA64Image_Src`) writes the 16-bit
+  premultiplied colour that `transform_RGBA_RGBA_Over` and
+  `transform_RGBA_NRGBA_Over` compose over the canvas: the code is generated
+  from one template, with the same weights and sums, and `RGBA64At` is the
+  colour the specialised code reads. Composed with their integer arithmetic,
+  `(d·(0xffff−a)·0x101/0xffff + c) >> 8`, it gives their bytes over any
+  canvas; a pixel not written stays zero and leaves the canvas as it is.
+  `TestScenes` passed with the icons of the grid drawn so (the first
+  prototype below); the heads took the icons over, and the change does not
+  use it.
+
+== Prototypes
+
+On a copy of the code, the frame of `grid-e1-24-second`; every step kept the
+digests of Σ.
+
+[cols="5,1",options="header"]
+|===
+| Step | ms
+
+| `develop` | 380
+| thumbnails resampled in parallel, a goroutine each, with `prepareOpaque`;
+  icons with the RGBA64 colour; titles truncated by sums | 75
+| the same through a pool of workers, in the order of the tiles | 73–76
+| the parts of the tiles under their titles — the heads — drawn in
+  parallel into a scratch canvas | 58–60
+| the advances of glyphs kept by the face | 45
+| the thumbnails resampled before the canvas is made | 40
+|===
+
+The second row changed nothing: the drawing waited 19 ms for the thumbnail
+of the first tile and then drew for some 50 ms on its own — the backgrounds
+24 ms, the text 15 ms, the truncation 7 ms — while 24 thumbnails took less
+than the wait. The heads took the backgrounds off the drawing; then the
+text was the most of it, and the measuring of glyphs most of the text; the
+canvas, 7 ms, was last.
+
+== Workers
+
+`grid-e1-24-second`, three runs of 40 frames for each number of workers;
+the CPU time of the workers from the profile, per frame.
+
+[cols="1,2,2",options="header"]
+|===
+| Workers | ms a frame | CPU of the workers, ms
+
+| 23 | 44.9, 45.1, 46.1 | 502
+| 16 | 42.8, 42.3, 43.0 | 467
+| 12 | 44.9, 45.6, 44.4 | 418
+| 8 | 50.3, 51.8, 53.2 | 355
+| 6 | 59.9, 61.7, 61.1 | 330
+|===
+
+Past the 12 cores, the second thread of a core adds nothing to the frame:
+the resampling is arithmetic on floats, and two threads of a core share it.
+Each thread then takes longer for its thumbnail: the work of the heads,
+some 290 ms on one thread — resampling 265, backgrounds 23 — takes 502 ms of
+CPU on 23 workers and 330 on 6. Not measured, but read in the scheduler:
+with a worker on every CPU, the loop of the animation, which draws its
+layers and frames at rest in the background and presents a frame every
+6.9 ms, could wait for a processor until a worker is preempted, after up to
+10 ms.
+
+== Before and after
+
+2026-10-01, ws1, the test binaries of `develop` with `BenchmarkE1Grid` and of
+the change, built from the same worktree, run in turn three times,
+`-test.benchtime 20x -test.count 2`: six values each, ms a frame and MB
+allocated a frame.
+
+[cols="3,2,2",options="header"]
+|===
+| Benchmark | `develop` | the change
+
+| `grid-e1-24-second` | 383.1–390.2; 16.0 MB | 42.6–48.0; 21.5–22.2 MB
+| `grid-e1-header` | 370.7–383.9; 16.1 MB | 42.7–45.1; 19.4–20.3 MB
+| `grid-e1-header-tiles` | 378.3–393.6; 28.6 MB | 51.7–55.2; 34.4–35.5 MB
+| `carousel-e1-24-second` | 34.8–38.6; 14.5–15.1 MB | 31.7–33.0; 14.6–15.1 MB
+| `carousel-e1-header` | 35.1–37.8; 14.6–14.7 MB | 31.8–33.1; 14.6–14.7 MB
+|===
+
+CPU time from profiles of 40 frames: the frame of `grid-e1-24-second` 399
+against 428 ms, the tiles layer 387 against 432 ms — with the workers, which
+resample on threads that share cores. The allocations grow by the scratch
+canvas of the heads, 14 MB, which `sync.Pool` loses at a collection. The
+carousel is faster by the advances its titles no longer load.
+
+With fewer processors, `GOMAXPROCS` on ws1: 8 — the threads of the Steam
+Deck — 81.5–84.8 ms a frame, 89.5–90.1 ms the tiles layer; 4 — 151.0–159.1
+and 159.6–164.2 ms.
+
+== On the desktop
+
+2026-10-01 23:23 to 2026-10-02 00:33, ws1, the author's desktop: 36
+windows in the grid, the overlay on DP-0 at 144 Hz, the service stopped
+meanwhile. `measure.sh` of specification 001 drove the binaries of
+`develop` at `02528c7`, the base of the branch, and of the change at
+`fdd98e5`, each built in a clean worktree, in turn: S2 (`HOLD=2
+LAYOUT=grid`, `glx`) and S3 (`SWEEP=1` as well) twice each, then S1 under
+`cpu` (`LAYOUT=grid`) once each; 20 activations a run, 73 steps each. The
+runs are outside the repository, in `~/.cache/qws-runs/20261001-2323` on
+ws1.
+
+[cols="3,2,2",options="header"]
+|===
+| | `develop` | the change
+
+| the frame at rest of a step, after the frame before it, p50 / p95 (S2)
+| 381.0–383.4 / 399.1–402.5 ms | 6.94 / 7.82–7.83 ms
+| a step from its key to its frame at rest, A3, p50 (S2, S3)
+| 533.7–536.6 ms | 152.8 ms
+| the last step of the held key at rest since its key, p50 (S2)
+| 536.9–538.5 ms | 154.6–154.9 ms
+| intervals above 1.5 periods, A1 (S2)
+| 478 of 31 139, 480 of 30 927 | 29 of 32 189, 30 of 32 199
+| the same with the hover swept (S3)
+| 475 of 30 649, 476 of 30 923 | 63 of 32 351, 64 of 32 295
+| of them over 50 ms (S2, S3) | 465–480 | 5–8
+| hover: missed intervals; A3 p50 (S3)
+| 10 of 3 507, 12 of 3 495; 152.8 ms | 8 of 3 516, 0 of 3 540; 152.8 ms
+| an activation, M1 warm, p50: total; drawing (`glx`)
+| 771.0–786.3; 518.5–523.3 ms | 334.5–361.8; 79.7–81.3 ms
+| a step under `cpu`, M2, p50 / p95: total; drawing
+| 551.6 / 573.8; 531.1 / 551.7 ms | 103.0 / 113.4; 81.3 / 89.4 ms
+| an activation under `cpu`, M1 warm, p50 | 781.5 ms | 357.6 ms
+| activations off their window, K5 of 007 | 0 of 20 a run | 0 of 20 a run
+|===
+
+On `develop` each step of the grid is followed by a gap: the animation of
+150 ms ends and the frame at rest, drawn in the background, comes about
+380 ms after the last frame of the motion — every one of those gaps is an
+interval over 50 ms. With the change the frame at rest is drawn while the
+step moves and is shown in the next refresh; the step ends at its 150 ms.
+The frames at rest that miss a refresh, 3–23 of some 1 160 a run, and the
+misses after a pause that uploaded, 5–9 of some 770 up to 640 KB, are those
+specification 013 is about. The grid on the desktop takes longer to draw
+than Σ — 36 windows of the author's instead of 24 — and the change is a
+little less of a gain there, a sixth of the time rather than a ninth.
+
+M3 of `measure.sh` — the CPU time of the drawing, from a profile — is not
+comparable: it counts what runs under `Selector.render`, and the workers
+draw the heads on stacks of their own. The CPU time of "Before and after"
+stands.
+
+== Checks of the checks
+
+Each on a copy of the change, undone after.
+
+* A byte flipped in every head copied into the canvas: all 12 grid scenes of
+  `TestScenes` fail, no carousel scene.
+* Counted: in every grid scene of Σ every head is drawn apart and used;
+  none is drawn in place.
+* Without the check that the canvas is the colour of the head:
+  `TestGridHeads/corners` and `/wide-workspace` fail. Without the tiles
+  whose heads meet left out: `/tight` and `/small` fail. Without the shadow
+  in the bounds of a head: the bounds check fails for the selected and
+  hovered tiles.
+* With a margin of 0 pixels instead of 2 the bounds check holds: the
+  rectangles are already rounded out to whole pixels, and the margin is
+  spare.
+* `TestScenes`, `TestGridHeads`, `TestLayers`, `TestParallelDrawing` pass
+  five times in a row, with `GOMAXPROCS` 1 and 3, and under `-race`.
+
+== What would change pixels
+
+* *Separable resampling.* `Kernel.Scale` — horizontal, then vertical — takes
+  5.5 ms against 10.0 ms of `Transform` for the thumbnail of a tile of E1,
+  but it places an image on whole pixels at a size of whole pixels, and the
+  grid places its thumbnails at fractions of a pixel: at the place and size
+  of a tile of Σ, 52 960 of 79 924 pixels differ, by up to 42. The same
+  shape of `Transform`'s own arithmetic sums in another order. Not done.
+* *Resampling on the GPU*, as the snapshots do: another filter. Not done.
+
+== Exact options not taken
+
+* *The weights of `Transform` once per column and row.* For a matrix without
+  rotation — every image of the grid and the carousel — the weights of a
+  column do not depend on the row; a copy of the kernel of `x/image/draw`
+  that computes them once would give the same sums for less CPU. It would
+  copy library code that Dependabot (specification 012) now updates. Not
+  measured.
+* *Heads kept across frames.* A step changes the heads of two tiles, the
+  old selection and the new; the others are the same bytes as in the frame
+  before, as long as the images of a window are not changed in place. It
+  would leave a step a few milliseconds of drawing, but it has to know when
+  a thumbnail changes — the live thumbnails reserved as specification 020.
+* *`opaqueBounds` and `crop` of the tiles layer*, 10 ms of its 52: the
+  bounds can be found from the edges inwards instead of over every pixel.
+* *A scratch canvas kept for good*, as the window background is, instead of
+  a `sync.Pool`: 14 MB held by each instance for fewer allocations.
