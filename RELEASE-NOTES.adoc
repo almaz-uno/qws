@@ -51,6 +51,20 @@ incompatible change, released in a minor version by the author's decision:
 The documents under `doc/` are in English
 (link:specs/017-english-documents/spec.adoc[specification 017]).
 
+=== 1.3.2 — unreleased
+
+*Snapshots out of the switcher's way* (link:specs/011-snapshot-pause/spec.adoc[specification
+011]):
+
+* While the switcher is shown, the capture of windows waits instead of
+  spinning on a CPU, as it did since 1.1.0 whenever a window changed
+  meanwhile.
+* Every qws stops capturing windows while the switcher of any qws on the
+  display is shown, not only its own: a second instance — a second service,
+  a trial build — no longer takes the frames of the first one's switcher.
+  Beside one, a step used to miss 1.1 % of its frames instead of 0.5 %, a
+  fade-in about one in ten.
+
 === 1.3.1 — 2026-10-02
 
 *The grid drawn faster* (link:specs/019-grid-speed/spec.adoc[specification

@@ -1,0 +1,175 @@
+= 011 — snapshots paused for any switcher
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-02
+:status: implemented
+:issue: 30
+
+== What and why
+
+Since 1.1.0 every qws instance captures the visible windows through the GPU
+when their contents change (specification 008), and pauses those captures
+while its own switcher is shown (007). It does not pause for the switcher of
+another instance. While one shows its switcher, another captures the windows
+that change meanwhile, a terminal that prints, an editor, and takes the GPU
+and the X server from the frames: on E1, beside the two services the author
+ran then, the step of the carousel missed 1.10 % of its frames instead of
+0.51 %, the fade-in 9.8 % instead of 0.45 % (specification 010, research,
+"The control"). The author asked (2026-10-01) that the snapshots pause while
+any switcher is shown.
+
+The same evening the author removed the second service,
+`qws-workspace.service`; one instance remains. A second one still comes and
+goes — a trial build, a measurement, the second service back — and the
+pause is for it. For the one instance alone the change brings the fix found
+on the way: while its own switcher is shown, its snapshotter spun on a CPU
+for every window that came due.
+
+The specification is a delta to `develop` at `f90abc7` (1.2.0). Unchanged:
+what is captured and when, but for the pause; the capture at an activation,
+`Refresh`; the pause for the instance's own switcher; the snapshots on the
+CPU of the focus watcher, without GLX; the configuration.
+
+== Decisions
+
+Author, 2026-10-01: snapshots pause while the switcher of any qws instance
+is shown. The author removed `qws-workspace.service` at 21:49 the same day,
+on purpose.
+
+Made on the way, 2026-10-01, for the author to confirm:
+
+* the instances find each other's switchers through a property of the root
+  window listing the overlay windows, and follow the map state of those
+  windows by their structure events — not a property set while a switcher
+  is shown, which an instance killed while showing would leave set and
+  pause the others for good: the X server destroys the windows of a client
+  that dies, and the others see it;
+* an overlay is listed when it is created, not at each activation: the list
+  changes a few times a day, the activation does not wait for it;
+* the snapshots on the CPU of the focus watcher keep pausing for their own
+  switcher only: they run without GLX, on none of the author's machines;
+* the loop of the snapshotter waits while paused, found on the way: since
+  1.1.0 a window that comes due while its switcher is shown arms
+  the loop's timer in the past, and the loop wakes at once, skips the
+  capture for the pause and arms it again — it spins on a CPU for as long
+  as the switcher is shown (`pkg/snapshot`, `run` and `nextDue`); paused for
+  every switcher, the other instance would spin as well;
+* a fix, without a key: a patch — 1.3.2, as 1.2.1, 1.3.0 and 1.3.1 went out
+  meanwhile.
+
+== Behavior
+
+. *The list.* The root window has the property `_QWS_SWITCHERS`, of the type
+  `WINDOW`, format 32: the overlay windows of the qws instances of the
+  display. An instance lists its overlay when it creates it — at its first
+  activation, and again when the monitor changes. It grabs the server,
+  reads the list, drops the windows that no longer exist, appends its own
+  and writes the list back, so that two instances listing at once lose
+  neither.
+. *The pause.* The snapshotter of every instance follows the windows of the
+  list — read when it starts and whenever the property changes — by their
+  structure events: mapped, unmapped, destroyed. While any of them is
+  mapped it takes no snapshot on change, as while its own switcher is
+  shown; the snapshots that come due meanwhile are taken when the last of
+  them is unmapped. The snapshots of an activation, before its first frame,
+  are taken as before.
+. *Waiting.* While paused, the loop of the snapshotter arms no timer for
+  the windows that come due: it wakes for its events, for the snapshots of
+  an activation and when the pause ends, and only then for a window due.
+. *An instance that dies* leaves its window in the list; the X server
+  destroys the window, the snapshotters see it destroyed and stop
+  following it, and the next instance to list its overlay drops it.
+. *Older versions* neither list their overlay nor follow the list: beside
+  them, an instance of this change behaves as 1.2.0 does.
+
+== Metrics
+
+As in 010. The snapshots of an instance are its records `Snapshot`, at debug
+level, with their cause — `change` or `activation` — and their time; the
+switcher of another instance is shown from the first frame of an activation
+to the unmapping of its overlay, from its records `Frame` and `Window
+activated` and the end of its fade-out.
+
+Session S4:: S2 of 007 on E1, with the two services stopped and two
+instances of this change in their place — the flags of the services, debug
+logging in JSON — so that their snapshots can be read.
+
+== Acceptance criteria
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| The list and the map state: two overlay windows listed by one connection
+  and followed from another — not shown; one mapped, shown; unmapped, not
+  shown; mapped and destroyed, not shown; a third listed, the destroyed one
+  is no longer in `_QWS_SWITCHERS`. Test in `pkg/x11`, skipped without an X
+  display.
+
+| K2
+| No snapshot on change while another switcher is shown: in S4, of the
+  records `Snapshot` with the cause `change` of the two instances, none
+  falls between the first frame of an activation of the measured instance
+  and the end of its fade-out. From the logs.
+
+| K3
+| Frames, in S4: A1 p95 of the step, the fade-in and the fade-out ≤ the
+  refresh period + 0.5 ms, 7.44 ms at 144 Hz, and the share of the step's
+  intervals above 1.5 periods ≤ 0.6 % — as with the services stopped in 010
+  (0.51 %).
+
+| K4
+| The hover of 010, measured again as its open decision asks: S3 with the
+  grid and with the carousel, the services replaced as in S4; A1 p95 of the
+  hover ≤ 7.44 ms.
+
+| K5
+| Waiting: while paused, the loop arms no timer for a window due, however
+  late; unpaused, it arms one for the time it is due, at once when that has
+  passed. Test in `pkg/snapshot`.
+
+| K6
+| `go vet ./...`, `go test ./...` and `make check-specs` pass.
+|===
+
+== Results
+
+2026-10-01, E1; the runs in `research.adoc`.
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | `TestSwitchers` on ws1.
+| K2 | Met: of 521 snapshots on change of the two instances in the evening,
+  and of 534 on an idle ws1 the next morning, none fell strictly within the
+  some 1240 and 1220 s the measured switcher was shown, to the second the
+  logs give.
+| K3 | Met for the missed frames, not for the p95, on an idle ws1: the step
+  misses 0.07 % of its intervals, against 0.6 %, the fades none; its p95 is
+  7.83 ms, the fades' 7.80 and 7.73, against 7.44 — and 7.80 with no
+  instance beside, so the pause does not cost it (research, "On an idle
+  ws1"). Back to back with 1.3.0 and 1.2.0, alone, this change measures as
+  they do, 8.56 ms against 9.04 and 8.59: the p95 of ws1 moves from one set
+  of runs to the next by up to 2 ms, more than the builds tell apart
+  (research, "Three builds back to back"). The evening before, with other sessions busy on ws1, the misses
+  came in bursts, 1.67 % in all. Beside the services of 1.1.0, 010 measured
+  8.42 ms and 1.10 %, the fade-in 15.12 ms and 9.8 %.
+| K4 | Not met at its threshold: on an idle ws1 the hover at 7.82 ms in the
+  grid and in the carousel, against 11.49 and 8.87 in 010; missed 0.40 %
+  and 0.26 %.
+| K5 | `TestWait`.
+| K6 | `go vet ./...`, `go test ./...`, `make check-specs`, locally and in
+  workflow `test`.
+|===
+
+== Open decisions
+
+. The p95 of ws1: it moves by up to 2 ms between sets of runs, the builds
+  alike within each (research, "Three builds back to back"). What moves it
+  is not found; until it is, a threshold such as the 7.44 ms of K3 and K4
+  holds a build only against another run back to back with it.
+. The snapshots on the CPU of the focus watcher, for the switcher of
+  another instance.

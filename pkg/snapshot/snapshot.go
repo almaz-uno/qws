@@ -19,6 +19,7 @@ import (
 
 	"github.com/almaz-uno/qws/pkg/composite"
 	"github.com/almaz-uno/qws/pkg/glx"
+	"github.com/almaz-uno/qws/pkg/x11"
 	"github.com/go-gl/gl/v4.6-core/gl"
 	"github.com/jezek/xgb"
 	xcomposite "github.com/jezek/xgb/composite"
@@ -47,6 +48,7 @@ type Snapshotter struct {
 	thumbs map[xproto.Window]image.Image
 
 	paused  atomic.Bool
+	wake    chan struct{} // the pause ended
 	events  chan xgb.Event
 	refresh chan chan struct{}
 	quit    chan struct{}
@@ -55,10 +57,12 @@ type Snapshotter struct {
 	// Owned by the loop
 	windows map[xproto.Window]*window
 	frames  map[xproto.Window]xproto.Window // frame of the window manager → its client
-	off     *glx.Offscreen
-	gpu     *gpu
-	render  *xrender // nil without RENDER or MIT-SHM
-	cpu     *composite.Capturer
+	// The switchers of the qws instances, for the pause (specs/011-snapshot-pause)
+	switchers *x11.Switchers
+	off       *glx.Offscreen
+	gpu       *gpu
+	render    *xrender // nil without RENDER or MIT-SHM
+	cpu       *composite.Capturer
 }
 
 // window is what the snapshotter knows of a client window
@@ -116,6 +120,7 @@ func New(interval time.Duration, scaling string) (*Snapshotter, error) {
 		root:     xproto.Setup(conn).DefaultScreen(conn).Root,
 		interval: interval,
 		thumbs:   make(map[xproto.Window]image.Image),
+		wake:     make(chan struct{}, 1),
 		events:   make(chan xgb.Event, 256),
 		refresh:  make(chan chan struct{}),
 		quit:     make(chan struct{}),
@@ -167,6 +172,11 @@ func (s *Snapshotter) initX(scaling string) error {
 	if err := xproto.ChangeWindowAttributesChecked(s.conn, s.root, xproto.CwEventMask,
 		[]uint32{xproto.EventMaskPropertyChange}).Check(); err != nil {
 		return err
+	}
+	if sw, err := x11.NewSwitchers(s.conn, s.root); err == nil {
+		s.switchers = sw
+	} else {
+		log.Debug().Err(err).Msg("Switchers of other instances not followed")
 	}
 	cpu, err := composite.NewCapturer(s.conn, s.root, scaling)
 	if err != nil {
@@ -220,9 +230,34 @@ func (s *Snapshotter) Refresh(timeout time.Duration) {
 }
 
 // Pause stops or resumes the snapshots taken on change: they are paused while
-// the switcher is shown (specs/007-animation); Refresh still captures
+// the switcher is shown (specs/007-animation), and while that of another qws
+// instance is (specs/011-snapshot-pause); Refresh still captures
 func (s *Snapshotter) Pause(paused bool) {
 	s.paused.Store(paused)
+	if !paused {
+		select {
+		case s.wake <- struct{}{}:
+		default:
+		}
+	}
+}
+
+// pausedNow reports whether the snapshots on change are paused: for this
+// instance's switcher or another's. In the loop only.
+func (s *Snapshotter) pausedNow() bool {
+	return s.paused.Load() || s.switchers.Shown()
+}
+
+// wait is how long the loop waits for a window due at due, at now: no
+// longer than till then, and not at all once that has passed; while paused,
+// or with no window due, an hour — the loop wakes for its events, an
+// activation or the end of the pause. Armed for a window due while paused, the
+// timer fired at once and the loop spun (specs/011-snapshot-pause).
+func wait(paused bool, due time.Time, ok bool, now time.Time) time.Duration {
+	if paused || !ok {
+		return time.Hour
+	}
+	return max(0, due.Sub(now))
 }
 
 // Close stops the snapshotter and frees what it holds in the X server and the
@@ -262,19 +297,17 @@ func (s *Snapshotter) run(ready chan<- error) {
 	timer := time.NewTimer(time.Hour)
 	defer timer.Stop()
 	for {
-		if due, ok := s.nextDue(); ok {
-			timer.Reset(max(0, time.Until(due)))
-		} else {
-			timer.Reset(time.Hour)
-		}
+		due, ok := s.nextDue()
+		timer.Reset(wait(s.pausedNow(), due, ok, time.Now()))
 		select {
 		case ev := <-s.events:
 			s.handle(ev)
+		case <-s.wake:
 		case done := <-s.refresh:
 			s.captureChanged(time.Now(), causeActivation, true)
 			close(done)
 		case <-timer.C:
-			if !s.paused.Load() {
+			if !s.pausedNow() {
 				s.captureChanged(time.Now(), causeChange, false)
 			}
 		case <-s.quit:
@@ -312,6 +345,9 @@ func (s *Snapshotter) captureChanged(now time.Time, cause string, all bool) {
 // handle follows the windows: the client list, their structure and that of
 // their frames, their damage
 func (s *Snapshotter) handle(ev xgb.Event) {
+	if s.switchers.Handle(ev) {
+		return
+	}
 	now := time.Now()
 	switch e := ev.(type) {
 	case xproto.PropertyNotifyEvent:
