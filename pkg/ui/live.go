@@ -43,8 +43,8 @@ type liveThumbnails struct {
 	lastFrame time.Time // the end of the last frame presented
 
 	// The frame being presented: whether it has taken the pictures, the
-	// pictures, those it draws, and the change of the latest pass it draws for
-	// the first time
+	// pictures, those it draws, and where the lag of the latest pass it draws
+	// for the first time counts from
 	begun   bool
 	pics    map[xproto.Window]snapshot.Picture
 	drawing map[xproto.Window]uint64
@@ -53,9 +53,12 @@ type liveThumbnails struct {
 	lag     time.Duration            // of the last frame, for its record; 0: none
 
 	// The windows of the cards and tiles in view at rest, for the passes,
-	// kept while the layers' generation, the layout and the selection stay
+	// kept while the layers' generation, the layout and the selection stay,
+	// and since when each is in view, within the generation: the windows and
+	// their thumbnails are those of a new activation, or have changed
 	shown    []xproto.Window
 	shownKey [3]int
+	since    map[xproto.Window]time.Time
 
 	// The live items of the frame at rest, kept while what they depend on
 	// stays: the layers' generation and the layout, and for the carousel the
@@ -142,17 +145,17 @@ func (s *Selector) liveBegin() {
 	if !s.liveOn() {
 		return
 	}
-	s.live.pics = s.live.snap.BeginFrame(s.liveShown())
+	s.live.pics = s.live.snap.BeginFrame(s.liveShown(time.Now()))
 	s.live.begun, s.live.wanted = true, false
 	s.live.changed = time.Time{}
 	clear(s.live.drawing)
 }
 
-// liveShown is the windows whose cards or tiles are in view at rest: every
-// tile of the grid; the cards of the carousel with a live rectangle at the
-// selection, eleven at most — those the snapshotter passes. A slice given
-// is never changed: the snapshotter keeps it.
-func (s *Selector) liveShown() []xproto.Window {
+// liveShown is the windows whose cards or tiles are in view at rest, at
+// now: every tile of the grid; the cards of the carousel with a live
+// rectangle at the selection, eleven at most — those the snapshotter
+// passes. A slice given is never changed: the snapshotter keeps it.
+func (s *Selector) liveShown(now time.Time) []xproto.Window {
 	key := [3]int{s.layers.gen, s.selectedIndex, 0}
 	if s.grid() {
 		key = [3]int{s.layers.gen, -1, 1}
@@ -165,6 +168,7 @@ func (s *Selector) liveShown() []xproto.Window {
 		data = s.prepareWindowData()
 	}
 	shown := make([]xproto.Window, 0, len(s.windows))
+	since := make(map[xproto.Window]time.Time, len(s.windows))
 	for i, w := range s.windows {
 		if !s.grid() {
 			if _, ok := carousel.CardLive(data, i, float64(i-s.selectedIndex), s.config); !ok {
@@ -172,8 +176,12 @@ func (s *Selector) liveShown() []xproto.Window {
 			}
 		}
 		shown = append(shown, w.ID)
+		since[w.ID] = now
+		if t, ok := s.live.since[w.ID]; ok && s.live.shownKey[0] == key[0] {
+			since[w.ID] = t
+		}
 	}
-	s.live.shown, s.live.shownKey = shown, key
+	s.live.shown, s.live.shownKey, s.live.since = shown, key, since
 	return shown
 }
 
@@ -215,13 +223,21 @@ func (s *Selector) picture(i int, data []carousel.WindowData) (snapshot.Picture,
 	return p, true
 }
 
-// livePicture makes the item draw the picture of window i, and counts its
-// change for the lag when the window has not drawn it yet
+// livePicture makes the item draw the picture of window i, and counts it
+// for the lag when the window has not drawn it yet and its card or tile is
+// in view: from its change, or from when the card came into view if later
+// (Metrics, L)
 func (s *Selector) livePicture(i int, it *carousel.LiveItem, p snapshot.Picture) {
 	it.Texture = p.Texture
 	id := s.windows[i].ID
-	if p.Gen > s.live.drawn[id] && p.Changed.After(s.live.changed) {
-		s.live.changed = p.Changed
+	if since, ok := s.live.since[id]; ok && p.Gen > s.live.drawn[id] {
+		from := p.Changed
+		if since.After(from) {
+			from = since
+		}
+		if from.After(s.live.changed) {
+			s.live.changed = from
+		}
 	}
 	if s.live.drawing == nil {
 		s.live.drawing = map[xproto.Window]uint64{}

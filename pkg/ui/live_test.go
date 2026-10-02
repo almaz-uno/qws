@@ -94,9 +94,10 @@ func (livePresenter) Close()                      {}
 // those of the size of their cards' thumbnails, gives the snapshotter the
 // presenter's fence and releases the one it replaces, and the windows of the
 // cards in view, the same slice while the selection stays; a frame's record
-// has the lag of the latest pass it draws for the first time, and only then;
-// the ClientMessage of the snapshotter asks for a frame at rest, which waits
-// a refresh period after the frame before
+// has the lag of the latest pass it draws for the first time, and only then,
+// from its change or from when its card came into view, with the layers it
+// is drawn from, if later; the ClientMessage of the snapshotter asks for a
+// frame at rest, which waits a refresh period after the frame before
 func TestLiveFrames(t *testing.T) {
 	goFont := filepath.Join(t.TempDir(), "goregular.ttf")
 	if err := os.WriteFile(goFont, goregular.TTF, 0o644); err != nil {
@@ -136,6 +137,10 @@ func TestLiveFrames(t *testing.T) {
 		t.Errorf("the windows in view %v, want 10 to 15", src.shown)
 	}
 	first := src.shown
+	inView := time.Now().Add(-30 * time.Millisecond)
+	for id := range s.live.since {
+		s.live.since[id] = inView
+	}
 
 	changed := time.Now().Add(-20 * time.Millisecond)
 	src.pics = map[xproto.Window]snapshot.Picture{
@@ -187,6 +192,14 @@ func TestLiveFrames(t *testing.T) {
 		t.Errorf("lag %v of a new pass", lag)
 	}
 
+	// A pass of a change read before the card came into view: from then
+	s.live.since[12] = time.Now().Add(-2 * time.Millisecond)
+	src.pics[12] = snapshot.Picture{Texture: 102, Width: 512, Height: 271, Gen: 7, Changed: changed}
+	end = frame()
+	if lag := s.takeLag(); lag != end.Sub(s.live.since[12]) {
+		t.Errorf("lag %v of a change before the card came into view, want %v from then", lag, end.Sub(s.live.since[12]))
+	}
+
 	// The grid: every tile in view
 	s.config.LayoutMode = "grid"
 	s.liveBegin()
@@ -194,7 +207,18 @@ func TestLiveFrames(t *testing.T) {
 	if len(src.shown) != len(s.windows) {
 		t.Errorf("%d tiles in view, want all %d", len(src.shown), len(s.windows))
 	}
+	if !s.live.since[11].Equal(inView) {
+		t.Error("a card in view since before is so anew as a tile")
+	}
 	s.config.LayoutMode = "carousel"
+
+	// New layers — a new activation, or new windows: in view from then
+	s.layers.gen++
+	s.liveBegin()
+	s.liveEnd(time.Now())
+	if !s.live.since[11].After(inView) {
+		t.Error("in view from before the layers of the frame")
+	}
 
 	// The wake of the snapshotter
 	if s.liveEvent(xproto.ClientMessageEvent{Type: 76}) {

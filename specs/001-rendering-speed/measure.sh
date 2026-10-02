@@ -398,11 +398,12 @@ animations() {
 }
 
 # Metrics L and C of specs/020-live-thumbnails over the runs given, and the
-# live passes of their snapshotters
+# live passes of their snapshotters. qws counts L for the cards and tiles in
+# view only, from the change or from when the card came into view if later.
 live() {
 	local d logs=("${@/%//log.json}")
 	if grep -q -e '"live_ms"' -e '"message":"Live"' "${logs[@]}"; then
-		printf 'L live_ms          '
+		printf 'L live_ms in view  '
 		cat "${logs[@]}" | jq -r 'select(.live_ms) | .live_ms' | pct
 		printf 'S live pass_ms     '
 		cat "${logs[@]}" | jq -r 'select(.message == "Live") | .ms' | pct
