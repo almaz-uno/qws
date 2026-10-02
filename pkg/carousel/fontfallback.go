@@ -37,10 +37,22 @@ type MultiFallbackFace struct {
 	// and hints the glyph for each call, and the grid measures every title
 	// on every frame (specs/019-grid-speed)
 	advances map[rune]glyphAdvance
+
+	// bounds keeps what GlyphBounds returned for a rune, for the same reason:
+	// the live rectangles of the frames at rest measure the labels of the
+	// cards and tiles (specs/020-live-thumbnails)
+	bounds map[rune]glyphBounds
 }
 
 // glyphAdvance is a result of GlyphAdvance
 type glyphAdvance struct {
+	advance fixed.Int26_6
+	ok      bool
+}
+
+// glyphBounds is a result of GlyphBounds
+type glyphBounds struct {
+	bounds  fixed.Rectangle26_6
 	advance fixed.Int26_6
 	ok      bool
 }
@@ -244,6 +256,23 @@ func (m *MultiFallbackFace) Glyph(dot fixed.Point26_6, r rune) (
 
 // GlyphBounds returns the bounds for the given rune
 func (m *MultiFallbackFace) GlyphBounds(r rune) (
+	bounds fixed.Rectangle26_6,
+	advance fixed.Int26_6,
+	ok bool,
+) {
+	if b, found := m.bounds[r]; found {
+		return b.bounds, b.advance, b.ok
+	}
+	bounds, advance, ok = m.glyphBounds(r)
+	if m.bounds == nil {
+		m.bounds = make(map[rune]glyphBounds)
+	}
+	m.bounds[r] = glyphBounds{bounds, advance, ok}
+	return bounds, advance, ok
+}
+
+// glyphBounds is GlyphBounds without the memory
+func (m *MultiFallbackFace) glyphBounds(r rune) (
 	bounds fixed.Rectangle26_6,
 	advance fixed.Int26_6,
 	ok bool,
