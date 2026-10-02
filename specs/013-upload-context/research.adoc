@@ -1,0 +1,210 @@
+= 013 — research
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-01
+
+Facts the specification rests on, 2026-10-01, `develop` at `f90abc7`
+(1.2.0), E1: ws1, RTX 4080 SUPER, NVIDIA 580.105.08, i9-7920X, picom
+`--backend glx --vsync`, the author's desktop in use and the author's service
+`/usr/local/bin/qws` running. `nvidia-smi` gives the PCIe link of the GPU as
+generation 3 at most, 16 lanes at most, 4 in use. The probe is outside the
+repository, in `~/.cache/qws-probe-upload` on ws1.
+
+== The misses of 1.2.0
+
+The three carousel runs of S2 of 007 (`2f1a499`, the uploads of 1.0.0 to
+1.2.0), their
+logs in `~/.cache/qws-measure/2026-10-01/T8/s2-glx-{1,2,3}` on ws1, summed up
+anew by line `A1 carousel by pause` of `measure.sh summary`: the intervals
+above 1.5 periods, by what the pause before the frame uploaded; frames at
+rest and stalls over 50 ms apart.
+
+[cols="1,2,2,2,1,1",options="header"]
+|===
+| Run | No upload | Up to 640 KB | More | At rest | Stalls
+
+| 1 | 19 of 14358, 0.13 % | 13 of 1436, 0.91 % | 51 of 3672, 1.39 % | 1 of 738 | 6
+| 2 | 19 of 14375, 0.13 % | 17 of 1398, 1.22 % | 62 of 3707, 1.67 % | 1 of 738 | 4
+| 3 | 17 of 14335, 0.12 % | 11 of 1451, 0.76 % | 57 of 3696, 1.54 % | 0 of 739 | 5
+|===
+
+Together: 55 of 43068 pauses without an upload, 0.13 %; 211 of 15360 that
+uploaded, 1.37 % — 41 of 4285 up to 640 KB, 0.96 %, 170 of 11075 more,
+1.53 %. The counts are those of the research of 007 — 211, 55, 2 at rest, 15
+stalls; its rate without an upload, 0.15 %, did not record its denominator.
+A piece of the frame at rest is 630 KB, a card layer up to 1.4 MB.
+
+== What the specifications allow
+
+*Sharing.* `GLX_ARB_create_context`: with a share context, "all shareable
+data (excluding OpenGL texture objects named 0) will be shared"; the server
+context state of all sharing contexts "must exist in a single address
+space", else, or when the share context was created on another screen,
+`BadMatch`. Two direct contexts of one process share an address space. The
+extension says nothing of the Xlib display a context is created on; NVIDIA
+shares between displays (the probe).
+
+*What is shared*
+(https://registry.khronos.org/OpenGL/specs/gl/glspec46.core.pdf[OpenGL 4.6
+core], chapter 5): buffer, program, shader,
+renderbuffer, sampler, sync and texture objects; not the containers —
+framebuffers, vertex arrays. A deleted texture lives on while it is bound in
+any context (5.1.3); the commands of another context still in flight are not
+named there.
+
+*When a change is seen* (5.3): the contents of an object changed in another
+context are seen once the change has completed — by `glFinish`, or by
+`glFenceSync` there and `glWaitSync` here — and the object is bound again in
+the current context (rule 4). The presenter binds the textures of a frame at
+every draw.
+
+*Fences* (4.1): `glClientWaitSync` with a timeout of 0 tests the state of a
+fence without blocking; `glWaitSync` makes the server wait, "either in the
+CPU executing server-side code, or in the GPU hardware", and returns at once.
+A fence waited for from another context signals only once flushed in its
+own: `SYNC_FLUSH_COMMANDS_BIT` "will not help when waiting for a fence
+command issued in another context's command stream" (4.1.2).
+
+*NVIDIA.*
+https://developer.download.nvidia.com/GTC/PDF/GTC2012/PresentationPDF/S0356-GTC2012-Texture-Transfers.pdf["Optimizing
+Texture Transfers"], GTC 2012, S0356: since Fermi the
+GPU has copy engines, one on a GeForce, that move data beside rendering;
+OpenGL gets them for transfers made from a context of their own on a thread
+of their own, synchronized with the rendering context by `ARB_sync`.
+Non-transfer calls in the transfer thread may serialize it with rendering,
+and the driver then says "Pixel transfer is synchronized with 3D rendering"
+in its debug output. On
+https://forums.developer.nvidia.com/t/gltexstorage-and-multiple-gl-contexts/45183[NVIDIA's
+forum], a texture allocated in one context and filled in another came out
+corrupted: allocation and upload belong in the one upload context, fenced,
+the rendering context waiting for the fence before it draws.
+
+== The probe
+
+`~/.cache/qws-probe-upload/v2`: an override-redirect window of 2520×1400, the
+overlay of E1, mapped off the screen, with the context of `pkg/glx`, swap
+interval 0; a scene of a base of the window size and 23 layers of 560×640,
+blended and moving a little each frame; frames due every 1/144 s, the last
+3 ms spun, each a swap and `glFinish`, as frames are while their timings are
+logged. In every second pause, no later than 3 ms before the frame:
+alternately a layer of 1.4 MB into a new texture, as `SetLayer` does, or a
+piece of 64 rows of a frame, 630 KB, through a pixel buffer, as `StageFrame`
+does, a frame staged starting with a copy of the base into the staging
+texture. Modes:
+
+* `none` — no uploads;
+* `same` — the uploads in the presenter's context, the layers from the
+  memory of the process, as in 1.2.0; `samepbo` — the layers through a pixel
+  buffer;
+* `shared` — the same uploads made by a second context on a thread of its
+  own, created with the presenter's as share context on a pbuffer of 1×1, a
+  fence after each; the presenter draws a new layer once `glClientWaitSync`
+  with timeout 0 finds its fence signalled, the copy waits for a fence of the
+  presenter's frames; `sharedpbo` — the layers through the second context's
+  pixel buffer;
+* `flood`, `floodpbo` — the second context uploading layers into textures no
+  frame draws, without pause, from memory or through its pixel buffer.
+
+The modes take turns in blocks of 400 frames, the first 10 of a block not
+counted: run one after another, 9900 frames each, they drifted with the
+desktop — a run of `shared` in which no frame drew a layer before its fence
+missed 1.1 % of its intervals, the runs before and after it 0–0.02 %. Timer
+queries give the time of a frame on the GPU, from its first command to the
+end of its swap, and how long its first command waited there after it was
+issued, "queued".
+
+. *Sharing works* on E1: the second context, on an Xlib display of its own
+  or on the presenter's (`XInitThreads` first), is created with the
+  presenter's as share context, and the layers it uploads show in the
+  presenter's frames.
+. *No serialization reported.* With both contexts debug contexts, NVIDIA
+  reports only that the pixel buffer is in system memory and mapped
+  write-only, "fast"; never "synchronized with 3D rendering".
+. *An upload in the second context*, from the request to its fence
+  signalled: a layer 1.1–1.4 ms at the median, issued in 0.27–0.62 ms of the
+  uploader's CPU; a piece 0.5 ms, issued in 0.13 ms — some 1.2 GB/s. No layer
+  had to be drawn before its fence signalled: by the next frame, 3 ms later
+  at least, it had.
+. *Transfers beside the frames.* Flooding, the frames themselves take as
+  long on the GPU as without uploads, but start later: the GPU turns to the
+  presenter's commands once the transfer under way is done. From memory they
+  start a millisecond late; through a pixel buffer, a fifth of that:
++
+[cols="2,1,2,2,1",options="header"]
+|===
+| 22:38, 17550 frames | Moved, GB/s | Queued p50 / p95, ms | On the GPU p50 / p95, ms | Over 2 ms
+
+| `none`     | —    | 0.18 / 0.98 | 0.15 / 0.17 | 0.34 %
+| `flood`    | 1.37 | 1.02 / 2.27 | 0.15 / 0.16 | 12.00 %
+| `floodpbo` | 2.01 | 0.36 / 1.40 | 0.16 / 0.66 | 0.70 %
+|===
++
+The rates are those of 22:35 and 22:37, run apart with `none` in turn; the
+run above has both. NVIDIA's driver does not run uploads from memory beside
+the frames; through a pixel buffer, mostly.
+. *At the rate of the animation*, a layer or a piece every second pause:
++
+[cols="2,1,2,2,1,1",options="header"]
+|===
+| Run, mode | Frames | On the GPU p50 / p95 / p99, ms | Presented p50 / p95 / p99, ms | Over 2 ms | Missed
+
+| 22:11, `none`   | 11700 | 0.26 / 0.35 / 2.15 | 0.49 / 1.44 / 3.06 | 1.83 % | 0.20 %
+| 22:11, `same`   | 11700 | 0.27 / 1.56 / 2.98 | 0.51 / 1.81 / 3.75 | 4.33 % | 0.03 %
+| 22:11, `shared` | 11700 | 0.19 / 0.32 / 2.63 | 0.44 / 1.36 / 3.29 | 1.84 % | 0.11 %
+| 22:26, `none`   | 23400 | 0.16 / 0.18 / 0.31 | 0.37 / 1.33 / 2.15 | 1.08 % | 0.93 %
+| 22:26, `same`   | 23400 | 0.16 / 0.18 / 0.32 | 0.38 / 1.35 / 3.60 | 1.49 % | 1.25 %
+| 22:26, `shared` | 23400 | 0.16 / 0.18 / 0.87 | 0.38 / 1.37 / 3.73 | 1.74 % | 1.13 %
+| 22:41, `none`      | 9360 | 0.16 / 0.25 / 0.32 | 0.36 / 1.29 / 1.55 | 0.50 % | 0.45 %
+| 22:41, `same`      | 9360 | 0.16 / 0.31 / 0.35 | 0.37 / 1.29 / 1.59 | 0.67 % | 0.68 %
+| 22:41, `samepbo`   | 9360 | 0.16 / 0.31 / 0.36 | 0.39 / 1.33 / 2.43 | 1.21 % | 0.94 %
+| 22:41, `shared`    | 9360 | 0.16 / 0.32 / 1.04 | 0.40 / 1.38 / 4.14 | 2.04 % | 0.92 %
+| 22:41, `sharedpbo` | 9360 | 0.16 / 0.23 / 0.32 | 0.38 / 1.33 / 2.08 | 1.06 % | 0.58 %
+|===
++
+In the first run the frames of `same` took 4.5 times as long on the GPU at
+p95 as those without uploads; in the others they did not, and the
+desktop, which made 0.45–0.93 % of the intervals miss without any upload,
+outweighed the modes. Of the second context, the layers from memory came
+out worst — over 2 ms in 1.7–2.0 % of the frames —, through its pixel buffer
+second only to no uploads at all, 1.06 %, and on the GPU at p95 as without
+them.
+
+Off the screen nothing waits for a vertical blank: a frame is late only by
+the GPU or the CPU, and its misses follow the desktop as much as the mode.
+What the vertical blank of picom makes of a frame that starts some hundreds
+of microseconds late on the GPU, only S2 on the screen tells.
+
+== The implementation off the screen
+
+`BenchmarkPacedFrames`, metric M2 of the specification, 36000 frames, on the
+presenter of this change — the layers of the uploader through its pixel
+buffer:
+
+[cols="2,1,1,1,1",options="header"]
+|===
+| Run, mode | Queued p95, ms | On the GPU p95, ms | Over 2 ms | Waited
+
+| 22:53, no uploads             | 0.78 | 1.91 | 8.39 % | —
+| 22:53, the presenter's context | 0.77 | 1.93 | 9.75 % | —
+| 22:53, the uploader           | 0.50 | 1.78 | 6.10 % | 0.10 %
+| 23:03, no uploads             | 0.79 | 1.67 | 4.53 % | —
+| 23:03, the presenter's context | 0.81 | 1.89 | 6.62 % | —
+| 23:03, the uploader           | 0.87 | 1.69 | 5.09 % | 0.07 %
+|===
+
+The desktop was busy in both: frames without uploads took 1.7–1.9 ms on the
+GPU at p95, against 0.18–0.35 ms in the quieter runs of the probe and 0.18 ms
+in a run of 2400 frames of the benchmark at 22:52. Within that, in both runs
+the uploads in the presenter's context put 1.4–2.1 percentage points more
+frames over 2 ms than no uploads, and 0.02–0.22 ms on the GPU at p95; the
+uploader's frames were within 0.1 ms of those without uploads, queued and on
+the GPU, and over 2 ms −2.3 and +0.56 points — K3 met in the first run, in
+the second short by 0.06 points of its 0.5, while the two runs without
+uploads differ by 3.9. One frame in a thousand or so waited for an upload of
+the uploader.
+
+Two runs before, at 22:20 and 22:47, logged frame timings, so that the
+presenter waited for the GPU in each swap and the queries took that wait in:
+1.36 ms at p95 and 11–15 % over 2 ms in every mode alike. The benchmark turns
+the timings off.

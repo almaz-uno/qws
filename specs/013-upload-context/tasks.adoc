@@ -1,0 +1,43 @@
+= 013 — tasks
+:toc: left
+:toc-title: Contents
+:revdate: 2026-10-01
+
+. [x] T1. What GLX, OpenGL and NVIDIA allow for shared contexts and their
+  fences; the probe off the screen (research).
+. [x] T2. The misses of 1.2.0 by pause, from the runs of S2 of 007, by the
+  new line of `measure.sh summary` — the reference of K4.
+. [x] T3. `glx.Context.NewShared`.
+. [x] T4. The uploader in the GLX presenter, the fallback to the presenter's
+  context; K1, K2, K6 by tests, K7.
+. [x] T5. `BenchmarkPacedFrames` on E1, K3:
+  `go test -run '^$' -bench PacedFrames -benchtime 36000x -timeout 20m ./pkg/carousel`.
+. [ ] T6. S2 on E1 — K4, K5, the log of K6 — with the author away: the
+  harness focuses every i3 window and sends keys. Runs of this change and of
+  1.2.0 take turns, the service of the author stopped as in K7 of 010, the
+  overlay on DP-0 at 144 Hz:
++
+----
+cd ~/.cache/qws-wt-uploads && make build
+git -C ~/wsp/pet/qws worktree add --detach ~/.cache/qws-wt-ref v1.2.0
+make -C ~/.cache/qws-wt-ref build
+M=specs/001-rendering-speed/measure.sh
+R=~/.cache/qws-013-runs/$(date +%Y%m%d-%H%M) && mkdir -p "$R"
+systemctl --user stop qws.service
+for i in 1 2 3; do
+	QWS=~/.cache/qws-wt-ref/qws HOLD=2 LAYOUT=carousel $M run glx "$R/ref-$i"
+	HOLD=2 LAYOUT=carousel $M run glx "$R/new-$i"
+done
+HOLD=2 LAYOUT=grid $M run glx "$R/new-grid"
+systemctl --user start qws.service
+grep -c '"Uploads in a context of their own"' "$R"/new-*/log.json
+grep -H -E '^(A1 carousel|A1 grid|A2|A3 carousel|K2 carousel|K5)' "$R"/*/summary
+----
++
+Some 30 minutes. K4: line `A1 carousel by pause` of `new-1..3`, the three
+together — the missed after `upto-640KB` and `more` against those after
+`no-upload`; `ref-1..3` give the same for 1.2.0 that day. K5: `A1 carousel
+interval` and `missed` of `new-*` against `ref-*`, `K2 carousel frames`,
+`A2`, `A3`, `K5`. `waited` says how often a frame waited for an upload.
+. [ ] T7. The results of K4–K6 in `spec.adoc`, the runs in `research.adoc`;
+  K5's threshold confirmed with the author; the open decisions revisited.
