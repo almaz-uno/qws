@@ -82,7 +82,7 @@ type glxPresenter struct {
 // newGLXPresenter creates the GLX presenter; a variable, so that tests can make
 // the initialisation fail
 var newGLXPresenter = func() (Presenter, error) {
-	ctx, err := glx.NewContext()
+	ctx, err := glx.NewContext(nil)
 	if err != nil {
 		return nil, err
 	}
