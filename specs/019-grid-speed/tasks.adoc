@@ -16,3 +16,6 @@
   safeguard undone once to see a case fail; K2, K3.
 . [x] T7. `develop` and the change interleaved on ws1; K4–K6 and the results.
 . [x] T8. `go vet ./...`, `go test ./...`, `make check-specs`; K7.
+. [x] T9. S2 and S3 of the grid under `glx` and S1 under `cpu` on the
+  desktop of E1, `develop` and the change in turn; research, "On the
+  desktop".

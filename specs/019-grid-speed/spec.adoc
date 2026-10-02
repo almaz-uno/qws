@@ -172,15 +172,18 @@ Reported:
 * With `GOMAXPROCS` 8 on ws1, the threads of the Steam Deck, a frame takes
   81.5–84.8 ms, the tiles layer 89.5–90.1.
 
-Not checked:
+On the desktop of E1, 2026-10-01/02, the binaries of `develop` and of the
+change in turn (research, "On the desktop"):
 
-* The program on E1. The agent that did the change may not drive the
-  author's desktop: neither the step and the hover of the grid under the
-  animation (S2 and S3 of specifications 007 and 010) nor M1 of 001 for the
-  grid were run. What to expect: the frame at rest of a step about 40 ms
-  after the frame before it, not 208–449 ms; under `cpu`, a step of the grid
-  faster by some 330 ms.
-* ws7, the Steam Deck.
+* S2 and S3 of the grid under `glx`: a step from its key to its frame at
+  rest in 152.8 ms against 533.7–536.6 ms; the frame at rest 6.94 ms after
+  the frame before it against 381–383 ms; 29–64 intervals above 1.5 periods
+  in a run against 475–480, 5–8 of them over 50 ms against 465–480. The
+  hover is on time with both.
+* An activation in the grid, M1 warm, 334.5–361.8 ms against
+  771.0–786.3 ms; under `cpu` a step, M2, 103.0 ms against 551.6 ms.
+
+Not checked: ws7, the Steam Deck.
 
 == Open decisions
 

@@ -225,6 +225,59 @@ With fewer processors, `GOMAXPROCS` on ws1: 8 — the threads of the Steam
 Deck — 81.5–84.8 ms a frame, 89.5–90.1 ms the tiles layer; 4 — 151.0–159.1
 and 159.6–164.2 ms.
 
+== On the desktop
+
+2026-10-01 23:23 to 2026-10-02 00:33, ws1, the author's desktop: 36
+windows in the grid, the overlay on DP-0 at 144 Hz, the service stopped
+meanwhile. `measure.sh` of specification 001 drove the binaries of
+`develop` at `02528c7`, the base of the branch, and of the change at
+`fdd98e5`, each built in a clean worktree, in turn: S2 (`HOLD=2
+LAYOUT=grid`, `glx`) and S3 (`SWEEP=1` as well) twice each, then S1 under
+`cpu` (`LAYOUT=grid`) once each; 20 activations a run, 73 steps each. The
+runs are outside the repository, in `~/.cache/qws-runs/20261001-2323` on
+ws1.
+
+[cols="3,2,2",options="header"]
+|===
+| | `develop` | the change
+
+| the frame at rest of a step, after the frame before it, p50 / p95 (S2)
+| 381.0–383.4 / 399.1–402.5 ms | 6.94 / 7.82–7.83 ms
+| a step from its key to its frame at rest, A3, p50 (S2, S3)
+| 533.7–536.6 ms | 152.8 ms
+| the last step of the held key at rest since its key, p50 (S2)
+| 536.9–538.5 ms | 154.6–154.9 ms
+| intervals above 1.5 periods, A1 (S2)
+| 478 of 31 139, 480 of 30 927 | 29 of 32 189, 30 of 32 199
+| the same with the hover swept (S3)
+| 475 of 30 649, 476 of 30 923 | 63 of 32 351, 64 of 32 295
+| of them over 50 ms (S2, S3) | 465–480 | 5–8
+| hover: missed intervals; A3 p50 (S3)
+| 10 of 3 507, 12 of 3 495; 152.8 ms | 8 of 3 516, 0 of 3 540; 152.8 ms
+| an activation, M1 warm, p50: total; drawing (`glx`)
+| 771.0–786.3; 518.5–523.3 ms | 334.5–361.8; 79.7–81.3 ms
+| a step under `cpu`, M2, p50 / p95: total; drawing
+| 551.6 / 573.8; 531.1 / 551.7 ms | 103.0 / 113.4; 81.3 / 89.4 ms
+| an activation under `cpu`, M1 warm, p50 | 781.5 ms | 357.6 ms
+| activations off their window, K5 of 007 | 0 of 20 a run | 0 of 20 a run
+|===
+
+On `develop` each step of the grid is followed by a gap: the animation of
+150 ms ends and the frame at rest, drawn in the background, comes about
+380 ms after the last frame of the motion — every one of those gaps is an
+interval over 50 ms. With the change the frame at rest is drawn while the
+step moves and is shown in the next refresh; the step ends at its 150 ms.
+The frames at rest that miss a refresh, 3–23 of some 1 160 a run, and the
+misses after a pause that uploaded, 5–9 of some 770 up to 640 KB, are those
+specification 013 is about. The grid on the desktop takes longer to draw
+than Σ — 36 windows of the author's instead of 24 — and the change is a
+little less of a gain there, a sixth of the time rather than a ninth.
+
+M3 of `measure.sh` — the CPU time of the drawing, from a profile — is not
+comparable: it counts what runs under `Selector.render`, and the workers
+draw the heads on stacks of their own. The CPU time of "Before and after"
+stands.
+
 == Checks of the checks
 
 Each on a copy of the change, undone after.
