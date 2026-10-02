@@ -40,7 +40,7 @@ func TestRenderThumbnail(t *testing.T) {
 			src := windowImage(size.X, size.Y, int64(depth*size.X))
 			pixmap := newPixmap(t, conn, screen.Root, depth, size)
 			fillPixmap(t, conn, pixmap, depth, src)
-			got, err := x.thumbnail(pixmap, visual, size.X, size.Y)
+			got, err := x.thumbnail(pixmap, visual, depth, image.Rectangle{Max: size})
 			xproto.FreePixmap(conn, pixmap)
 			if err != nil {
 				t.Fatalf("depth %d, %v: %v", depth, size, err)

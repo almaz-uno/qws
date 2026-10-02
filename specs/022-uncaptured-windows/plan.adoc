@@ -44,10 +44,11 @@ since a frame of a new size has a new pixmap.
 
 | `pkg/snapshot/xrender.go`
 | `thumbnail` of a rectangle of the pixmap, copied first when not at its
-  corner.
+  corner; `pixmapRect` of `snapshot.go` gives it.
 
-| `pkg/snapshot/frame_test.go`
-| New: `TestCaptureFromFrame`, `BenchmarkFrameRender`.
+| `pkg/snapshot/frame_test.go`, `pkg/snapshot/xrender_test.go`
+| New: `TestCaptureFromFrame`, `BenchmarkFrameRender`; the call of
+  `TestRenderThumbnail` with the rectangle of its pixmap.
 |===
 
 Kept away from the `Init` calls of `initX`, which specification 021 changes
