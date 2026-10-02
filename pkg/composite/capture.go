@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 
+	"github.com/almaz-uno/qws/pkg/x11"
 	"github.com/jezek/xgb"
 	"github.com/jezek/xgb/composite"
 	"github.com/jezek/xgb/shm"
@@ -30,13 +31,12 @@ type Capturer struct {
 	scalingAlgorithm ScalingAlgorithm
 }
 
-// NewCapturer creates a new thumbnail capturer.
-// It initializes the XComposite extension.
+// NewCapturer creates a new thumbnail capturer on a connection of
+// x11.NewConn, with its extensions set up (specs/021-xgb-extension-init).
 // scalingAlgorithm: "nearest" (fast), "bilinear" (balanced), "catmull-rom" (quality)
 func NewCapturer(conn *xgb.Conn, root xproto.Window, scalingAlgorithm string) (*Capturer, error) {
-	// Initialize composite extension
-	if err := composite.Init(conn); err != nil {
-		return nil, fmt.Errorf("failed to initialize Composite extension: %w", err)
+	if err := x11.CheckExtension(conn, "Composite"); err != nil {
+		return nil, fmt.Errorf("Composite: %w", err)
 	}
 
 	// Query composite version
@@ -51,9 +51,9 @@ func NewCapturer(conn *xgb.Conn, root xproto.Window, scalingAlgorithm string) (*
 			version.MajorVersion, version.MinorVersion)
 	}
 
-	// Try to initialize SHM extension
+	// SHM, when the X server has it
 	shmAvailable := false
-	if err := shm.Init(conn); err == nil {
+	if err := x11.CheckExtension(conn, "MIT-SHM"); err == nil {
 		// Query SHM version to verify it's available
 		if _, err := shm.QueryVersion(conn).Reply(); err == nil {
 			shmAvailable = true

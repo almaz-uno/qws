@@ -1,0 +1,222 @@
+= 021 — research
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-02
+
+Facts the specification rests on, 2026-10-02, `develop` at `759c6d3`
+(1.3.2), xgb 1.3.1, Go 1.26.0. E1: ws1, Intel Core i9-7920X (12 cores, 24
+threads), NVIDIA, driver 580.105.08, Xorg 21.1.7, i3, picom 9.1
+`--backend glx --vsync`, two monitors of 2560×1440, DP-0 and DP-4; the
+service of the author ran. The probes are outside the repository, in
+`~/.cache/qws-probe-xgb` on ws1.
+
+== The tables of xgb
+
+The code of xgb 1.3.1:
+
+* `xgb.go:194–226`: `NewEventFuncs` and `NewErrorFuncs`, `map[int]` of the
+  constructors of events and errors by their number, and
+  `NewExtEventFuncs`, `NewExtErrorFuncs`, the constructors of each
+  extension by its own numbering, filled by the `init` of the extension's
+  package. All four are variables of the package: one for the process.
+* `(*Conn).readResponses`, the reader goroutine of a connection, started by
+  `NewConn`: `NewErrorFuncs[int(buf[1])]` for every error (`xgb.go:519`),
+  `NewEventFuncs[evNum]` for every event (`xgb.go:557`), with no lock.
+* The `Init` of every extension package, `damage.Init` for one: it asks
+  `QueryExtension`, sets `c.Extensions[name]` under `c.ExtLock`, then
+  writes the constructors of the extension into `NewEventFuncs` at
+  `FirstEvent + n` and into `NewErrorFuncs` at `FirstError + n`, with no
+  lock, whichever connection it was given. `c.ExtLock`, "a lock used
+  whenever new extensions are initialized", guards `c.Extensions` of the
+  connection alone; BurntSushi/xgb#34, "Read/Write mutex for Extensions
+  map", added it for that map only.
+* The documentation of each package says "Init must be called before using
+  the RANDR extension", nothing of the tables.
+
+The extensions qws uses, from their packages, and their numbers on E1, from
+`xdpyinfo -queryExtensions`:
+
+[cols="2,1,1,1,1,1",options="header"]
+|===
+| Extension | Events | Errors | Opcode | First event | First error
+
+| Composite | 0 | 0 | 142 | — | —
+| DAMAGE | 1 | 1 | 143 | 91 | 152
+| MIT-SHM | 1 | 1 | 130 | 65 | 128
+| RANDR | 2 | 4 | 140 | 89 | 147
+| RENDER | 0 | 5 | 139 | — | 142
+| XFIXES | 2 | 1 | 138 | 87 | 140
+|===
+
+Go checks a map read against a write in progress: the write marks the map,
+the read finds the mark and the runtime ends the process with "concurrent
+map read and map write" — `internal/runtime/maps.fatal` in the stack below.
+A fatal error, not a panic: `recover` does not catch it. The mark is set by
+any assignment, the same value at the same key too: an `Init` run again on
+a connection writes the map again. The check sees only an overlap in time;
+the race detector sees any two accesses that happens-before does not order.
+
+No issue of `jezek/xgb` is about the tables (its issues and pull requests,
+2026-10-02).
+
+== Where qws initialised extensions
+
+`cmd/qws/root.go` makes, in this order: the main connection
+(`x11.Connect`); the snapshotter (`snapshot.New`), with a connection of its
+own; without it, the capturer of 1.0.0 on the main connection; the window
+model (`x11.NewModel`), with a connection of its own; the focus watcher,
+which selects the property changes of the root on the main connection; the
+key grabs; then the loop of events, and the activations. The calls of
+`Init` on `develop`:
+
+[cols="3,2,3,4",options="header"]
+|===
+| Call | Connection | When | Reading events meanwhile
+
+| `x11.GetMonitors`: `randr.Init`
+| main
+| every activation: `Selector.Show`, and `ui.NewSelector` at the first
+| the snapshotter's — DAMAGE of every viewable window that changes, the
+  structure of the windows, the root's properties; the model's — the
+  properties of the client windows and of the root; the main one — keys,
+  the root's properties, the overlay's events
+
+| snapshotter, `initX`: `composite.Init`, `xfixes.Init`, `damage.Init`
+| snapshotter's
+| start
+| none selected yet
+
+| snapshotter, `initX` → `composite.NewCapturer`: `composite.Init`,
+  `shm.Init`
+| snapshotter's
+| start, after it selected the property changes of the root
+| the snapshotter's own: the root's properties
+
+| snapshotter, loop → `newXRender`: `render.Init`, `shm.Init`
+| snapshotter's
+| start, before the first reconciliation
+| the snapshotter's own: the root's properties, the switchers of other
+  instances
+
+| `root.go`, without the snapshotter: `composite.NewCapturer`:
+  `composite.Init`, `shm.Init`
+| main
+| start
+| none selected yet
+|===
+
+The activation is where the crash was seen: a window that changes every
+20 ms sends DAMAGE to the snapshotter's connection all along. The start has
+a race of the same kind, rarer: four `Init` while the root's properties may
+change. Before 1.1.0, with one connection, `randr.Init` at an activation
+raced the reader of that same connection.
+
+== Reproduction
+
+`TestMonitorsUnderEvents` (`pkg/x11/extensions_test.go`, committed with the
+change): a connection of `x11.Connect` calls `GetMonitors` again and again
+for a second, while a second connection, of `xgb.NewConn`, sends
+ClientMessages with an empty event mask to an unmapped InputOnly window of
+its own at −100,−100 — "If the event-mask is the empty set, then the event
+is sent to the client that created the destination window" (X11 protocol,
+SendEvent), no other client sees them — and reads them. On `develop` with
+only the test file added (run T-before of the specification), the binary of
+`go test -c ./pkg/x11`, run 20 times: 18 ended with
+
+----
+fatal error: concurrent map read and map write
+
+goroutine 21 [running]:
+internal/runtime/maps.fatal({0x66fea2?, 0x0?})
+	.../src/runtime/panic.go:1181 +0x18
+github.com/jezek/xgb.(*Conn).readResponses(0x111392d32000)
+	.../github.com/jezek/xgb@v1.3.1/xgb.go:557 +0x2e5
+created by github.com/jezek/xgb.postNewConn in goroutine 8
+	.../github.com/jezek/xgb@v1.3.1/xgb.go:159 +0x2e5
+----
+
+— the stack of issue #61 — 0.01–0.87 s after the binary started, a median
+of 0.09 s; two passed, with 246 and 333 calls of `GetMonitors` and 252 748
+and 242 778 events read in their second. A first version of the test, the
+same flood and loop with a cleanup of its own, crashed in 25 runs of 26.
+Built with `-race`, 9 runs of 9 failed with "race detected during
+execution of test", each on one race: the write of `randr.Init`
+(`randr/randr.go:27`, from `pkg/x11/randr.go:25`) and the read of
+`readResponses` (`xgb.go:557`), in one order or the other; 531–757 calls
+and 68 325–72 144 events in the second.
+
+The second costs the X server a core: `utime` + `stime` of Xorg, from
+`/proc/<pid>/stat`, grew by 0.98–0.99 s in each run that passed. A paced
+flood (`paced_flood_test.go` in the probes, `FLOOD_PER_MS` ClientMessages a
+millisecond) spares it little and loses the crash: `GetMonitors` then runs
+2 100–3 100 times a second instead of some 250, Xorg takes 0.6–0.75 s of
+CPU in the second all the same, and 4 runs of 10 crashed at 20 events a
+millisecond, 6 of 10 at 50. The test floods unpaced, for one second.
+
+== Designs
+
+Ways to write the tables once, before any connection reads events:
+
+[cols="3,5",options="header"]
+|===
+| Design | Why not, or why
+
+| `Init` of each extension once, on the first connection, before it
+  selects any event
+| Its reader runs while `Init` writes. The X server sends MappingNotify to
+  every client, whatever it selected, when the keyboard mapping changes —
+  "The X server reports MappingNotify events to all clients. There is no
+  mechanism to express disinterest in this event." (Xlib, chapter 10) — as
+  when a session starts and sets its keyboard up, the moment the service
+  starts. And the guarantee would rest on the order of `root.go`.
+
+| A lock of qws around `Init`
+| The reader is xgb's goroutine and takes no lock of qws.
+
+| A patched xgb: a lock in `readResponses` and `Init`, or tables per
+  connection
+| A fork, or a `replace`, to carry through every update of xgb (012);
+  nothing upstream to take it.
+
+| *The setup on a connection of its own, closed before the writes*
+| *Chosen.* No reader of any connection runs while the tables are written:
+  the setup's connection has ended, and every other is made after.
+|===
+
+Why no reader can see the tables being written (the Go memory model,
+https://go.dev/ref/mem): the last act of the reader of xgb 1.3.1 is to
+close its channel of events (`defer close(c.eventChan)`), or to send a
+read error on it and then close it; every read of the tables by that
+reader comes before that act, which is synchronized before the receive of
+`WaitForEvent` that returns neither an event nor an error. The setup drains
+`WaitForEvent` to that receive after `Close`, then writes. `sync.OnceValues`
+returns to every caller once the setup has returned, and every later
+connection starts its reader by a `go` statement in `xgb.NewConn` after
+that. A connection made with `xgb.NewConn` before the first `x11.NewConn`
+would break this; qws makes none.
+
+The setup costs a connection: the first `x11.NewConn` took 0.87–1.45 ms,
+a later one 0.28–0.40 ms, `xgb.NewConn` 0.26–0.45 ms — the three in turn
+in a test of the package, run 5 times, with the change. It saves a round
+trip per `Init`: seven at the start of the snapshotter, one or two at each
+activation.
+
+== After the change
+
+T-after, the binaries built from `b510741` in a clean worktree: 20 runs of
+20 passed, with 199–432 calls of `GetMonitors` and 221 649–261 938 events
+read in the second, Xorg's CPU 0.97–1.02 s a run; built with `-race`, 5 of
+5 passed with no race, 1 352–1 759 calls and 97 022–106 529 events.
+
+== The same tables
+
+`tables_test.go` of the probes, copied into `pkg/x11` of `b510741` and run
+alone (`go test -count=1 -run TestTables -v ./pkg/x11`): the maps as
+numbers and the addresses of their constructors, before the first
+`x11.NewConn`, after it, and after `composite.Init`, `damage.Init`,
+`randr.Init`, `render.Init`, `shm.Init` and `xfixes.Init` run on its
+connection. The setup added the events 65 and 87–91 and the errors 128,
+140, 142–150 and 152 — 34 events and 17 errors before it, 40 and 29 after
+— and gave the connection the opcodes of `xdpyinfo`; the six `Init` changed
+neither map, a number or a constructor.

@@ -74,7 +74,7 @@ func (x xserver) watch(w xproto.Window) error {
 // NewModel connects to the X server and reads every client window. It fails
 // without an X server; the caller then collects the list at each activation.
 func NewModel() (*Model, error) {
-	conn, err := xgb.NewConn()
+	conn, err := NewConn()
 	if err != nil {
 		return nil, fmt.Errorf("model: %w", err)
 	}

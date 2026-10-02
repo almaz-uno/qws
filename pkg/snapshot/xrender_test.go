@@ -5,7 +5,7 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/jezek/xgb"
+	"github.com/almaz-uno/qws/pkg/x11"
 	"github.com/jezek/xgb/xproto"
 )
 
@@ -19,7 +19,7 @@ import (
 // halved on one side only, or not at all. Needs an X display with RENDER and
 // MIT-SHM, not a GPU or a compositor: the pixmaps are made here.
 func TestRenderThumbnail(t *testing.T) {
-	conn, err := xgb.NewConn()
+	conn, err := x11.NewConn()
 	if err != nil {
 		t.Skipf("no X display: %v", err)
 	}
@@ -40,7 +40,7 @@ func TestRenderThumbnail(t *testing.T) {
 			src := windowImage(size.X, size.Y, int64(depth*size.X))
 			pixmap := newPixmap(t, conn, screen.Root, depth, size)
 			fillPixmap(t, conn, pixmap, depth, src)
-			got, err := x.thumbnail(pixmap, visual, size.X, size.Y)
+			got, err := x.thumbnail(pixmap, visual, depth, image.Rectangle{Max: size})
 			xproto.FreePixmap(conn, pixmap)
 			if err != nil {
 				t.Fatalf("depth %d, %v: %v", depth, size, err)

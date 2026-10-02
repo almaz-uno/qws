@@ -1,0 +1,68 @@
+= 021 — plan
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-02
+
+== Approach
+
+A file of its own in `pkg/x11`, `extensions.go`: the names of the six
+extensions; `setupExtensions`, which asks for them on a connection of its
+own, closes it, drains its events to the end of its reader and writes the
+tables; `NewConn`, which runs the setup once (`sync.OnceValues`), then
+connects as `xgb.NewConn` does and copies the major opcodes into the new
+connection's `Extensions` under its `ExtLock`; `CheckExtension`, which
+reports an extension absent from a connection's `Extensions`. The file
+imports the six packages of xgb for the `init` that fills their
+`NewExtEventFuncs` and `NewExtErrorFuncs`.
+
+Every `xgb.NewConn` of the program becomes `x11.NewConn`, and every `Init`
+a `CheckExtension` of the same extension, before the version query that
+follows it as now. `pkg/composite` imports `pkg/x11` for it; `pkg/x11`
+imports neither `pkg/composite` nor `pkg/snapshot`.
+
+At the start, with the change: `x11.Connect` makes the first connection,
+so the setup runs inside it, before the main connection and every other
+exists; `snapshot.New`, the capturer of 1.0.0 and `x11.NewModel` find the
+extensions set up. `cmd/qws/root.go` does not change.
+
+== Files
+
+[cols="2,5"]
+|===
+| File | What changes
+
+| `pkg/x11/extensions.go`
+| New: the setup, `NewConn`, `CheckExtension`.
+
+| `pkg/x11/extensions_test.go`
+| New: `TestMonitorsUnderEvents` (K1).
+
+| `pkg/x11/conn.go`, `pkg/x11/model.go`
+| `Connect` and `NewModel` connect through `NewConn`.
+
+| `pkg/x11/randr.go`
+| `GetMonitors` checks RANDR instead of `randr.Init`; its version query
+  and the queries of the monitors stay.
+
+| `pkg/snapshot/snapshot.go`
+| `New` connects through `x11.NewConn`; `initX` checks Composite, XFIXES
+  and DAMAGE.
+
+| `pkg/snapshot/xrender.go`
+| `newXRender` checks RENDER and MIT-SHM.
+
+| `pkg/snapshot/xrender_test.go`
+| `TestRenderThumbnail` connects through `x11.NewConn`: `newXRender` no
+  longer sets RENDER up on a connection of its own.
+
+| `pkg/composite/capture.go`
+| `NewCapturer` checks Composite and MIT-SHM.
+|===
+
+== Preserved
+
+The version queries — Composite 0.4, XFIXES 5.0, DAMAGE 1.1, RENDER 0.11,
+MIT-SHM, RandR 1.3 — and what each part falls back to when one fails; the
+connections and their order; the console programs, of which only
+`capture` uses an extension, through `x11.Connect`.

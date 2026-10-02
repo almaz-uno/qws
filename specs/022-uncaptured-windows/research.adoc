@@ -1,0 +1,136 @@
+= 022 — research
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-02
+
+Facts the specification rests on, 2026-10-02, `develop` at `759c6d3`
+(1.3.2), E1: ws1 — NVIDIA GeForce RTX 4080 SUPER, driver 580.105.08,
+Debian 12, Xorg 21.1.7, picom 9.1 `--backend glx`, i3. The author's desktop
+in use and the service of 1.3.2 running. Nothing was drawn on the screen and
+no window of the author's touched but by reading its attributes. The probe
+is outside the repository, in `~/.cache/qws-probe-capture` on ws1:
+`main.go`, built with `go build -o capprobe .`, its output `run-2.txt`.
+
+== What the code does
+
+`pkg/snapshot/snapshot.go` of 1.3.2:
+
+* `follow` selects the structure events of a client window of
+  `_NET_CLIENT_LIST`, makes a DAMAGE object of it, `ReportLevelNonEmpty`,
+  and follows the map state of its parent when that is not the root: the
+  frame of i3. `viewable` is the window mapped and its frame mapped.
+  `reconcile` follows the windows that appear in the list later. A floating
+  window of i3 has a frame of its own, a child of the root, as a tiled one.
+* `captureGPU` of a stale window names its pixmap with
+  `NameWindowPixmap`; a failure is wrapped as `errNotViewable`, "the X
+  server would not name the window's pixmap — it is not viewable after all,
+  as while i3 switches workspaces".
+* `capture` on `errNotViewable` returns without a snapshot and without a
+  record: the window is tried again a settle later, three times, and then
+  at its next change, which DAMAGE reports. No path of 018 or of the CPU is
+  tried.
+
+== The probe
+
+`capprobe`: windows of its own off every monitor — a frame, an
+override-redirect child of the root at −3000,−3000, which picom redirects as
+it redirects the frames of i3; in it a client window of 600×400; in that a
+child of the same client (as the VT100 widget of xterm) and one of another
+connection (as the child of Dion, of another client). From a third
+connection, as the snapshotter: `NameWindowPixmap` of the frame and of the
+client window, and DAMAGE (`ReportLevelNonEmpty`) of the client window when
+each child is drawn into, after a `Subtract`. Each case in a frame of its
+own. The visuals of ws1: the default 0x21 of depth 24, 44 TrueColor visuals
+of depth 24 and 44 of depth 32, the first of these 0x23, which the frames
+of i3 of a window of depth 32 have.
+
+[cols="4,2,2,2",options="header"]
+|===
+| Client window in its frame | Frame named | Window named | Its damage on drawing into a child
+
+| depth 24, the frame's visual — xterm, Dion, Yandex Music
+| yes | BadMatch | yes, either client
+| depth 24, another visual than the frame's — KeePassXC, Telegram
+| yes | BadMatch | yes, either client
+| depth 32, in a frame of depth 24
+| yes | named | yes, either client
+| depth 32, the frame's visual of depth 32
+| yes | BadMatch | yes, either client
+| depth 32, another visual than the frame's 0x23 — GTK, Electron on i3
+| yes | named | yes, either client
+|===
+
+The X server redirects a window on its own — and gives it a pixmap — when
+its visual differs from its parent's and one of the two is the ARGB visual
+of Composite (`compImplicitRedirect` of the X server); two visuals of depth
+24 that differ do not count. A window not redirected is drawn into the
+pixmap of its nearest redirected ancestor, its frame, and
+`NameWindowPixmap` of it answers BadMatch — as it does for a window not
+viewable, so 008 could not tell the two apart. DAMAGE of a client window
+reports drawing into its children in every case.
+
+== On E1
+
+The client windows of `_NET_CLIENT_LIST`, read by `xwininfo` and
+`xprop`:
+
+[cols="2,1,2,2",options="header"]
+|===
+| Windows | Depth | Visual | Frame's visual
+
+| Dion, Yandex Music | 24 | 0x21 | 0x21
+| KeePassXC, Telegram | 24 | 0x27 | 0x21
+| VS Code (5), Chrome (9), mate-terminal (16), Claude | 32 | 0x82 | 0x23
+|===
+
+4 of 35 windows have no pixmap of their own. In the 18 runs of S5 of 020,
+`~/.cache/qws-runs/20261002-1427-020/s5-*/log.json`, whose warm-up shows
+every window of i3 in turn, 31 windows have records "Snapshot" — all of
+depth 32 — and none of the four, nor the xterm of S5: depth 24, the
+default visual, its VT100 widget a child of its own.
+
+== The frame's pixmap
+
+* It is the compositor's: picom binds the pixmaps of the frames on the GPU,
+  and NVIDIA refuses a second GLX pixmap of a storage, 11 on 152.22, while
+  the first lives (research of 018, "The refusal"). Bound by qws first —
+  picom restarted — it would refuse picom.
+* It holds the frame's border and its decoration; the client window lies in
+  it at its offset from the frame's origin, `TranslateCoordinates`, plus the
+  frame's border. i3 gives the frame no border and the client window none.
+* i3 sends a client window synthetic ConfigureNotify events in root
+  coordinates (ICCCM, 4.1.5), which the snapshotter receives with the real
+  ones, as it selects the structure of the window.
+
+== The change off the screen
+
+2026-10-02, the branch at `6ed3123`. `TestCaptureFromFrame`
+(`go test -run TestCaptureFromFrame -v ./pkg/snapshot`): windows of 800×500
+off the screen, their picture `windowImage` in a child that covers them,
+drawn twice:
+
+[cols="4,2,2",options="header"]
+|===
+| Client window | Taken | Mean / worst from the area average
+
+| depth 24, the frame's visual, a child of another client
+| RENDER, from the frame | 0.680, 0.675 / 93
+| depth 24, the frame's visual, a child of its own
+| RENDER, from the frame | 0.508, 0.682 / 92–93
+| depth 24, another visual
+| RENDER, from the frame | 0.671, 0.566 / 92
+| depth 24, in a window of its frame's visual inside the frame
+| RENDER, from the frame | 0.643, 0.687 / 92–93
+| depth 32 ARGB, in a frame of depth 24
+| GPU, its own pixmap | 0.001 / 1
+|===
+
+The worst pixels are the 1-pixel strokes of the picture, which RENDER's
+halving blurs as in 018; its bound there is the mean.
+
+`BenchmarkFrameRender` (`go test -run '^$' -bench FrameRender -benchtime
+200x ./pkg/snapshot`), a window of 2556×1357 at 2,22 in a frame of
+2560×1381, three runs: a capture — the offset asked, the rectangle copied,
+the passes, the read back — 1.01–1.06 ms at p50, 1.44–1.55 ms at p95; RENDER
+from a window's own pixmap took 1.64 ms at p50 on the desktop of E1 in 018.

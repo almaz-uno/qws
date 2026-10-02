@@ -1,0 +1,60 @@
+= 022 — plan
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-02
+
+The plan of the options recommended in the specification; should the author
+choose others, it is written again.
+
+== Approach
+
+*Naming.* `captureGPU` of a stale window asks `namePixmap`: the window's own
+pixmap, as now; on a refusal, the window's attributes — not viewable, then
+`errNotViewable` as now; viewable, the parents up to the root, `QueryTree`,
+the first whose pixmap `NameWindowPixmap` names. The window keeps the
+ancestor (`via`) and the ancestor's visual (`pixVisual`), and `captureGPU`
+returns `errNotBound` without binding: `capture` takes it by RENDER, as a
+window the GPU refused. No ancestor: `errNotRedirected`, and `capture` takes
+the window on the CPU, through `composite.Capturer`, whose direct
+`GetImage` of the window includes its children.
+
+*RENDER from a rectangle.* `xrender.thumbnail` takes the rectangle of the
+window in the pixmap. Where it does not start at the pixmap's corner, it is
+copied first, `CopyArea`, into a pixmap of the window's size and depth: the
+passes of 018 then pad at the window's own edges, not with the frame's
+decoration around it. The offset is asked at each capture,
+`TranslateCoordinates` of the window to the ancestor, plus the ancestor's
+border.
+
+*Named anew.* A map or an unmap of the window or of its frame makes it
+stale, as now; and a ConfigureNotify of the frame the window is taken from,
+since a frame of a new size has a new pixmap.
+
+== Files
+
+[cols="2,5"]
+|===
+| File | What changes
+
+| `pkg/snapshot/snapshot.go`
+| `namePixmap`; the fields `via`, `pixVisual`, `pixDepth`; `errNotRedirected`;
+  `capture` passes the rectangle to RENDER and logs `via`; a ConfigureNotify
+  of the frame names the pixmap anew.
+
+| `pkg/snapshot/xrender.go`
+| `thumbnail` of a rectangle of the pixmap, copied first when not at its
+  corner; `pixmapRect` of `snapshot.go` gives it.
+
+| `pkg/snapshot/frame_test.go`, `pkg/snapshot/xrender_test.go`
+| New: `TestCaptureFromFrame`, `BenchmarkFrameRender`; the call of
+  `TestRenderThumbnail` with the rectangle of its pixmap.
+|===
+
+Kept away from the `Init` calls of `initX`, which specification 021 changes
+on its own branch.
+
+== Order
+
+The probe and the specification; the change with its test, which fails
+before it; the benchmark; scenario E on E1, by the author.

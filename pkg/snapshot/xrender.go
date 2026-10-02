@@ -6,6 +6,7 @@ import (
 	"image"
 	"math"
 
+	"github.com/almaz-uno/qws/pkg/x11"
 	"github.com/jezek/xgb"
 	"github.com/jezek/xgb/render"
 	"github.com/jezek/xgb/shm"
@@ -30,20 +31,20 @@ type xrender struct {
 
 const filterBilinear = "bilinear"
 
-// newXRender sets up RENDER and MIT-SHM on the connection; an error without
-// them
+// newXRender sets up the RENDER path on a connection of x11.NewConn; an error
+// without RENDER or MIT-SHM
 func newXRender(conn *xgb.Conn, root xproto.Window) (*xrender, error) {
 	// The pixels are read as the bytes of a little-endian a8r8g8b8: BGRA
 	if xproto.Setup(conn).ImageByteOrder != xproto.ImageOrderLSBFirst {
 		return nil, errors.New("RENDER: images of the X server are not LSBFirst")
 	}
-	if err := render.Init(conn); err != nil {
+	if err := x11.CheckExtension(conn, "RENDER"); err != nil {
 		return nil, fmt.Errorf("RENDER: %w", err)
 	}
 	if _, err := render.QueryVersion(conn, 0, 11).Reply(); err != nil {
 		return nil, fmt.Errorf("RENDER: %w", err)
 	}
-	if err := shm.Init(conn); err != nil {
+	if err := x11.CheckExtension(conn, "MIT-SHM"); err != nil {
 		return nil, fmt.Errorf("MIT-SHM: %w", err)
 	}
 	if _, err := shm.QueryVersion(conn).Reply(); err != nil {
@@ -100,13 +101,17 @@ func (x *xrender) close() {
 	unix.SysvShmDetach(x.shm)
 }
 
-// thumbnail scales the pixmap of a window of w×h and the visual into its
-// thumbnail and reads it back
-func (x *xrender) thumbnail(pixmap xproto.Pixmap, visual xproto.Visualid, w, h int) (*image.RGBA, error) {
+// thumbnail scales the rectangle r of a pixmap of the visual and the depth —
+// a window, at r — into its thumbnail and reads it back. A rectangle not at
+// the pixmap's corner — a window in its frame's pixmap — is copied first
+// into a pixmap of its own, so that the passes pad at its edges, not with the
+// frame around it (specs/022-uncaptured-windows).
+func (x *xrender) thumbnail(pixmap xproto.Pixmap, visual xproto.Visualid, depth int, r image.Rectangle) (*image.RGBA, error) {
 	format, ok := x.formats[visual]
 	if !ok {
 		return nil, fmt.Errorf("RENDER: no picture format for visual 0x%x", visual)
 	}
+	w, h := r.Dx(), r.Dy()
 	tw, th := thumbSize(w, h)
 
 	var pictures []render.Picture
@@ -131,6 +136,23 @@ func (x *xrender) thumbnail(pixmap xproto.Pixmap, visual xproto.Visualid, w, h i
 		return p, nil
 	}
 
+	if r.Min != (image.Point{}) {
+		window, err := xproto.NewPixmapId(x.conn)
+		if err != nil {
+			return nil, err
+		}
+		xproto.CreatePixmap(x.conn, byte(depth), window, xproto.Drawable(x.root), uint16(w), uint16(h))
+		pixmaps = append(pixmaps, window)
+		gc, err := xproto.NewGcontextId(x.conn)
+		if err != nil {
+			return nil, err
+		}
+		xproto.CreateGC(x.conn, gc, xproto.Drawable(window), 0, nil)
+		xproto.CopyArea(x.conn, xproto.Drawable(pixmap), xproto.Drawable(window), gc,
+			int16(r.Min.X), int16(r.Min.Y), 0, 0, uint16(w), uint16(h))
+		xproto.FreeGC(x.conn, gc)
+		pixmap = window
+	}
 	src, err := picture(xproto.Drawable(pixmap), format)
 	if err != nil {
 		return nil, err
