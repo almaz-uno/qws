@@ -1,0 +1,165 @@
+= 020 — plan
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-02
+
+The plan of the options recommended in the specification; should the author
+choose others, it is written again.
+
+== Approach
+
+*One owner, one share group.* The snapshotter keeps owning the windows'
+pixmaps, their GLX pixmaps and their textures, as since 008. The presenter's
+context is created with the snapshotter's as its share context, so that the
+textures the snapshotter writes — and the fences after them — are objects of
+the presenter's context too (research, "Sharing"). Nothing else crosses: the
+presenter never binds a pixmap and never touches a window texture.
+
+*Live textures.* Each window the snapshotter has averaged on the GPU gets
+two thumbnail textures of the size of its snapshot, written in turn, with a
+framebuffer each. A snapshot of 008 is averaged into the next of them and
+read back from it, as now from the one target all windows share; a live
+pass averages into it and makes a fence, without the read back. A pass
+writes the texture of the two the presenter is not drawing, and waits
+first, on the GPU, for a fence of the frames the presenter has presented
+so far — as the uploads of 013 waited for a texture the presenter had
+drawn. A generation number counts the pictures of a window, so that the
+selector can tell a live texture newer than the snapshot a card was drawn
+from.
+
+*The live schedule.* Between `SetLive(overlay)`, which the selector calls
+when it maps its overlay, and `SetLive(0)`, when it unmaps it at the end of
+the fade-out, the loop of the snapshotter takes the windows that changed in
+the order they first changed, each at most once a `live_interval`, without
+the settle of 100 ms. One window a pass, the passes spread: a pass no
+sooner than the `live_interval` divided by the number of windows waiting
+after the one before it — the `spread` of the probe — each followed by a
+fence and a flush; the presenter tests the fence and never waits for it.
+After a pass the snapshotter tells the selector (below).
+
+*The pause of 011.* Without #35 merged, `SetLive` replaces `Pause` around
+an activation with `live: true` on `glx`. With it, the snapshotter is
+paused by the overlays of `_QWS_SWITCHERS` other than the one `SetLive`
+gave it — `Switchers.Shown` gets a window to leave out — and its own
+`paused` is not set while live; with `live: false` the code of #35 is kept
+as it is.
+
+*Drawing.* The selector knows where each thumbnail lies: the geometry of a
+card at its offset — integer at rest, fractional in a step — and of a tile.
+It gives the presenter a list of live items, each a texture, its fence, the
+matrix the CPU draws the thumbnail under, the live rectangle and, for a
+tile, the rectangle of its icon; the presenter draws them after every frame
+it presents — the frame at rest, a scene, a frame of a fade — through the
+fade of that frame. A program of its own computes, for each pixel of a
+live rectangle, the kernel of `x/image/draw` `BiLinear` at the point
+the inverse of the matrix maps the pixel's centre to: a tent of support 1
+widened to the scale when shrinking, the weights normalized, summed in 16
+bits a channel and truncated, as `transform_RGBA_RGBA_Src` does —
+`~/.cache/qws-probe-live/kernel` on ws1 is that program, in single
+precision. The same program draws the live items of frames in motion, at
+the card's place and scale of the frame. A texture is drawn once its fence
+has signalled, tested with `glClientWaitSync` at timeout 0; until then the
+one before it.
+
+*Waking at rest.* At rest the selector waits in `WaitForEvent` of its own
+connection. Once the fence of a pass has signalled — the snapshotter waits
+for it on its own thread — the snapshotter sends the overlay window a
+`ClientMessage` of the atom `_QWS_LIVE` through its own connection, at most
+one a refresh period; the selector reads it as any event and presents the
+frame shown with the live items over it. No goroutine reads the selector's
+connection, and the order of its events is kept.
+
+== Files
+
+[cols="2,5"]
+|===
+| File | What changes
+
+| `pkg/glx/glx_linux.go`, `pkg/glx/pixmap_linux.go`
+| `NewContext` takes an optional context to share with; `Offscreen` gives
+  its context for that, as an opaque handle. A failure to share is told
+  apart from a failure to create.
+
+| `pkg/snapshot/gpu.go`
+| The thumbnail drawn into a texture the caller gives, read back or not.
+
+| `pkg/snapshot/live.go`
+| New: the live textures of a window, their generation and fences; the
+  live schedule; `SetLive`, `Live(window)`; the `ClientMessage`; the records
+  "Live".
+
+| `pkg/snapshot/snapshot.go`, `pkg/snapshot/schedule.go`
+| The loop runs the live schedule while live; `Pause` stays for `live:
+  false`. After #35: `pausedNow` leaves the own overlay out of `Shown`
+  while live.
+
+| `pkg/x11/switchers.go` — after #35 only
+| `Shown` gets the window to leave out, 0 for none; `TestSwitchers` with
+  an overlay left out.
+
+| `pkg/carousel/factory.go`, `pkg/carousel/present_glx.go`
+| `NewBackend` takes the context to share with; the presenter says whether
+  it shares.
+
+| `pkg/carousel/present_glx_live.go`
+| New: the live items, their program, drawn after every frame presented;
+  a fence after each frame, for the passes to wait for.
+
+| `pkg/carousel/present.go`
+| `Animator.SetLiveItems(items []LiveItem)`; `LiveItem`.
+
+| `pkg/carousel/renderer-cpu.go`, `pkg/carousel/layers.go`
+| `CardThumbnail` and `GridThumbnail`: the matrix of a thumbnail, its live
+  rectangle and, for a tile, its icon's rectangle — from the geometry the
+  drawing already uses, so that the two cannot diverge.
+
+| `pkg/ui/live.go`
+| New: the live items of the layout shown, from the snapshotter's live
+  textures newer than the activation's snapshots; at rest the frame
+  presented again on `_QWS_LIVE`, no sooner than a period after the last.
+
+| `pkg/ui/selector.go`, `pkg/ui/animation.go`, `pkg/ui/timing.go`
+| `SetLive` of the snapshotter when the overlay is mapped and unmapped; the
+  live items set before each frame; the event; the field `live` of the
+  frame records.
+
+| `cmd/qws/root.go`
+| The snapshotter given to the selector, its context to the presenter; no
+  `Pause` with `live: true` on `glx`, `Pause` otherwise.
+
+| `internal/config/config.go`, `cmd/qws/root.go`
+| `appearance.thumbnail.live`, `appearance.thumbnail.live_interval`: the
+  defaults, the flags, the warning for a negative interval.
+
+| `config.yaml.example`, `doc/configuration.asciidoc`, `README.md`
+| The two keys; the README's "Live window thumbnails via XComposite" made
+  true.
+
+| `pkg/carousel/live_test.go`, `pkg/snapshot/live_test.go`,
+  `internal/config/config_test.go`, `cmd/qws/root_test.go`
+| `TestLiveThumbnails`, `TestSharedLive`, `TestLiveSchedule`,
+  `TestLiveFallback`, `TestThumbnailKeys`, the flags.
+
+| `specs/001-rendering-speed/measure.sh`
+| Session S5: the window that changes, `live` on and off in turn; the
+  summary of L.
+|===
+
+Reused: the area average of 008 and its test; the window texture and its
+binding again; the fences and the shared context of the patch of 013
+(`~/.cache/qws-013-upload-context.patch` on ws1), its X error handler for a
+display of its own; the geometry of `carouselCard`, `gridThumbnail` and
+`gridIconScale`; the fades of 007 and 010.
+
+Unchanged: the drawing of `cpu`, its frames and `testdata/scenes.json`; the
+layers of 007 and the heads of 019; the snapshots while hidden, their RENDER
+and CPU paths; `snapshot_interval`.
+
+== Order
+
+Sharing first (`pkg/glx`, K4), then the live textures and their schedule
+(`pkg/snapshot`, K5), the drawing (`pkg/carousel`, K3), the selector and
+the configuration (K6, K10), and last the sessions on E1 (K7–K9, K11), with
+`live` on and off in turn. Should #35 be merged first, `pkg/x11` comes with
+the schedule.
