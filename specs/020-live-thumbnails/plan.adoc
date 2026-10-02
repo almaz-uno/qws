@@ -68,21 +68,34 @@ gave it — `Switchers.Shown` gets a window to leave out — and its own
 as it is.
 
 *Drawing.* The selector knows where each thumbnail lies: the geometry of a
-card at its offset — integer at rest, fractional in a step — and of a tile.
-It gives the presenter a list of live items, each a texture, its fence, the
-matrix the CPU draws the thumbnail under, the live rectangle and, for a
-tile, the rectangle of its icon; the presenter draws them after every frame
-it presents — the frame at rest, a scene, a frame of a fade — through the
-fade of that frame. A program of its own computes, for each pixel of a
+card at its offset — integer at rest, fractional in a step — and of a tile
+(`CardLive`, `CarouselLive`, `GridLive` of `pkg/carousel/live.go`, from
+`carouselCard`, `gridThumbnail` and the matrices the drawing uses). A live
+item is a texture, the matrix the CPU draws the thumbnail under, the live
+rectangle and its holes: what is drawn over the thumbnail at rest. On a
+tile, the icon and the glyphs of the labels; on a card, what the cards
+drawn after it draw — their covers, rectangles that hold every pixel a
+card draws, as `drawWindowWithData` draws them, checked against it by
+`TestLiveCovers`. The border of a card is `2 / scale` px wide, not 2: `gg`
+strokes in pixels of the canvas. The selector gives the presenter the
+items of a frame at rest (`SetLiveItems`), drawn over the next frame that
+is not a scene, through its fade; a scene carries them among its items
+(`SceneItem.Live`): in the carousel each after its card and before the
+cards after it, in the grid after the tiles and before the frames. A
+program of its own computes, for each pixel of a
 live rectangle, the kernel of `x/image/draw` `BiLinear` at the point
 the inverse of the matrix maps the pixel's centre to: a tent of support 1
 widened to the scale when shrinking, the weights normalized, summed in 16
 bits a channel and truncated, as `transform_RGBA_RGBA_Src` does —
 `~/.cache/qws-probe-live/kernel` on ws1 is that program, in single
 precision. The same program draws the live items of frames in motion, at
-the card's place and scale of the frame. A texture is drawn once its fence
-has signalled, tested with `glClientWaitSync` at timeout 0; until then the
-one before it.
+the card's place and scale of the frame. The pictures are published once
+complete (above): the presenter tests no fence. It makes one before the
+swap of a frame that drew live pictures (`TakeLiveFence`), for the
+selector to give the snapshotter, and deletes the one it replaces
+(`ReleaseFence`). The presenter is a `LivePresenter`, apart from
+`Animator`, so that the presenters and the fakes of the animations stay as
+they are.
 
 *Waking at rest.* At rest the selector waits in `WaitForEvent` of its own
 connection. Once the fence of a pass has signalled — the snapshotter waits
@@ -123,19 +136,22 @@ connection, and the order of its events is kept.
 
 | `pkg/carousel/factory.go`, `pkg/carousel/present_glx.go`
 | `NewBackend` takes the context to share with; the presenter says whether
-  it shares.
+  it shares (`Live`), and draws the live items before each swap; the
+  fallback, said once at info level.
 
 | `pkg/carousel/present_glx_live.go`
-| New: the live items, their program, drawn after every frame presented;
-  a fence after each frame, for the passes to wait for.
+| New: the program of the kernel, the items drawn over a frame or in a
+  scene; a fence after each frame that drew one, for the passes to wait
+  for.
 
-| `pkg/carousel/present.go`
-| `Animator.SetLiveItems(items []LiveItem)`; `LiveItem`.
+| `pkg/carousel/present_glx_scene.go`, `pkg/carousel/present.go`
+| `SceneItem.Live`: a live item drawn at its place among the layers.
 
-| `pkg/carousel/renderer-cpu.go`, `pkg/carousel/layers.go`
-| `CardThumbnail` and `GridThumbnail`: the matrix of a thumbnail, its live
-  rectangle and, for a tile, its icon's rectangle — from the geometry the
-  drawing already uses, so that the two cannot diverge.
+| `pkg/carousel/live.go`
+| New: `LiveItem`, `LivePresenter`; `CardLive`, `CarouselLive` and
+  `GridLive`, the matrix of a thumbnail, its live rectangle and its holes —
+  from the geometry the drawing already uses, so that the two cannot
+  diverge.
 
 | `pkg/ui/live.go`
 | New: the live items of the layout shown, from the snapshotter's live
@@ -161,8 +177,9 @@ connection, and the order of its events is kept.
 
 | `pkg/carousel/live_test.go`, `pkg/snapshot/live_test.go`,
   `internal/config/config_test.go`, `cmd/qws/root_test.go`
-| `TestLiveThumbnails`, `TestSharedLive`, `TestLiveSchedule`,
-  `TestLiveFallback`, `TestThumbnailKeys`, the flags.
+| `TestLiveThumbnails`, `TestLiveCovers`, `TestLiveFallback`,
+  `BenchmarkLiveFrame`; `TestSharedLive`, `TestLiveSchedule`,
+  `BenchmarkLivePass`; `TestThumbnailKeys`, the flags.
 
 | `specs/001-rendering-speed/measure.sh`
 | Session S5: the window that changes, `live` on and off in turn; the

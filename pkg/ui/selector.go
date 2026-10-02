@@ -210,7 +210,7 @@ func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, window
 	}
 
 	// Initialize renderer and presenter
-	renderer, presenter, err := carousel.NewBackend(appearance.Renderer)
+	renderer, presenter, err := carousel.NewBackend(appearance.Renderer, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create renderer: %w", err)
 	}

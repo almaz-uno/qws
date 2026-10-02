@@ -118,4 +118,9 @@ type SceneItem struct {
 	RectA, RectB Rect
 	WeightB      float64
 	Alpha        float64
+
+	// Live, when set, is drawn in place of the layers: the live picture of
+	// the card drawn before it, under the cards after it
+	// (specs/020-live-thumbnails)
+	Live *LiveItem
 }

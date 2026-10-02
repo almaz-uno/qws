@@ -70,6 +70,7 @@ type glxPresenter struct {
 	texture   uint32
 	pbo       uint32 // pixel unpack buffer the frames are uploaded through
 	scene     sceneState
+	live      liveState
 
 	// The frame at rest of an animation, uploaded in parts before it is
 	// presented (specs/007-animation): the texture it goes into, the frame,
@@ -79,14 +80,34 @@ type glxPresenter struct {
 	stageNext, stageEnd int
 }
 
-// newGLXPresenter creates the GLX presenter; a variable, so that tests can make
-// the initialisation fail
+// newGLXPresenter creates the GLX presenter without live pictures; a
+// variable, so that tests can make the initialisation fail
 var newGLXPresenter = func() (Presenter, error) {
-	ctx, err := glx.NewContext(nil)
+	return newLivePresenter(nil)
+}
+
+// newGLXContext creates the presenter's GL context; a variable, so that a
+// test can make the sharing fail (specs/020-live-thumbnails)
+var newGLXContext = glx.NewContext
+
+// newLivePresenter creates the GLX presenter, its context sharing the objects
+// of share's, so that it draws the snapshotter's live pictures
+// (specs/020-live-thumbnails). Where the context cannot share them, it is
+// created without, and the live thumbnails are off: said once, at info level.
+func newLivePresenter(share *glx.Share) (Presenter, error) {
+	ctx, err := newGLXContext(share)
 	if err != nil {
 		return nil, err
 	}
-	return &glxPresenter{ctx: ctx}, nil
+	p := &glxPresenter{ctx: ctx}
+	if share != nil {
+		if err := ctx.ShareError(); err != nil {
+			log.Info().Err(err).Msg("Live thumbnails off: the presenter's GL context does not share the snapshots'")
+		} else {
+			p.live.on = true
+		}
+	}
+	return p, nil
 }
 
 func (p *glxPresenter) VisualID() xproto.Visualid {
@@ -152,6 +173,9 @@ func (p *glxPresenter) init() error {
 	if err := p.initScene(); err != nil {
 		return err
 	}
+	if err := p.initLive(); err != nil {
+		return err
+	}
 
 	// Core profile draws only with a vertex array bound, even without attributes
 	gl.GenVertexArrays(1, &p.vao)
@@ -182,18 +206,22 @@ func (p *glxPresenter) init() error {
 
 func (p *glxPresenter) Present(img *image.RGBA) error {
 	if err := p.draw(img); err != nil {
+		p.live.items = nil
 		return err
 	}
 	p.presented = true
+	p.drawLiveItems(Opaque)
 	p.swap()
 	return nil
 }
 
 func (p *glxPresenter) Refresh() (bool, error) {
 	if !p.presented {
+		p.live.items = nil
 		return false, nil
 	}
 	p.drawTexture(p.texture, Opaque)
+	p.drawLiveItems(Opaque)
 	p.swap()
 	return true, nil
 }
@@ -215,6 +243,15 @@ func (p *glxPresenter) drawTexture(texture uint32, f Fade) {
 }
 
 func (p *glxPresenter) swap() {
+	if p.live.drew {
+		// For the passes of the snapshotter that write what the frame drew;
+		// the swap flushes it
+		if p.live.fence != 0 {
+			gl.DeleteSync(p.live.fence)
+		}
+		p.live.fence = gl.FenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0)
+		p.live.drew = false
+	}
 	p.ctx.SwapBuffers(p.window)
 	if timingEnabled() {
 		// The end of presentation, P, of the frame timings: the swap returns
@@ -334,9 +371,11 @@ func (p *glxPresenter) StageFrame(img *image.RGBA, maxBytes int) (int, bool, err
 
 func (p *glxPresenter) PresentStaged(f Fade) error {
 	if err := p.drawStaged(f); err != nil {
+		p.live.items = nil
 		return err
 	}
 	p.presented = true
+	p.drawLiveItems(f)
 	p.swap()
 	return nil
 }
@@ -356,6 +395,7 @@ func (p *glxPresenter) drawStaged(f Fade) error {
 func (p *glxPresenter) Close() {
 	if p.ready {
 		p.closeScene()
+		p.closeLive()
 		gl.DeleteBuffers(1, &p.pbo)
 		gl.DeleteTextures(1, &p.texture)
 		gl.DeleteTextures(1, &p.stage)

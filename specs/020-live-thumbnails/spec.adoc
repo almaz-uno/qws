@@ -147,9 +147,14 @@ since its thumbnails move. *Recommended*, taken:
   rest the `cpu` frame byte for byte, in motion its scene of layers. The
   live rectangle of a window is the part of its thumbnail that is the
   thumbnail alone in the `cpu` frame: the pixels whose centres fall inside
-  the thumbnail, less those its border touches — 2 px in from the edge on
-  a card, 1 px on a tile — and less the rectangle of the icon of a tile,
-  which may lie over it (research, "Where a thumbnail lies"). A window has
+  the thumbnail, less those its border touches — 1 px in from the edge on
+  a tile; on a card the border is 2 px wide at the full size of its
+  thumbnail and wider as the card is smaller, 2 divided by the scale the
+  thumbnail is drawn at, since `gg` strokes in pixels of the canvas — and
+  less what is drawn over it: the rectangle of the icon of a tile, and the
+  glyphs of its labels where a large font takes them over the thumbnail;
+  what the cards drawn after a card draw over it, its neighbour's title
+  where long (research, "Where a thumbnail lies"). A window has
   a live rectangle only once it has changed since the snapshot its card was
   drawn from. So with live thumbnails off, or until a shown window
   changes, every frame at rest is the `cpu` frame byte for byte, as now.
@@ -163,9 +168,10 @@ since its thumbnails move. *Recommended*, taken:
   The thumbnail itself is the area average of 008, within 1 of the one
   computed on the CPU (K4 of 008).
 
-Checked on a scene of fixed content: windows of the test, off the screen,
-whose pixmaps hold known pictures (`TestGPUThumbnail` of 008 makes such
-pixmaps). Rejected: a tolerance over the whole frame, which would let any
+Checked on a scene of fixed content: pictures written in a context like
+the snapshotter's, drawn over frames of windows of the test off the
+screen; the passes that make the pictures from pixmaps of known contents
+are checked on their own (K4). Rejected: a tolerance over the whole frame, which would let any
 pixel drift; a frame at rest drawn on the CPU at each change, which is
 option b.
 
@@ -312,13 +318,13 @@ All of it on `glx` with `appearance.thumbnail.live: true`; otherwise as in
 . *Drawing.* A window whose live texture is newer than the snapshot its
   card or tile was drawn from has a live rectangle (D3). Every frame the
   presenter draws — the frame at rest, a scene of layers, a frame of a
-  fade — draws, after it, each live texture whose fence has signalled into
-  its live rectangle with the kernel of `cpu` (D3), through the fade of
-  the frame. A texture whose fence has not signalled is drawn as it was;
+  fade — draws, after it, each live picture published — its fence
+  signalled — into its live rectangle with the kernel of `cpu` (D3),
+  through the fade of the frame. A pass not yet published is not drawn;
   the presenter never waits for it. In a scene of the carousel the live
-  rectangle follows its card, at the card's place and scale in the frame;
-  in the grid it is drawn over the tiles and under the selection and the
-  hover frames.
+  rectangle follows its card, at the card's place and scale in the frame,
+  drawn after the card and before the cards after it; in the grid it is
+  drawn over the tiles and under the selection and the hover frames.
 . *At rest.* A pass makes the selector present a frame — the frame shown,
   with the live textures over it — no sooner than a refresh period after
   the frame before it.
@@ -372,10 +378,12 @@ Run with the carousel and with the grid, with `live: true` and with
   frames of 007 byte for byte.
 
 | K3
-| The live picture: `TestLiveThumbnails` in `pkg/carousel` — windows of
-  the test off the screen, of fixed pictures, averaged into live textures
-  and drawn over a carousel at rest at offsets 0 to 5 and over a grid of 36
-  with icons over thumbnails: outside the live rectangles the frame equals
+| The live picture: `TestLiveThumbnails` in `pkg/carousel` — pictures of
+  fixed content written in a context the presenter's shares, as the
+  snapshotter's, drawn over windows of the test off the screen, over a
+  carousel at rest at offsets 0 to 5 and over a grid of 36 with icons over
+  thumbnails, as a frame and as a scene: outside the live rectangles the
+  frame equals
   the `cpu` frame byte for byte; inside, it is within 1 per channel of the
   `cpu` frame drawn with the live thumbnails read back, and equal to it in
   at least 99.5 % of the pixels. A frame of a fade with zoom draws a live
