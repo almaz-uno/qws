@@ -597,7 +597,10 @@ func (s *Snapshotter) capture(w *window, cause string) {
 // anew when it is stale. A pixmap the GPU would not bind stays named, for
 // RENDER, and is bound again only once named anew: the client holding a GLX
 // pixmap of the window holds it, as qws does, while the window keeps its
-// pixmap (specs/018-snapshot-bind-conflicts).
+// pixmap (specs/018-snapshot-bind-conflicts). Each binding first waits for
+// the drawing the X server has done, glXWaitX: on NVIDIA a drawing it has
+// answered can still be on the GPU, and the pixmap would be read as it was
+// before (specs/025-snapshot-wait-x).
 func (s *Snapshotter) captureGPU(w *window) (*image.RGBA, error) {
 	if w.texture == 0 {
 		w.texture = newWindowTexture()
@@ -625,6 +628,7 @@ func (s *Snapshotter) captureGPU(w *window) (*image.RGBA, error) {
 				Msg("No pixmap of its own: taken from its frame by RENDER")
 			return nil, errNotBound
 		}
+		s.off.WaitX()
 		bound, err := s.off.BindPixmap(uint32(w.pixmap), w.depth)
 		if err != nil {
 			log.Debug().Err(err).Uint32("window", uint32(w.id)).Msg("Pixmap not bound on the GPU until named anew")
@@ -634,6 +638,7 @@ func (s *Snapshotter) captureGPU(w *window) (*image.RGBA, error) {
 	case w.bound == nil:
 		return nil, errNotBound
 	default:
+		s.off.WaitX()
 		w.bound.Rebind()
 	}
 	return s.gpu.thumbnail(w.width, w.height, w.bound.YInverted), nil

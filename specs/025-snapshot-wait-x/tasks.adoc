@@ -1,0 +1,14 @@
+= 025 — tasks
+:toc: left
+:toc-title: Contents
+:revdate: 2026-10-03
+
+. [x] T1. Binary B, the test binary of `pkg/snapshot` at `9774075`; three
+  runs of `TestGPUThumbnail` with it (research).
+. [x] T2. The specification and the research of the cause.
+. [x] T3. `WaitX` in `pkg/glx`, its calls in `captureGPU` and in
+  `TestGPUThumbnail`; the merge of 020's tip tried.
+. [x] T4. F, B and A in turn, 50 runs each; K1.
+. [x] T5. The probe P and S1 with the code of B and of A; K2, K3.
+. [x] T6. K4 and K5, each commit on its own in a clean worktree; the
+  results.

@@ -211,6 +211,10 @@ static void offRebind(Display *dpy, offBindProc bind, offReleaseProc release, GL
 	bind(dpy, gp, GLX_FRONT_LEFT_EXT, NULL);
 }
 
+static void offWaitX(void) {
+	glXWaitX();
+}
+
 static void offRelease(Display *dpy, offReleaseProc release, GLXPixmap gp) {
 	release(dpy, gp, GLX_FRONT_LEFT_EXT);
 	glXDestroyPixmap(dpy, gp);
@@ -292,6 +296,18 @@ func (o *Offscreen) BindPixmap(pixmap uint32, depth int) (*TexturePixmap, error)
 // that it holds the current contents of the pixmap
 func (p *TexturePixmap) Rebind() {
 	C.offRebind(p.o.dpy, p.o.bind, p.o.release, p.gp)
+}
+
+// WaitX waits, as glXWaitX, until the X server has done the drawing asked
+// of it before, so that a pixmap it was asked to draw — through another
+// connection, by the window's client or by RENDER of the snapshotter — is
+// read as drawn once bound again. Without it, the X server's work still on
+// the GPU of NVIDIA, 10 of 200 live passes of a window scaled into a pixmap
+// read it as it was before, and 5 of 55 runs of TestSharedLive with the
+// desktop in use (specs/020-live-thumbnails, research); with it, none. The
+// context must be current.
+func (o *Offscreen) WaitX() {
+	C.offWaitX()
 }
 
 // Release unbinds the pixmap from its texture; the X pixmap itself stays
