@@ -19,13 +19,17 @@
 # is CHANGING_TERM: mate-terminal by default, a window of depth 32 under the
 # compositor of ws1, with a pixmap of its own, passed live on the GPU; or
 # xterm, of depth 24 and drawn in the pixmap of its frame, passed live by
-# RENDER from the frame (D2 of 020, A). meta has its window and depth. With
+# RENDER from the frame (D2 of 020, A). meta has its window and depth. After
+# the warm-up it is focused once more, then the window focus was on: it is
+# second in the order of the switcher, the card selected first. With
 # LIVE=true or LIVE=false the instance runs with appearance.thumbnail.live so
 # (a build that knows the key); unset, as configured. With REST=<seconds>, the
-# rest variant of S5: after its steps each activation holds the overlay still
-# for that long — a second for the frame at rest of the last step, then the
-# seconds of REST — whose lines of the log and times go to rest, so that the
-# summary counts the live passes a second at rest (K13 of 020). Each run
+# rest variant of S5: after its steps each activation steps back as many to
+# the card selected first — the window of S5 — and holds the overlay still
+# for a second, for the frame at rest of the last step, then the seconds of
+# REST, whose lines of the log and times go to rest, so that the summary
+# counts the live passes a second at rest (K13 of 020); then it steps on
+# again to where it was. Each run
 # writes the CPU time of the instance over each activation, from the key press
 # to 0.3 s after the release, from /proc, to cpu — C of 020.
 #
@@ -177,16 +181,27 @@ start_changing() {
 	sleep 0.5
 }
 
-# The overlay of activation $3 held still for REST seconds, after a second
-# for the frame at rest of its last step: the lines of the log $1 and the
-# times, in ms, around them go to $2/rest
+# The overlay of activation $3 back STEPS steps, on the card selected first,
+# held still for REST seconds after a second for the frame at rest of the
+# last step, then STEPS steps on again: the lines of the log $1 and the
+# times, in ms, around the rest go to $2/rest
 hold_still() {
-	local log=$1 out=$2 a=$3 l0 t0
+	local log=$1 out=$2 a=$3 l0 t0 s n
+	for ((s = 1; s <= STEPS; s++)); do
+		n=$(frame_count "$log")
+		xdotool key Left
+		wait_frames "$log" $((n + 1)) || true
+	done
 	sleep 1
 	l0=$(wc -l <"$log")
 	t0=$(date +%s%3N)
 	sleep "$REST"
 	echo "$a $l0 $(wc -l <"$log") $t0 $(date +%s%3N)" >>"$out/rest"
+	for ((s = 1; s <= STEPS; s++)); do
+		n=$(frame_count "$log")
+		xdotool key Right
+		wait_frames "$log" $((n + 1)) || true
+	done
 }
 
 # CPU time of the process $1 so far, in ms
@@ -195,7 +210,7 @@ cpu_ms() {
 }
 
 run() {
-	local renderer=$1 out=$2 log=$2/log.json pid a s n c0 t0 cleanup
+	local renderer=$1 out=$2 log=$2/log.json pid a s n c0 t0 cleanup first
 	[[ -x $qws ]] || { echo "no $qws, run make build" >&2; exit 1; }
 	mkdir -p "$out"
 	if [[ -n $CHANGING ]]; then
@@ -236,6 +251,17 @@ run() {
 	kill -0 "$pid"
 
 	warm_up
+	if [[ -n $changing_win ]]; then
+		# The window of S5 second in the order of the switcher: in i3's order
+		# of focus, the warm-up's, the windows of the workspace of another
+		# output come after those of the focused one's — 29th of 33 on ws1 —
+		# and in the carousel the window of S5 was never in view
+		first=$(focus_order | head -n 1)
+		i3-msg -q "[id=$changing_win] focus" || true
+		sleep 0.35
+		i3-msg -q "[id=$first] focus" || true
+		sleep 0.35
+	fi
 
 	for ((a = 1; a <= ACTIVATIONS; a++)); do
 		n=$(frame_count "$log")
