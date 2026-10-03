@@ -60,7 +60,7 @@ func NewConn() (*xgb.Conn, error) {
 	}
 	conn.ExtLock.Unlock()
 	if _, ok := opcodes["XC-MISC"]; ok {
-		conn.SetIDRangeFunc(nextXIDs)
+		conn.SetIDRangeFunc(newXIDRanges(xproto.Setup(conn)).next)
 	}
 	return conn, nil
 }

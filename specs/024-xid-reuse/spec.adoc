@@ -45,6 +45,10 @@ keep `xgb.NewConn` and no reuse: they live for a run of their own. The
 connections of Xlib in `pkg/glx` take their XIDs from libxcb, which reuses
 them through XC-MISC already (research).
 
+The XIDs xgb gives ahead (issue #74) are a delta to this specification on
+`develop` at `4415462`, in the same patch: the open decision of #70,
+decided by the author on 2026-10-03.
+
 == Decisions
 
 Asked for, 2026-10-03 (issue #70):
@@ -75,10 +79,31 @@ Made on the way, 2026-10-03, for the author to confirm:
   past it, keeps pixmaps with some of the first, and makes pixmaps, checked,
   with some of those past it; the flag `-xid-requests` of the test binary
   makes and frees a pixmap with every one (research, "Reproduction").
-* *The XIDs in flight are not guarded against* — an open decision: xgb
-  gives up to five XIDs ahead, which the X server may take for free when it
-  answers `GetXIDRange` and give again once the next range is walked through
-  (research, "XIDs in flight").
+* *The XIDs in flight* were left open by #70: xgb gives up to five XIDs
+  ahead, which the X server may take for free when it answers
+  `GetXIDRange` and give again once the next range is walked through
+  (research, "XIDs in flight"). Decided by the author, below.
+
+Decided by the author, 2026-10-03 (issue #74):
+
+* no XID xgb has given ahead comes again — the last XIDs it gave before a
+  range left out of the X server's answer — in 1.3.4.
+
+Made on the way, 2026-10-03, for the author to confirm:
+
+* *64, across ranges.* The range function leaves out the last 64 XIDs xgb
+  gave, whatever the ranges they came from: the XIDs the X server may take
+  for free are the five of xgb's buffer and those taken and not yet named,
+  one or two at a time on a connection of qws (research, "The bound").
+* *The longest part.* Of the answer, the longest part without them; the
+  lowest of the longest.
+* *None left: an error.* An answer with no XID but those 64 makes `NewId`
+  fail, and xgb asks again for the next XID; the function does not ask
+  again on its own. Such an answer needs a hole of at most 64 XIDs among
+  those just given, which the X server's cuts reach only through 15 or
+  more resources around it (research, "The X server's answer").
+* *The test of #74 in the default suite.* `TestXIDsAheadNotGivenAgain`
+  walks two ranges by `NewId` alone, 0.8 s, and names six XIDs.
 
 == Behavior
 
@@ -92,6 +117,11 @@ Made on the way, 2026-10-03, for the author to confirm:
   reply; xgb gives its XIDs in turn and asks again past its end. On the
   answer of none, `NewId` fails with "error getting ID re-use: XC-MISC:
   every XID of the connection in use".
+. *XIDs given ahead.* The range function keeps the last 64 XIDs xgb gave,
+  across ranges, and returns the longest part of the X server's range that
+  holds none of them. When the range holds no other, `NewId` fails with
+  "error getting ID re-use: XC-MISC: no free XID of the connection but
+  those given last" (issue #74).
 . *Without XC-MISC*, `NewId` fails past the first range, as before.
 
 == Metrics
@@ -102,6 +132,11 @@ without the race detector and 2 with it, and once with `-xid-requests`, on
 E1 beside the service and picom. T-before builds `develop` at `9774075`
 with only the test file of this change added; T-after builds this change,
 with 3 runs under `-race`.
+
+Run A:: The same binaries run as `-test.run 'TestXIDsAheadNotGivenAgain$'
+-test.count=1 -test.v`, 5 times without the race detector and 2 with it.
+A-before builds `develop` at `4415462` with only the test file of #74
+added; A-after builds the fix of #74, with 3 runs under `-race`.
 
 == Acceptance criteria
 
@@ -147,6 +182,23 @@ with 3 runs under `-race`.
   `TestFallback`, `TestSwitchers`, `TestModelMatchesQueries` — and
   `TestMonitorsUnderEvents`; `go vet ./...`, `go test -race ./pkg/x11` and
   `make check-specs` pass; `gofmt -l .` finds nothing.
+
+| K6
+| XIDs given ahead: `TestXIDsAheadNotGivenAgain` in `pkg/x11`, on a
+  connection of `x11.NewConn` — the last 20 XIDs of the first range taken a
+  millisecond apart and each named by a pixmap a millisecond after its
+  `NewId`, the pixmaps of the last six kept, then 2 097 167 XIDs more.
+  A-before fails in 5 runs of 5 and 2 of 2 under `-race`: one of the six is
+  given again. A-after passes in 5 of 5 and 3 of 3 under `-race`, no XID of
+  a pixmap kept given again and no request failing; without the race
+  detector a run takes at most 1 s. `TestXIDsReused` passes, also with
+  `-xid-requests`.
+
+| K7
+| The XIDs left out: `TestXIDRangesAhead` — on a connection of E1, the
+  whole space less the last 64 XIDs of the first range; a range apart from
+  the 64 as it is; across them the longer part; within them none; after a
+  range of 10, the 64 made of 54 of the range before and those 10.
 |===
 
 == Results
@@ -190,7 +242,14 @@ the runs and the probes in `research.adoc`.
   available" and no "RENDER unavailable". `TestGPUThumbnail` alone fails
   "drawn anew" in more than half of the runs on E1 that day, `develop`
   alike: 8 runs of 20 passed for each, `develop` and the change in turn
-  (research, "After the change").
+  (research, "After the change"). The same for the commits of #74.
+| K6 | 2026-10-03, the fix of #74 `10826e3` in a clean worktree. A-before:
+  5 runs of 5 failed with "XID 4194298, 0x9dffffa, given again while the
+  pixmap of XID 2097146 lives", in 0.73–0.76 s; with `-race`, 2 of 2, in
+  2.56–2.60 s. A-after: 5 of 5 passed, in 0.74–0.78 s; with `-race`, 3 of
+  3, no race, 2.51–2.58 s. `TestXIDsReused` passed, and with
+  `-xid-requests` in 23.83 s (research, "XIDs given ahead left out").
+| K7 | `TestXIDRangesAhead` passes.
 |===
 
 == Open decisions
@@ -202,10 +261,16 @@ the runs and the probes in `research.adoc`.
   them again. A resource still named by one — a damage object, a pixmap
   named — then fails to be made with BadIDChoice, and a `FreePixmap` of
   the RENDER path after it frees the pixmap of that XID (research, "XIDs in
-  flight"). A remedy: the range function cuts from the X server's range the
-  last 64 XIDs of the range it gave before; not taken without the author.
+  flight"). Author, 2026-10-03: done — the last 64 XIDs given are left out
+  of every range (issue #74; Behavior, K6, K7).
+. The bound of 64 holds while every XID of qws is named before 59 others
+  are taken on its connection (research, "The bound"): a part that held an
+  XID unnamed across many `NewId` of other goroutines would need a larger
+  one.
 . Upstream: `generateXIds` of xgb 1.3.1 says it "needs to be updated to use
   the XC Misc extension once we run out of new ids". A report, or a patch
   that would set the function in xgb, is the author's decision.
-. `TestXIDsReused` takes 0.5 s, 1.6 s under `-race`, at every `go test
-  ./...` with a display; the X server spends some 0.02 s of CPU on it.
+. `TestXIDsReused` takes 0.5 s, 1.6 s under `-race`, and
+  `TestXIDsAheadNotGivenAgain` 0.8 s, 2.5 s under `-race`, at every `go
+  test ./...` with a display; the X server spends some 0.02 s of CPU on
+  each.
