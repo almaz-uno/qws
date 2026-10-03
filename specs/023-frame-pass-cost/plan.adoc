@@ -1,0 +1,111 @@
+= 023 — plan
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-03
+
+The plan of the options recommended in the specification — D1 b, D2 c, D3,
+and a for D4–D7; should the author choose others, it is written again. It
+starts from `develop` once pull request #60 (020) is merged: the code it
+changes is 020's.
+
+== Approach
+
+*The chain.* A type of `pkg/snapshot/xrender.go`, `chain`: the copy of the
+window — a pixmap of its size and of the depth of the pixmap it is taken
+from — and its graphics context, made with graphics exposures off; the
+source picture in that pixmap's visual, padded; a pixmap a8r8g8b8 and its
+picture for each halving; the picture it scales into, given; the window's
+size and the visual and depth of the pixmap; whether it copies. `newChain`
+makes it and sets the transform and the filter of each picture once, as
+the loop of `scale` sets them now. `run(pixmap, at)` sends the copy from
+`at` — none for a window at the corner of its pixmap, whose source picture
+is then that pixmap's — and the composites, and returns their cookies.
+`free` frees the pictures, then the pixmaps and the graphics context.
+
+`scale` becomes `newChain`, `run` and `free`, so that the snapshots of 018
+and 022 keep their pictures and their requests but for their order and the
+graphics exposures of the copy: the chain made before the copy, not around
+it; the X server draws the same pixels.
+
+*A pass from the frame.* `scaleFromFrame` of `live.go` takes the window's
+chain — made at its first pass of an activation, and anew when the window's
+size, the visual or the depth of its pixmap, whether it copies, or, without
+a copy, the pixmap itself differs — runs it at the offset kept, and sends
+`TranslateCoordinates` of the window to the frame. Its reply marks the
+composites' cookies done, so their `Check` sends no `GetInputFocus`; the
+offset it tells, plus the frame's border, is compared with the one used:
+another, the chain run again at it, once — made anew if the window has come
+to or left the corner of the pixmap — and the offset kept; another again,
+the pass not made and the window left changed. A failed composite or reply
+leaves the window stale, as in 020.
+
+*Where the window lies.* `window` keeps `at`, the offset last told, and
+`viaBorder`, the frame's border: `namePixmap` keeps the border of the
+`GetGeometry` it sends the frame, and `pixmapRect` of a snapshot, which asks
+as now, keeps the offset it gets.
+
+*Freed.* `setLive` frees the chains of every window when the live passes
+end (`want.overlay == 0`), `forget` with the window; `dropScaled` frees the
+scaled pixmap as now.
+
+*The counting.* `TestFramePassRequests` counts R by the sequence numbers of
+xgb's cookies (`xgb.Cookie.Sequence`) around a pass on the snapshotter of
+the tests (`frameSnapshotter`), which runs no loop: nothing else sends on
+its connection, and the test polls the connection's events
+(`PollForEvent`) for NoExposure. Written before the change and run on 020's
+code, it fails there and gives the counts of K3.
+
+*The pictures.* `TestFramePassPictures` draws its windows anew between
+passes by copying into them, in the X server, one of two pixmaps of the
+test, so that 200 passes of a window of 2556×1357 take seconds, not the
+uploads of a picture each; the snapshot of each picture is taken once and
+compared with every live picture of it.
+
+*The benchmark.* `BenchmarkLivePassFrame` takes the window's size from
+`LIVE_FRAME_SIZE`, `2556x1357` by default.
+
+== Files
+
+[cols="2,5"]
+|===
+| File | What changes
+
+| `pkg/snapshot/xrender.go`
+| `chain`, `newChain`, `run`, `free`; `scale` through them; the copy's
+  graphics context without graphics exposures.
+
+| `pkg/snapshot/live.go`
+| `scaleFromFrame` with the window's chain and the offset checked by
+  `TranslateCoordinates`; `setLive` frees the chains at the end of the
+  passes.
+
+| `pkg/snapshot/snapshot.go`
+| `window`: `chain`, `at`, `viaBorder`; `namePixmap` keeps the frame's
+  border; `pixmapRect` keeps the offset; `forget` frees the chain.
+
+| `pkg/snapshot/liveframe_test.go`
+| `TestFramePassPictures`, `TestFramePassRequests`, `TestFramePassChain`;
+  `BenchmarkLivePassFrame` with `LIVE_FRAME_SIZE`.
+
+| `specs/023-frame-pass-cost/`
+| The results.
+|===
+
+No document of behavior changes: nothing the user sees does
+(constitution, "Documentation is part of the change").
+
+== Preserved
+
+The pictures of the passes from the frame and of the snapshots, byte for
+byte; the scaled pixmap of 020, its binding, `glXWaitX`, `Rebind` and the
+copy into the live texture; the schedule of 020; the passes of the windows
+with a pixmap of their own; the frame's pixmap never bound on the GPU; one
+pass of a window at a time — a window with a pass under way takes no other
+(`livePassable` of 020) — so a chain is never run by two passes at once.
+
+== Order
+
+The counting and the benchmark's size on 020's code, and S5x before any
+code: the references. Then D3, D1 and D2, each with its tests; the
+benchmarks; S5x with the change. See `tasks.adoc`.
