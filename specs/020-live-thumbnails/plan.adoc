@@ -63,7 +63,8 @@ back by a whole interval, and its lag past the bound of K7.
 
 *Passes in the pauses.* While frames come one after another — the last two
 ended less than 10 ms apart — no pass is made; one due waits for them to
-stop, 10 ms after the last, the loop's timer set for then. First, a pass
+stop, 30 ms after the last — the author's hold, past the pause between
+two keys — the loop's timer set for then. First, a pass
 due less than 4 ms before the next frame ended, by the period of the last
 two, waited for that end, `EndFrame` waking the loop, and ran in the
 pause after the frame: it held the frames off the screen, as below, but

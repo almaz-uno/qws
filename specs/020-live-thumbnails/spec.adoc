@@ -395,8 +395,10 @@ All of it on `glx` with `appearance.thumbnail.live: true`; otherwise as in
   number of windows taking passes — waiting, or passed within the
   interval — after the one before it. While the switcher presents frames
   one after another — a step, a hover moving; the fades take none — no
-  pass is made: one due waits for the frames to stop, 10 ms after the
-  last, and a frame in motion draws the pictures published before it.
+  pass is made: one due waits for the frames to stop, 30 ms after the
+  last — past the pause between the steps of two keys — and a frame in
+  motion draws the pictures published before it. Frames come one after
+  another when the last two ended less than 10 ms apart.
   Changed after the rest variant of S5, 2026-10-03: passes made in the
   pauses between such frames, 4 ms before the next at the latest, held
   them off the screen but not on the desktop of E1, where the steps of the
@@ -548,12 +550,18 @@ with them.
   `live: true` against `live: false` run in turn: A1 p95 no more than
   0.1 ms longer, the share of intervals above 1.5 periods no more than 0.2
   percentage points higher, three runs together; K2–K6 of 007 hold as they
-  do with `live: false`.
+  do with `live: false`. Author, 2026-10-03: confirmed, with the hold
+  before a pass 30 ms after the frames stop, not 10, so that a pass does
+  not land in the pause between two keys.
 
 | K9
 | CPU: in S5, C with `live: true` no more than 3 % of a CPU above
   `live: false` over the time the switcher is shown — provisional,
-  confirmed by the author on 2026-10-02 until the first measurement.
+  confirmed by the author on 2026-10-02 until the first measurement. In
+  the rest variant, one window changing all the time, it was 4.70 and
+  5.38 points in the grid, a window of its own pixmap and one from its
+  frame. Author, 2026-10-03: option c — the cost of a pass lowered, by
+  specification 023 (#66), the bound kept.
 
 | K10
 | Configuration: the two keys from a file, their `QWS_` variables and
