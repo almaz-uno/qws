@@ -345,3 +345,215 @@ func TestFrameCopyQuiet(t *testing.T) {
 		}
 	}
 }
+
+// framePictures are two pictures of a window's size in pixmaps of the test,
+// copied into the window's child in turn, so that it is drawn anew in the X
+// server, not uploaded at each pass
+type framePictures struct {
+	conn    *xgb.Conn
+	child   xproto.Window
+	gc      xproto.Gcontext
+	pixmaps [2]xproto.Pixmap
+	size    image.Point
+}
+
+func newFramePictures(t testing.TB, conn *xgb.Conn, child xproto.Window, size image.Point, seed int64) *framePictures {
+	t.Helper()
+	f := &framePictures{conn: conn, child: child, size: size}
+	screen := xproto.Setup(conn).DefaultScreen(conn)
+	for i := range f.pixmaps {
+		f.pixmaps[i] = newPixmap(t, conn, screen.Root, 24, size)
+		t.Cleanup(func() { xproto.FreePixmap(conn, f.pixmaps[i]) })
+		fillDrawable(t, conn, xproto.Drawable(f.pixmaps[i]), 24, windowImage(size.X, size.Y, seed+int64(i)))
+	}
+	f.gc, _ = xproto.NewGcontextId(conn)
+	xproto.CreateGC(conn, f.gc, xproto.Drawable(child), xproto.GcGraphicsExposures, []uint32{0})
+	t.Cleanup(func() { xproto.FreeGC(conn, f.gc) })
+	return f
+}
+
+// show draws picture i into the window
+func (f *framePictures) show(i int) {
+	xproto.CopyArea(f.conn, xproto.Drawable(f.pixmaps[i]), xproto.Drawable(f.child), f.gc,
+		0, 0, 0, 0, uint16(f.size.X), uint16(f.size.Y))
+	f.conn.Sync()
+}
+
+// snapshot is the snapshot of picture i, taken by RENDER as 022 takes it
+func (f *framePictures) snapshot(t testing.TB, s *Snapshotter, w *window, i int) *image.RGBA {
+	t.Helper()
+	f.show(i)
+	s.capture(w, "test")
+	img, _ := s.Thumbnail(w.id)
+	snap, ok := img.(*image.RGBA)
+	if !ok {
+		t.Fatalf("snapshot %T, not taken by RENDER", img)
+	}
+	return snap
+}
+
+// TestFramePassPictures checks K1 of specs/023-frame-pass-cost: the passes
+// from the frame, through the chain kept for the activation, give the
+// pictures of 020's, byte for byte — each live picture equal, worst 0, to
+// the snapshot of the same picture, which 020's passes equalled (K14 of 020)
+// — for windows of depth 24 in frames of their visual off the screen, of
+// 2556×1357 (two halvings), 1279×677 (one, both sides odd) and 604×394
+// (none), one of another visual of depth 24, and one two levels below the
+// window the compositor redirects; each passed 200 times, drawn anew from
+// two pictures in turn between two passes: no pass reads the scaled pixmap
+// as it was before
+func TestFramePassPictures(t *testing.T) {
+	conn, err := x11.NewConn()
+	if err != nil {
+		t.Skipf("no X display: %v", err)
+	}
+	defer conn.Close()
+	s := frameSnapshotter(t, conn)
+	screen := xproto.Setup(conn).DefaultScreen(conn)
+	passes := 200
+	if testing.Short() {
+		passes = 20
+	}
+	for _, c := range []struct {
+		name   string
+		size   image.Point
+		visual xproto.Visualid
+		nested bool
+	}{
+		{"2556×1357", image.Pt(2556, 1357), 0, false},
+		{"1279×677", image.Pt(1279, 677), 0, false},
+		{"604×394", image.Pt(604, 394), 0, false},
+		{"of another visual", image.Pt(800, 500), otherVisual(screen, 24), false},
+		{"two levels below", image.Pt(800, 500), 0, true},
+	} {
+		if c.name == "of another visual" && c.visual == 0 {
+			t.Logf("%s: skipped, no such visual", c.name)
+			continue
+		}
+		var w *window
+		var child xproto.Window
+		if c.nested {
+			w, child = nestedFrameWindow(t, s, conn, image.Pt(-4000, -4000), c.size)
+		} else {
+			w, child = frameWindow(t, s, conn, image.Pt(-4000, -4000), c.size, c.visual)
+		}
+		pics := newFramePictures(t, conn, child, c.size, 40)
+		snaps := [2]*image.RGBA{pics.snapshot(t, s, w, 0), pics.snapshot(t, s, w, 1)}
+		worst := 0
+		for k := range passes {
+			pics.show(k % 2)
+			got, ok := livePicture(t, s, w)
+			if !ok {
+				t.Fatalf("%s: pass %d not made", c.name, k)
+			}
+			if _, d := difference(got, snaps[k%2]); d > worst {
+				worst = d
+			}
+		}
+		t.Logf("%s: %d passes, worst %d from the snapshot of the same picture", c.name, passes, worst)
+		if worst != 0 {
+			t.Errorf("%s: worst %d from the snapshots, want 0", c.name, worst)
+		}
+		if w.chain == nil {
+			t.Errorf("%s: no chain kept", c.name)
+		}
+		s.forget(w.id)
+	}
+}
+
+// nestedFrameWindow is a client window of depth 24 at 2,22 in a window at
+// 0,0 of a frame off the screen, which the compositor redirects: two levels
+// below it, as 022's case
+func nestedFrameWindow(t testing.TB, s *Snapshotter, conn *xgb.Conn, at image.Point, size image.Point) (*window, xproto.Window) {
+	t.Helper()
+	screen := xproto.Setup(conn).DefaultScreen(conn)
+	r := image.Rectangle{Min: at, Max: at.Add(size).Add(image.Pt(4, 24))}
+	top := testWindow(t, conn, screen.Root, r, 0, 0)
+	frame := testWindow(t, conn, top, image.Rectangle{Max: r.Size()}, 0, 0)
+	client := testWindow(t, conn, frame, image.Rect(2, 22, 2+size.X, 22+size.Y), 0, 0)
+	child := testWindow(t, conn, client, image.Rectangle{Max: size}, 0, 0)
+	waitRedirected(t, conn, top)
+	w := &window{id: client, frame: frame, mapped: true, frameMapped: true, visual: screen.RootVisual, stale: true}
+	s.windows[client], s.frames[frame] = w, client
+	fillDrawable(t, conn, xproto.Drawable(child), 24, windowImage(size.X, size.Y, 98))
+	s.capture(w, "test")
+	if w.via != top || w.bound != nil {
+		t.Fatalf("via 0x%x, bound %v; want the pixmap of 0x%x by RENDER", w.via, w.bound != nil, top)
+	}
+	return w, child
+}
+
+// TestFramePassChain checks K4 of specs/023-frame-pass-cost: the chain of a
+// window's passes from the frame is freed at the end of the live passes and
+// with the window — GetGeometry of each of its pixmaps answers BadDrawable —
+// and at another size made of that size, the pictures of K1 at it
+func TestFramePassChain(t *testing.T) {
+	conn, err := x11.NewConn()
+	if err != nil {
+		t.Skipf("no X display: %v", err)
+	}
+	defer conn.Close()
+	s := frameSnapshotter(t, conn)
+	s.live = liveSession{overlay: 7, interval: 33 * time.Millisecond}
+	gone := func(what string, c *chain) {
+		t.Helper()
+		ids := append([]xproto.Pixmap{c.copy}, c.pixmaps...)
+		for _, p := range ids {
+			if _, err := xproto.GetGeometry(conn, xproto.Drawable(p)).Reply(); err == nil {
+				t.Errorf("%s: pixmap 0x%x of the chain still there", what, p)
+			}
+		}
+	}
+	w, child := frameWindow(t, s, conn, image.Pt(-4000, -4000), image.Pt(1279, 677), 0)
+	if _, ok := livePicture(t, s, w); !ok {
+		t.Fatal("no pass")
+	}
+	c := w.chain
+	if c == nil || c.copy == 0 || len(c.pixmaps) != 1 {
+		t.Fatalf("chain %+v, want a copy and one halving", c)
+	}
+	// The end of the live passes
+	s.liveWant = liveSession{}
+	s.setLive()
+	if w.chain != nil {
+		t.Error("a chain kept past the end of the live passes")
+	}
+	gone("live ended", c)
+
+	// Another size: the window resized in its frame, named anew
+	s.live = liveSession{overlay: 7, interval: 33 * time.Millisecond}
+	if _, ok := livePicture(t, s, w); !ok {
+		t.Fatal("no pass")
+	}
+	size := image.Pt(800, 500)
+	xproto.ConfigureWindow(conn, w.id, xproto.ConfigWindowWidth|xproto.ConfigWindowHeight,
+		[]uint32{uint32(size.X), uint32(size.Y)})
+	xproto.ConfigureWindow(conn, child, xproto.ConfigWindowWidth|xproto.ConfigWindowHeight,
+		[]uint32{uint32(size.X), uint32(size.Y)})
+	conn.Sync()
+	w.stale = true
+	pics := newFramePictures(t, conn, child, size, 60)
+	snap := pics.snapshot(t, s, w, 0)
+	old := w.chain
+	got, ok := livePicture(t, s, w)
+	if !ok {
+		t.Fatal("no pass at the new size")
+	}
+	if w.chain == nil || w.chain.size != size {
+		t.Errorf("chain of %v, want %v", w.chain.size, size)
+	}
+	if _, worst := difference(got, snap); worst != 0 {
+		t.Errorf("at the new size: worst %d from the snapshot, want 0", worst)
+	}
+	if old != nil {
+		gone("another size", old)
+	}
+
+	// The window forgotten
+	c = w.chain
+	s.forget(w.id)
+	if w.chain != nil {
+		t.Error("a chain kept with the window forgotten")
+	}
+	gone("forgotten", c)
+}

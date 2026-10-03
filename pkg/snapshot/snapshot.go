@@ -133,6 +133,7 @@ type window struct {
 	live     *liveTextures
 	liveDue  liveSchedule
 	scaled   *scaledPixmap
+	chain    *chain // the RENDER chain of the passes from the frame, for an activation
 }
 
 // errNotViewable: the X server would not name the window's pixmap — it is not
@@ -598,6 +599,7 @@ func (s *Snapshotter) forget(id xproto.Window) {
 	}
 	s.release(w)
 	s.dropLive(w)
+	s.dropChain(w)
 	s.dropScaled(w)
 	if w.texture != 0 {
 		gl.DeleteTextures(1, &w.texture)

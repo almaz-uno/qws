@@ -278,6 +278,7 @@ func (s *Snapshotter) setLive() {
 			}
 		}
 		s.emptyTrash()
+		s.dropChains()
 	}
 }
 
@@ -506,11 +507,12 @@ func (s *Snapshotter) scaleFromFrame(w *window, tw, th int) bool {
 	if err == nil {
 		var r image.Rectangle
 		if r, err = s.pixmapRect(w); err == nil {
-			var passes []render.CompositeCookie
-			passes, err = s.render.scale(w.pixmap, w.pixVisual, w.pixDepth, r, sp.picture)
-			for _, p := range passes {
-				if err == nil {
-					err = p.Check()
+			var c *chain
+			if c, err = s.chainFor(w, r, sp); err == nil {
+				for _, p := range c.run(w.pixmap, r.Min) {
+					if err == nil {
+						err = p.Check()
+					}
 				}
 			}
 		}
@@ -524,12 +526,47 @@ func (s *Snapshotter) scaleFromFrame(w *window, tw, th int) bool {
 	return true
 }
 
+// chainFor is the chain the window's passes from the frame run, into its
+// scaled pixmap sp, for the window at r in its frame's pixmap: kept for the
+// activation (specs/023-frame-pass-cost, D1 b), made at its first pass and
+// anew for another size, visual or depth, a copy or none
+func (s *Snapshotter) chainFor(w *window, r image.Rectangle, sp *scaledPixmap) (*chain, error) {
+	copies := r.Min != image.Point{}
+	if c := w.chain; c != nil && c.fits(w.pixmap, w.pixVisual, w.pixDepth, r.Size(), copies, sp.picture) {
+		return c, nil
+	}
+	s.dropChain(w)
+	c, err := s.render.newChain(w.pixmap, w.pixVisual, w.pixDepth, r.Size(), copies, sp.picture)
+	if err != nil {
+		return nil, err
+	}
+	w.chain = c
+	return c, nil
+}
+
+// dropChain frees the window's chain
+func (s *Snapshotter) dropChain(w *window) {
+	if w.chain != nil {
+		w.chain.free()
+		w.chain = nil
+	}
+}
+
+// dropChains frees the chains of every window, at the end of the live
+// passes: they are kept for an activation, not longer
+func (s *Snapshotter) dropChains() {
+	for _, w := range s.windows {
+		s.dropChain(w)
+	}
+}
+
 // scaledFor is the scaled pixmap of the window, of tw×th, made at its first
 // pass from the frame and anew at another size
 func (s *Snapshotter) scaledFor(w *window, tw, th int) (*scaledPixmap, error) {
 	if sp := w.scaled; sp != nil && sp.width == tw && sp.height == th {
 		return sp, nil
 	}
+	s.dropChain(w) // it scales into the picture of the scaled pixmap
 	s.dropScaled(w)
 	sp := &scaledPixmap{width: tw, height: th}
 	w.scaled = sp // for dropScaled to free what is made, should a step fail
