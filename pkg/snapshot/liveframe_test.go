@@ -3,6 +3,7 @@ package snapshot
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"image"
 	"os"
 	"sort"
@@ -259,9 +260,11 @@ func (m *cpuMeter) report(b *testing.B, n int) {
 // GPU into the live texture, 30 passes a second — on the snapshotter's thread
 // (pass), from its start to its publication (done), at p50 and p95; and the
 // CPU of the X server a pass, less its own over as long a stretch before, and
-// of the test's process. b.N is the number of passes:
+// of the test's process. b.N is the number of passes; LIVE_FRAME_SIZE the
+// window's size, 2556x1357 by default — 604x394 is the xterm of S5:
 //
 //	go test -run '^$' -bench LivePassFrame -benchtime 300x ./pkg/snapshot
+//	LIVE_FRAME_SIZE=604x394 go test -run '^$' -bench LivePassFrame -benchtime 300x ./pkg/snapshot
 func BenchmarkLivePassFrame(b *testing.B) {
 	conn, err := x11.NewConn()
 	if err != nil {
@@ -273,6 +276,11 @@ func BenchmarkLivePassFrame(b *testing.B) {
 	defer zerolog.SetGlobalLevel(level)
 	s := frameSnapshotter(b, conn)
 	size := image.Pt(2556, 1357)
+	if v := os.Getenv("LIVE_FRAME_SIZE"); v != "" {
+		if _, err := fmt.Sscanf(v, "%dx%d", &size.X, &size.Y); err != nil {
+			b.Fatalf("LIVE_FRAME_SIZE %q: %v", v, err)
+		}
+	}
 	w, _ := frameWindow(b, s, conn, image.Pt(-4000, -4000), size, 0)
 	defer s.forget(w.id)
 	if _, ok := livePicture(b, s, w); !ok {
