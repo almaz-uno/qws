@@ -557,3 +557,164 @@ func TestFramePassChain(t *testing.T) {
 	}
 	gone("forgotten", c)
 }
+
+// passRequests makes a pass of the window and counts what it sends on the
+// snapshotter's connection, which nothing else sends on — the difference of
+// the sequence numbers of two GetInputFocus around it, less one — and the
+// NoExposure events the connection receives meanwhile; false when no pass is
+// made
+func passRequests(t testing.TB, s *Snapshotter, conn *xgb.Conn, w *window) (requests, noExposures int, ok bool) {
+	t.Helper()
+	for ev, _ := conn.PollForEvent(); ev != nil; ev, _ = conn.PollForEvent() {
+	}
+	before := xproto.GetInputFocus(conn)
+	if _, err := before.Reply(); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok = livePicture(t, s, w); !ok {
+		return 0, 0, false
+	}
+	after := xproto.GetInputFocus(conn)
+	if _, err := after.Reply(); err != nil {
+		t.Fatal(err)
+	}
+	for ev, _ := conn.PollForEvent(); ev != nil; ev, _ = conn.PollForEvent() {
+		if _, isNoExposure := ev.(xproto.NoExposureEvent); isNoExposure {
+			noExposures++
+		}
+	}
+	return int(after.Sequence-before.Sequence) - 1, noExposures, true
+}
+
+// TestFramePassRequests checks K3 of specs/023-frame-pass-cost: a pass from
+// the frame after the first of an activation sends at most 6 requests on
+// the snapshotter's connection for a window of 2556×1357, two halvings, and
+// 4 for one of 604×394, none — 020's passes sent 28 and 14 — and brings no
+// NoExposure event; the first, which makes what the passes keep, no more
+// requests than a pass of 020. The windows of the test have no DAMAGE, so
+// their passes send no DamageSubtract, one request of qws's passes: 5 and
+// 3 at most here, 27 and 13 for 020's. The windows are off the screen.
+func TestFramePassRequests(t *testing.T) {
+	conn, err := x11.NewConn()
+	if err != nil {
+		t.Skipf("no X display: %v", err)
+	}
+	defer conn.Close()
+	s := frameSnapshotter(t, conn)
+	for _, c := range []struct {
+		size        image.Point
+		most, of020 int
+	}{
+		{image.Pt(2556, 1357), 6 - 1, 28 - 1},
+		{image.Pt(604, 394), 4 - 1, 14 - 1},
+	} {
+		w, _ := frameWindow(t, s, conn, image.Pt(-4000, -4000), c.size, 0)
+		// The scaled pixmap of 020 made, as at a window's first pass of all
+		if _, ok := livePicture(t, s, w); !ok {
+			t.Fatalf("%v: no pass", c.size)
+		}
+		s.dropChains()
+		first, firstEvents, ok := passRequests(t, s, conn, w)
+		if !ok {
+			t.Fatalf("%v: no first pass of the activation", c.size)
+		}
+		var counts []int
+		events := firstEvents
+		for range 3 {
+			n, e, ok := passRequests(t, s, conn, w)
+			if !ok {
+				t.Fatalf("%v: no pass", c.size)
+			}
+			counts, events = append(counts, n), events+e
+		}
+		t.Logf("%v: the first pass of an activation %d requests, the next %v; %d NoExposure events",
+			c.size, first, counts, events)
+		for _, n := range counts {
+			if n > c.most {
+				t.Errorf("%v: %d requests a pass, want %d at most (020: %d)", c.size, n, c.most, c.of020)
+			}
+		}
+		if first > c.of020 {
+			t.Errorf("%v: the first pass %d requests, more than 020's %d", c.size, first, c.of020)
+		}
+		if events != 0 {
+			t.Errorf("%v: %d NoExposure events", c.size, events)
+		}
+		s.forget(w.id)
+	}
+}
+
+// TestFramePassMoved checks K2 of specs/023-frame-pass-cost: a window moved
+// in its frame between two passes — as i3 moves one, showing or hiding a
+// title bar — and one two levels below the window the compositor redirects,
+// moved with its parent: the next live picture equal byte for byte to the
+// snapshot at the new place, the pass made again once — 2(k + 3) requests,
+// with no DamageSubtract, as TestFramePassRequests counts — and the offset
+// kept for the passes after it
+func TestFramePassMoved(t *testing.T) {
+	conn, err := x11.NewConn()
+	if err != nil {
+		t.Skipf("no X display: %v", err)
+	}
+	defer conn.Close()
+	s := frameSnapshotter(t, conn)
+	size := image.Pt(604, 394)
+	for _, nested := range []bool{false, true} {
+		var w *window
+		var child xproto.Window
+		if nested {
+			w, child = nestedFrameWindow(t, s, conn, image.Pt(-4000, -4000), size)
+		} else {
+			w, child = frameWindow(t, s, conn, image.Pt(-4000, -4000), size, 0)
+		}
+		pics := newFramePictures(t, conn, child, size, 80)
+		pics.show(0)
+		if _, ok := livePicture(t, s, w); !ok {
+			t.Fatal("no pass")
+		}
+		// Up by 20 pixels: the window itself, or the window it lies in
+		moved := w.id
+		if nested {
+			tree, err := xproto.QueryTree(conn, w.id).Reply()
+			if err != nil {
+				t.Fatal(err)
+			}
+			moved = tree.Parent
+		}
+		geom, err := xproto.GetGeometry(conn, xproto.Drawable(moved)).Reply()
+		if err != nil {
+			t.Fatal(err)
+		}
+		xproto.ConfigureWindow(conn, moved, xproto.ConfigWindowY, []uint32{uint32(int(geom.Y) - 20)})
+		conn.Sync()
+		before := w.at
+		n, _, ok := passRequests(t, s, conn, w)
+		if !ok {
+			t.Fatalf("nested %v: no pass after the move", nested)
+		}
+		got := s.pics[w.id]
+		img := image.NewRGBA(image.Rect(0, 0, got.Width, got.Height))
+		gl.BindTexture(gl.TEXTURE_2D, got.Texture)
+		gl.GetTexImage(gl.TEXTURE_2D, 0, gl.RGBA, gl.UNSIGNED_BYTE, unsafe.Pointer(&img.Pix[0]))
+		for i := 3; i < len(img.Pix); i += 4 {
+			img.Pix[i] = 255
+		}
+		snap := pics.snapshot(t, s, w, 0)
+		_, worst := difference(img, snap)
+		t.Logf("nested %v: at %v, then %v; %d requests; worst %d from the snapshot at the new place",
+			nested, before, w.at, n, worst)
+		if worst != 0 {
+			t.Errorf("nested %v: worst %d from the snapshot at the new place", nested, worst)
+		}
+		if w.at != before.Add(image.Pt(0, -20)) {
+			t.Errorf("nested %v: offset %v kept, want %v", nested, w.at, before.Add(image.Pt(0, -20)))
+		}
+		if n != 2*(0+3) {
+			t.Errorf("nested %v: %d requests, want 6, the pass made again once", nested, n)
+		}
+		if again, _, _ := passRequests(t, s, conn, w); again != 0+3 {
+			t.Errorf("nested %v: %d requests the pass after, want 3", nested, again)
+		}
+		s.forget(w.id)
+	}
+}

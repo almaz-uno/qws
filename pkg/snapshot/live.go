@@ -501,21 +501,13 @@ var bindScaled = func(off *glx.Offscreen, pixmap xproto.Pixmap) (*glx.TexturePix
 // done it: the GPU reads the pixmap next. False when it cannot: the window is
 // then stale and keeps its picture until a snapshot names its pixmap anew;
 // should a scaled pixmap not bind on the GPU, no window is passed from its
-// frame for the session.
+// frame for the session. False as well, the window still waiting a pass,
+// when it moved in its frame twice in a pass.
 func (s *Snapshotter) scaleFromFrame(w *window, tw, th int) bool {
 	sp, err := s.scaledFor(w, tw, th)
+	moved := false
 	if err == nil {
-		var r image.Rectangle
-		if r, err = s.pixmapRect(w); err == nil {
-			var c *chain
-			if c, err = s.chainFor(w, r, sp); err == nil {
-				for _, p := range c.run(w.pixmap, r.Min) {
-					if err == nil {
-						err = p.Check()
-					}
-				}
-			}
-		}
+		moved, err = s.passFromFrame(w, sp)
 	}
 	if err != nil {
 		log.Debug().Err(err).Uint32("window", uint32(w.id)).Uint32("via", uint32(w.via)).
@@ -523,7 +515,45 @@ func (s *Snapshotter) scaleFromFrame(w *window, tw, th int) bool {
 		w.stale = true
 		return false
 	}
+	if moved {
+		log.Debug().Uint32("window", uint32(w.id)).Msg("Live pass from the frame: the window moved, again")
+		return false
+	}
 	return true
+}
+
+// passFromFrame runs the window's chain at the offset kept, then sends
+// TranslateCoordinates of the window to its frame, which xgb's check of the
+// composites would have sent a GetInputFocus for: its reply checks them as
+// well, and tells where the window lies now (specs/023-frame-pass-cost, D2
+// c). Should the window lie elsewhere — a title bar shown or hidden — the
+// chain is run again at once at the new place, once; true when it has moved
+// again by then.
+func (s *Snapshotter) passFromFrame(w *window, sp *scaledPixmap) (bool, error) {
+	for range 2 {
+		r := image.Rectangle{Max: image.Pt(w.width, w.height)}.Add(w.at)
+		c, err := s.chainFor(w, r, sp)
+		if err != nil {
+			return false, err
+		}
+		passes := c.run(w.pixmap, w.at)
+		pos, err := xproto.TranslateCoordinates(s.conn, w.id, w.via, 0, 0).Reply()
+		for _, p := range passes {
+			if err == nil {
+				// Answered by the reply after it: no round trip of its own
+				err = p.Check()
+			}
+		}
+		if err != nil {
+			return false, err
+		}
+		at := image.Pt(int(pos.DstX)+w.viaBorder, int(pos.DstY)+w.viaBorder)
+		if at == w.at {
+			return false, nil
+		}
+		w.at = at
+	}
+	return true, nil
 }
 
 // chainFor is the chain the window's passes from the frame run, into its
