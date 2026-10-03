@@ -117,3 +117,80 @@ func TestXIDsReused(t *testing.T) {
 		"with reused XIDs, every XID with a pixmap: %v; %.2f s",
 		first, beyond, jumps, len(kept), len(made)-len(kept), *xidRequests, elapsed.Seconds())
 }
+
+// TestXIDsAheadNotGivenAgain checks criterion K6 of specs/024-xid-reuse: xgb
+// asks for a range right after it has put the last XID of the one before in
+// the buffer of NewId, and the X server takes for free the XIDs it has given
+// and not yet seen named. Here the last 20 XIDs of the first range are taken a
+// millisecond apart and each named by a pixmap a millisecond after its NewId,
+// as by a goroutine slower than the X server: the five in the buffer and the
+// one taken last when xgb asks. Their pixmaps live on, and the next two
+// million XIDs, the walk through the X server's range, must hold none of
+// theirs: before #74 xgb gave the six again, and the X server answered
+// BadIDChoice.
+func TestXIDsAheadNotGivenAgain(t *testing.T) {
+	conn, err := NewConn()
+	if err != nil {
+		t.Skipf("no X display: %v", err)
+	}
+	defer conn.Close()
+	name := "XC-MISC"
+	ext, err := xproto.QueryExtension(conn, uint16(len(name)), name).Reply()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ext.Present {
+		t.Skip("no XC-MISC on the X server")
+	}
+	var failed atomic.Int64
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		for {
+			ev, xerr := conn.WaitForEvent()
+			if ev == nil && xerr == nil {
+				return // closed
+			}
+			if xerr != nil && failed.Add(1) == 1 {
+				t.Errorf("a request failed: %v", xerr)
+			}
+		}
+	}()
+	defer func() { conn.Close(); <-drained }()
+
+	setup := xproto.Setup(conn)
+	screen := setup.DefaultScreen(conn)
+	root, depth := xproto.Drawable(screen.Root), screen.RootDepth
+	mask := setup.ResourceIdMask
+	first := mask / (mask & -mask)
+	const (
+		slow = 20 // the last XIDs of the first range taken a millisecond apart
+		kept = 6  // the last of them, with a pixmap that lives on
+	)
+	held := make(map[uint32]uint32) // XID → the NewId that gave it
+	begin := time.Now()
+	for i := uint32(1); i <= 2*first+16; i++ {
+		id, err := conn.NewId()
+		if err != nil {
+			t.Fatalf("XID %d: %v", i, err)
+		}
+		if at, ok := held[id]; ok {
+			t.Fatalf("XID %d, 0x%x, given again while the pixmap of XID %d lives", i, id, at)
+		}
+		if i > first-slow && i <= first {
+			time.Sleep(time.Millisecond)
+			if i > first-kept {
+				held[id] = i
+				xproto.CreatePixmap(conn, depth, xproto.Pixmap(id), root, 1, 1)
+			}
+		}
+	}
+	if _, err := xproto.GetInputFocus(conn).Reply(); err != nil {
+		t.Fatal(err)
+	}
+	elapsed := time.Since(begin)
+	conn.Close()
+	<-drained
+	t.Logf("%d XIDs, the last %d of the first range a millisecond apart, %d of them kept with a pixmap; %.2f s",
+		2*first+16, slow, len(held), elapsed.Seconds())
+}
