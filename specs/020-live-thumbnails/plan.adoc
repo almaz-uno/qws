@@ -45,8 +45,9 @@ no longer its, are deleted once no frame is being drawn: a frame may bind
 them, and a name deleted may be given again.
 
 *The live schedule.* Between `SetLive(overlay, interval)`, which the
-selector calls when it maps its overlay, and `SetLive(0, 0)`, when it unmaps
-it at the end of the fade-out, the loop of the snapshotter takes the
+selector calls once its overlay is shown in full — at the end of the
+fade-in, since the first runs of S5 (D5) — and `SetLive(0, 0)`, as the
+fade-out starts, the loop of the snapshotter takes the
 windows that changed, each at most once an interval, without the settle of
 100 ms; of those due, the one that changed first. Only the windows the
 switcher shows: those of its last frame, which `BeginFrame` gives — not a
@@ -89,6 +90,21 @@ passes are paused by the overlays of `_QWS_SWITCHERS` other than the one
 condition of `liveTick` and of the timer of `liveWait`. The snapshotter
 holds the switchers behind an interface of its own, so that a test can
 give them.
+
+*From the frame* (D2, the author's answer A). A window taken from its
+frame's pixmap (022) has no texture of its own, and the frame's pixmap is
+the compositor's: a pass scales the window by RENDER — `xrender.scale`,
+the passes of 022's `thumbnail` without its read back — into a pixmap of
+the snapshotter's own, a8r8g8b8 of the thumbnail's size, bound on the GPU
+once (`scaledPixmap` of `live.go`); once the composites are checked — a
+round trip, by when the X server has done them — and `glXWaitX`, the
+pixmap is bound again and the average copies it, at a scale of 1, into
+the live texture not published. The live textures, the fences, the
+schedule and the drawing are those of every pass. `livePassable` takes
+such a window with RENDER at hand and the passes from frames not turned
+off; a pass that fails leaves it stale, a pixmap that will not bind turns
+the passes from frames off. The pixmap is freed with the window, or at
+another size.
 
 *Drawing.* The selector knows where each thumbnail lies: the geometry of a
 card at its offset — integer at rest, fractional in a step — and of a tile
@@ -142,7 +158,8 @@ order of its events is kept.
 | `pkg/glx/glx_linux.go`, `pkg/glx/pixmap_linux.go`
 | `NewContext` takes an optional context to share with; `Offscreen` gives
   its context for that, as an opaque handle. A failure to share is told
-  apart from a failure to create.
+  apart from a failure to create. `Offscreen.WaitX`, glXWaitX, for the
+  passes from frames.
 
 | `pkg/snapshot/gpu.go`
 | The average drawn into a framebuffer the caller gives, read back or not.
@@ -150,7 +167,12 @@ order of its events is kept.
 | `pkg/snapshot/live.go`
 | New: the live textures of a window, their generations and fences; the
   live schedule; `SetLive`, `Share`, `BeginFrame` and `EndFrame`; the
-  `ClientMessage`; the records "Live".
+  `ClientMessage`; the records "Live". The passes from frames: the scaled
+  pixmap of a window, `scaleFromFrame`, `bindScaled`.
+
+| `pkg/snapshot/xrender.go`, from 022
+| `scale`: the passes of `thumbnail` into a picture given, which
+  `thumbnail` reads back and a pass from a frame binds.
 
 | `pkg/snapshot/snapshot.go`
 | The loop runs the live schedule while live, and no snapshot on change;

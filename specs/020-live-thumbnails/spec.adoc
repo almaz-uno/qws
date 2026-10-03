@@ -150,16 +150,49 @@ Found in S5, 2026-10-02: every window of the list took passes, those off
 the strip as well, and their pictures were drawn seconds after their
 changes, when their cards came back.
 
-A window drawn into the pixmap of its frame takes no pass either: of
-depth 24 in a frame of depth 24, it is not redirected apart from the
-frame, Composite names no pixmap of its own, and the snapshotter has no
-texture of it to average: 022, in 1.3.3, takes its snapshots from the
-frame's pixmap by RENDER and never binds that pixmap on the GPU, and a
-window taken from its frame takes no pass. Its card or tile keeps its
-snapshot.
-On ws1, 2026-10-02: Dion, Telegram, KeePassXC and Yandex Music, 4 of 35
-windows, and the xterm the first runs of S5 changed. Whether to give them
-passes is an open decision.
+A window drawn into the pixmap of its frame — of depth 24 in a frame of
+depth 24, not redirected apart from the frame — has no pixmap of its own:
+Composite names none, and the snapshotter has no texture of it to average.
+022, in 1.3.3, takes its snapshots from the frame's pixmap by RENDER and
+never binds that pixmap on the GPU: it is the compositor's, which picom
+binds on ws1, and NVIDIA lets one GLX pixmap exist on a storage (018). On
+ws1, 2026-10-02: Dion, Telegram, KeePassXC and Yandex Music, 4 of 35
+windows, and the xterm the first runs of S5 changed; on 2026-10-03
+ilovlya, of depth 24 and visual 0x2b in a frame of 0x21, which changed all
+the time in the author's trial at rest. How such windows are live:
+
+[cols="1,3,3,3"]
+|===
+| | Option | For | Against
+
+| A
+| *By RENDER into a pixmap of qws's own.* A pass scales the window's
+  rectangle out of the frame's pixmap by RENDER, as its snapshot is
+  scaled, straight into a pixmap of the snapshotter's of the thumbnail's
+  size, bound on the GPU, and copies it into the live texture.
+| Reads only, as 022: nothing changes in how the X server and the
+  compositor draw the window. The pixmap bound is qws's own storage. The
+  picture is the snapshot's, the filter of RENDER. No read back.
+| A scale in the X server a pass, some 1 ms of its CPU for a window of
+  E1, and more of the snapshotter's than a pass from a pixmap of its own.
+
+| B
+| *Redirected by qws.* The snapshotter redirects each such window,
+  `CompositeRedirectWindow` automatic: a pixmap and a texture of its own.
+| The passes of every other window, unchanged.
+| Changes how the X server draws the author's windows while qws runs: a
+  pixmap more a window, 14 MB for one of E1, a copy into the frame at each
+  change, the window unmapped and mapped again in the X server (022, D1).
+
+| C
+| *Snapshots.* As 1.3.3.
+| Nothing to do.
+| The window that changes stands still; K11 fails on the author's desktop.
+|===
+
+*Author, 2026-10-03: A.* A window taken from its frame takes passes as
+any other — in view, one window a pass, at most once a `live_interval` —
+by RENDER into a pixmap of its own (Behavior, "From the frame").
 
 === D3. What replaces the frame at rest byte for byte
 
@@ -366,11 +399,26 @@ All of it on `glx` with `appearance.thumbnail.live: true`; otherwise as in
   after it. A fence and a flush follow each pass; once the fence has
   signalled, tested by the snapshotter, the texture is published as the
   window's picture.
+. *From the frame.* A window taken from its frame's pixmap (022) is
+  passed by RENDER: its rectangle in the frame's pixmap — where 022 finds
+  it, asked of the X server at each pass — scaled as its snapshot is, by
+  bilinear halvings and a last bilinear pass, straight into a pixmap of
+  qws's own, a8r8g8b8 of the thumbnail's size, made at the window's first
+  pass and anew at another size, freed with the window. That pixmap, and
+  never the frame's, is bound on the GPU; once the X server has answered
+  and `glXWaitX` returned, it is bound again and copied into the live
+  texture not published, under the fences of every pass. Nothing is read
+  back. The frame's pixmap is named anew when the frame is configured,
+  as 022 does: the window is then stale and keeps its picture until the
+  next activation, as a window whose size changed. A pass that fails
+  leaves the window so too; should a pixmap of qws's own not bind on the
+  GPU, no window is passed from its frame for the session, "Live
+  thumbnails of the windows taken from their frame off: …" at info
+  level, once. Without RENDER, no such pass: the snapshots of 022.
 . *Not live:* a window not viewable keeps its snapshot; a window whose size
   changes while shown keeps its last live picture until the next
-  activation; a window the GPU will not bind (018), and a window drawn
-  into the pixmap of its frame, which has no texture of its own (D2),
-  keep their snapshots; a window whose card is not in view takes no pass.
+  activation; a window the GPU will not bind (018) keeps its snapshot; a
+  window whose card is not in view takes no pass.
 . *Drawing.* A window whose live texture is newer than the snapshot its
   card or tile was drawn from has a live rectangle (D3). Every frame the
   presenter draws — the frame at rest, a scene of layers, a frame of a
@@ -420,8 +468,9 @@ C — CPU:: CPU time of the qws process over a session, from
 Session S5:: S2 of 007 on E1 — the overlay on DP-0 at 144 Hz, the service
 stopped — with a window on DP-4 changing all the time: a terminal printing
 a line every 20 ms, the window viewable on the visible workspace of DP-4,
-of depth 32 with a pixmap of its own — a mate-terminal on E1; an xterm,
-drawn into the pixmap of its frame, takes no pass (D2). Run with the
+of depth 32 with a pixmap of its own — a mate-terminal on E1 — and, for
+the windows taken from their frame, of depth 24 drawn into the pixmap of
+its frame — an xterm (D2). Run with the
 carousel and with the grid, with `live: true` and with `live: false` in
 turn, three times each. Its rest variant: after the steps of each
 activation the overlay is held still, `REST` seconds of `measure.sh`, a
@@ -520,6 +569,20 @@ with them.
   by a frame of its own. In the rest variant of S5 with `live: true`, R at
   least 20 passes a second, and no activation under 10 — provisional,
   until the first measurement. The author's trial at rest is K11.
+
+| K14
+| From the frame: `TestLiveFromFrame` in `pkg/snapshot` — a window of
+  depth 24 in a frame of its visual, and one of another visual of depth
+  24, off the screen, which the compositor redirects — passed live by
+  RENDER into a pixmap of qws's own, the only pixmap bound on the GPU,
+  never the frame's, nor the window bound; its picture within 1 of the
+  snapshot of the same picture, which RENDER scales alike — the tolerance
+  against `cpu` is RENDER's filter, as for the snapshots of 022, a mean
+  of 0.7–1.3 per channel from the area average for its pictures, 2 at
+  most; drawn anew, the new picture; a pixmap of qws's own that does not
+  bind: no pass, the snapshot kept, none tried again. `TestLiveAtRest`
+  with a window in a frame: as K13. `BenchmarkLivePassFrame`: the pass,
+  and the CPU of the X server and of qws a pass, reported in the results.
 |===
 
 == Open decisions
@@ -538,11 +601,8 @@ with them.
   the activation but for the selection and the hover.
 . Under `cpu`, semi-live thumbnails at a low rate, should the author want
   them there (D4).
-. The windows drawn into the pixmap of their frame (D2), 4 of 35 on ws1,
-  take no pass. Two ways to give them one, later: redirect each such
-  window, `CompositeRedirectWindow` by the snapshotter, so that it has a
-  pixmap and a texture of its own — which changes how the X server draws
-  the author's windows while qws runs (022, D1, option b); or a pass by
-  RENDER from the frame's pixmap, as 022 takes their snapshots, into a
-  pixmap of the snapshotter's own that it binds and averages on the GPU —
-  a copy in the X server a pass, and no read back. Neither measured.
+. A pass from a frame asks the X server, at each pass, where the window
+  lies in the frame, and makes and frees the pixmaps of its halvings:
+  kept between passes, with the rectangle asked again on a ConfigureNotify
+  of the window, a pass would send some 5 requests of RENDER instead of
+  some 25, and save the snapshotter's CPU (results). Not made.
