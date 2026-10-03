@@ -191,7 +191,10 @@ func (x *xrender) scale(pixmap xproto.Pixmap, visual xproto.Visualid, depth int,
 		if err != nil {
 			return nil, err
 		}
-		xproto.CreateGC(x.conn, gc, xproto.Drawable(window), 0, nil)
+		// Without graphics exposures, the protocol's default, a copy sends a
+		// NoExposure event, which woke the snapshotter's loop for nothing at
+		// each snapshot and pass (specs/023-frame-pass-cost, D3)
+		xproto.CreateGC(x.conn, gc, xproto.Drawable(window), xproto.GcGraphicsExposures, []uint32{0})
 		xproto.CopyArea(x.conn, xproto.Drawable(pixmap), xproto.Drawable(window), gc,
 			int16(r.Min.X), int16(r.Min.Y), 0, 0, uint16(w), uint16(h))
 		xproto.FreeGC(x.conn, gc)

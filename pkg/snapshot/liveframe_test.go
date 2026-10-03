@@ -318,3 +318,30 @@ func BenchmarkLivePassFrame(b *testing.B) {
 		b.ReportMetric(v.v[(len(v.v)*95+99)/100-1], v.name+"-p95-ms")
 	}
 }
+
+// TestFrameCopyQuiet checks D3 of specs/023-frame-pass-cost: the copy of a
+// window out of its frame's pixmap, for a snapshot and for a live pass,
+// sends no NoExposure event to the snapshotter's connection
+func TestFrameCopyQuiet(t *testing.T) {
+	conn, err := x11.NewConn()
+	if err != nil {
+		t.Skipf("no X display: %v", err)
+	}
+	defer conn.Close()
+	s := frameSnapshotter(t, conn)
+	w, _ := frameWindow(t, s, conn, image.Pt(-4000, -4000), image.Pt(604, 394), 0)
+	defer s.forget(w.id)
+	for k := range 4 {
+		if k%2 == 0 {
+			s.capture(w, "test")
+		} else if _, ok := livePicture(t, s, w); !ok {
+			t.Fatal("no pass")
+		}
+	}
+	xproto.GetInputFocus(conn).Reply()
+	for ev, _ := conn.PollForEvent(); ev != nil; ev, _ = conn.PollForEvent() {
+		if _, ok := ev.(xproto.NoExposureEvent); ok {
+			t.Fatal("a NoExposure event of the copy")
+		}
+	}
+}
