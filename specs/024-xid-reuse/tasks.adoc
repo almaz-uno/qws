@@ -1,0 +1,17 @@
+= 024 — tasks
+:toc: left
+:toc-title: Contents
+:revdate: 2026-10-03
+
+. [x] T1. `TestXIDsReused` on `develop`, before any other change: T-before
+  (research, "Reproduction").
+. [x] T2. The probes of XC-MISC on E1, of the cost of the requests and of
+  the XIDs in flight (research).
+. [x] T3. The specification.
+. [x] T4. `pkg/x11/xids.go`; XC-MISC in the setup; the range function in
+  `NewConn`; K2, K3.
+. [x] T5. T-after; K1.
+. [x] T6. The probe build without XC-MISC; K4.
+. [x] T7. `go vet ./...`, `go test ./...`, `-race`, `gofmt -l .`,
+  `make check-specs`, each commit on its own in a clean worktree; K5; the
+  results.

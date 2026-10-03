@@ -1,0 +1,211 @@
+= 024 — XIDs of every connection reused
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-03
+:issue: 70
+:status: implemented
+
+== What and why
+
+A connection of qws can run out of resource identifiers, XIDs, and from
+then on make no resource of the X server: no pixmap, picture or GC of a
+snapshot by RENDER, no damage object of a new window (issue #70). Not seen
+yet — the service restarts at every login — but latent in every release
+since 1.1.0 for the RENDER paths of 018 and 022.
+
+The cause, confirmed by the code of xgb and by a test that reproduces it
+(research): xgb 1.3.1 gives the XIDs of a connection in turn within the
+resource-id-mask the X server gave it, and once it has given the last one
+asks the range function of the connection for more; without one — and qws
+sets none — `NewId` fails from then on with "there are no more available
+resource identifiers, and no re-use configured", whatever the connection
+has freed meanwhile. On E1 the mask is `0x1fffff`: 2 097 151 XIDs a
+connection. The snapshotter's connection takes 9 for a snapshot by RENDER
+of a window of 2560×1440 drawn into its frame (022, two halvings), 7 for one
+with a pixmap of its own (018), one for each pixmap it names and each window
+it follows. A window of that size that changes all the time, captured once a
+second, uses the snapshotter's connection up in 2 097 151 / 9 s, some 2.7
+days.
+
+The change: every connection `x11.NewConn` makes (021) gets a range function
+that asks the X server for a range of XIDs of the connection that name no
+resource, by `GetXIDRange` of the extension XC-MISC, which X.Org's servers
+have and xgb implements (`xcmisc`). XC-MISC is set up once per process with
+the other extensions of 021, never initialised on a live connection.
+
+The specification is a delta to `develop` at `9774075` (1.3.3); the change
+goes out as patch 1.3.4, a fix with no new behaviour. Unchanged: the
+connections qws makes, all through `x11.NewConn`, and the order
+`cmd/qws/root.go` makes them in; the extensions each part uses and what it
+falls back to without them; the first range of every connection, the XIDs
+xgb gives before it needs a range function; the configuration — no key,
+variable or flag changes. The console programs `framecmp` and `glxoverlay`
+keep `xgb.NewConn` and no reuse: they live for a run of their own. The
+connections of Xlib in `pkg/glx` take their XIDs from libxcb, which reuses
+them through XC-MISC already (research).
+
+== Decisions
+
+Asked for, 2026-10-03 (issue #70):
+
+* XIDs reused on every connection of the program, through `GetXIDRange` of
+  XC-MISC, set where every connection is made: `x11.NewConn`;
+* a test that goes through a whole range.
+
+Made on the way, 2026-10-03, for the author to confirm:
+
+* *XC-MISC among the extensions of the setup.* `extensionNames` of
+  `pkg/x11/extensions.go` gets XC-MISC: the setup asks for it with the
+  other six and every connection gets its opcode, so that its requests can
+  be sent with no `xcmisc.Init`, which 021 leaves out of qws. XC-MISC has
+  no events and no errors: the tables of events and errors stay as 021
+  writes them.
+* *Without XC-MISC, today's behaviour.* `NewConn` sets no range function,
+  and the setup, run once per process, logs a warning once: "XC-MISC
+  unavailable, XIDs not reused".
+* *The answer of none.* X.Org's server answers start 0 and count 1 when no
+  XID of the client is free, which xgb would take for a range of one XID,
+  0 ORed with the base, in use: the range function returns an error instead,
+  and `NewId` fails, as libxcb does (research).
+* *The test takes the XIDs alone.* A pixmap made and freed with every XID
+  of a range costs E1 15 s, 13.5 s of them the X server's CPU, at every
+  `go test ./...` with a display, on the author's desktop that of the
+  desktop. `TestXIDsReused` asks for the XIDs of the whole first range and
+  past it, keeps pixmaps with some of the first, and makes pixmaps, checked,
+  with some of those past it; the flag `-xid-requests` of the test binary
+  makes and frees a pixmap with every one (research, "Reproduction").
+* *The XIDs in flight are not guarded against* — an open decision: xgb
+  gives up to five XIDs ahead, which the X server may take for free when it
+  answers `GetXIDRange` and give again once the next range is walked through
+  (research, "XIDs in flight").
+
+== Behavior
+
+. *The setup.* The first `x11.NewConn` of the process asks `QueryExtension`
+  for XC-MISC with Composite, DAMAGE, MIT-SHM, RANDR, RENDER and XFIXES
+  (021). Without XC-MISC it logs the warning.
+. *Connections.* Every connection `x11.NewConn` makes gets the opcode of
+  XC-MISC and, when the X server has it, the range function.
+. *Past the first range.* When xgb has given every XID of a range, it calls
+  the range function, which asks `GetXIDRange` and returns the range of the
+  reply; xgb gives its XIDs in turn and asks again past its end. On the
+  answer of none, `NewId` fails with "error getting ID re-use: XC-MISC:
+  every XID of the connection in use".
+. *Without XC-MISC*, `NewId` fails past the first range, as before.
+
+== Metrics
+
+Run T:: The test binary of `pkg/x11` — `go test -c`, and `go test -race -c`
+— run as `-test.run 'TestXIDsReused$' -test.count=1 -test.v`, 5 times
+without the race detector and 2 with it, and once with `-xid-requests`, on
+E1 beside the service and picom. T-before builds `develop` at `9774075`
+with only the test file of this change added; T-after builds this change,
+with 3 runs under `-race`.
+
+== Acceptance criteria
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| Reuse: `TestXIDsReused` in `pkg/x11`, on a connection of `x11.NewConn`
+  — the whole first range of XIDs and 524 288 past it; pixmaps kept from
+  the first range at its first XID and every 262 144th; a pixmap made,
+  checked, and freed with every 4 096th XID past it. T-before fails in 5
+  runs of 5 and 2 of 2 under `-race` at XID 2 097 152 with "there are no
+  more available resource identifiers, and no re-use configured", and with
+  `-xid-requests` at the same XID. T-after passes in 5 of 5, 3 of 3 under
+  `-race` and with `-xid-requests`: the XIDs past the first range come from
+  at least two ranges, none is that of a pixmap kept, every one is of the
+  connection — its base under its mask — and every pixmap made with them is
+  made. Without the race detector and the flag, a run takes at most 1 s.
+
+| K2
+| Every connection: `grep -rn SetIDRangeFunc --include=*.go pkg cmd
+  internal console` finds the one call in `NewConn`, under the presence of
+  XC-MISC. No `Init` is added: outside the tests, the grep of `\.Init(`
+  finds the three `gl.Init` alone, as K2 of 021 has it, and `xgb.NewConn`
+  is called in `pkg/x11/extensions.go` and the two console programs only.
+
+| K3
+| The answer of none: `TestXIDRange` — start 0 and count 1 give the error
+  `errNoXIDs`; a range of E1, start `0x9c00004` and count 2 097 148, is
+  returned as it is.
+
+| K4
+| Without XC-MISC: a probe build with XC-MISC left out of `extensionNames`
+  — the setup then finds no XC-MISC — fails `TestXIDsReused` as T-before
+  does, and logs the warning once in a run of the three tests of
+  `pkg/x11` that connect through `x11.NewConn`: `-test.run
+  'TestMonitorsUnderEvents$|TestModelMatchesQueries$|TestXIDsReused$'`.
+
+| K5
+| Unchanged and clean: `go test ./...` passes on E1, the tests of K4 of 021
+  among them — `TestNewAndClose`, `TestRenderThumbnail`, `TestGPUThumbnail`,
+  `TestFallback`, `TestSwitchers`, `TestModelMatchesQueries` — and
+  `TestMonitorsUnderEvents`; `go vet ./...`, `go test -race ./pkg/x11` and
+  `make check-specs` pass; `gofmt -l .` finds nothing.
+|===
+
+== Results
+
+2026-10-03, E1 (ws1), the commit of the fix `c647afe` in a clean worktree;
+the runs and the probes in `research.adoc`.
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | T-before: 5 runs of 5 failed at XID 2 097 152 with "there are no more
+  available resource identifiers, and no re-use configured", in 0.35–0.36
+  s; with `-race`, 2 of 2, in 1.21–1.23 s; with `-xid-requests`, at the
+  same XID after 15.53 s. T-after: 5 of 5 passed, in 0.46–0.49 s; with
+  `-race`, 3 of 3, no race, 1.63–1.68 s; with `-xid-requests`, in 21.17 s.
+  In each run the 524 288 XIDs past the first range came from 3 ranges of
+  XC-MISC, every one of the connection and none that of the 8 pixmaps
+  kept, and the 128 pixmaps made with them were made.
+| K2 | `SetIDRangeFunc`: `pkg/x11/extensions.go:63`, in `NewConn`, under
+  `opcodes["XC-MISC"]`, and nowhere else. Outside the tests the grep of
+  `\.Init(` finds the `gl.Init` of `pkg/snapshot/gpu.go`,
+  `pkg/carousel/present_glx.go` and `console/glxoverlay/main.go`, and
+  `xgb.NewConn` is called by the setup and `NewConn` in
+  `pkg/x11/extensions.go`, `console/framecmp` and `console/glxoverlay`. In
+  the tests the grep also finds three `Init` of `frameSnapshotter` in
+  `pkg/snapshot/frame_test.go`, on `develop` since 022 (issue #67).
+| K3 | `TestXIDRange` passes.
+| K4 | The probe build: `TestXIDsReused` failed at XID 2 097 152 with the
+  error of T-before; `TestMonitorsUnderEvents` and
+  `TestModelMatchesQueries` passed; the run logged "XC-MISC unavailable,
+  XIDs not reused: a connection makes no resource once it has given every
+  XID of its mask" once, at the level `warn`.
+| K5 | Build, `go vet ./...`, `gofmt -l .`, `make check-specs`, `go test
+  ./...` and `go test -race ./pkg/x11` pass for each commit of the change
+  in a clean worktree; a run of `go test ./...` that failed did so in
+  `TestGPUThumbnail`, "drawn anew", with the code of `develop` as with the
+  change, and the next run passed. With `-v`, the tests of `pkg/x11` pass
+  and none skips; `TestNewAndClose`, `TestRenderThumbnail` and
+  `TestFallback` pass, and `TestNewAndClose` logs "XSHM extension
+  available" and no "RENDER unavailable". `TestGPUThumbnail` alone fails
+  "drawn anew" in more than half of the runs on E1 that day, `develop`
+  alike: 8 runs of 20 passed for each, `develop` and the change in turn
+  (research, "After the change").
+|===
+
+== Open decisions
+
+. *XIDs in flight.* xgb gives up to five XIDs ahead of `NewId`, and asks
+  for a range right after it has given the last of the one before, while
+  the XIDs waiting and the one taken last may not have reached the X server
+  yet: its range can hold them, and once xgb has walked through it it gives
+  them again. A resource still named by one — a damage object, a pixmap
+  named — then fails to be made with BadIDChoice, and a `FreePixmap` of
+  the RENDER path after it frees the pixmap of that XID (research, "XIDs in
+  flight"). A remedy: the range function cuts from the X server's range the
+  last 64 XIDs of the range it gave before; not taken without the author.
+. Upstream: `generateXIds` of xgb 1.3.1 says it "needs to be updated to use
+  the XC Misc extension once we run out of new ids". A report, or a patch
+  that would set the function in xgb, is the author's decision.
+. `TestXIDsReused` takes 0.5 s, 1.6 s under `-race`, at every `go test
+  ./...` with a display; the X server spends some 0.02 s of CPU on it.
