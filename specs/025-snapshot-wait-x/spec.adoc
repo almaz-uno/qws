@@ -1,0 +1,142 @@
+= 025 — snapshots on the GPU wait for the X server's drawing
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-03
+:issue: 71
+:status: draft
+
+== What and why
+
+A snapshot on the GPU (specification 008) binds the window's pixmap as a
+texture — once the pixmap is named, `BindPixmap` of `pkg/glx`, and again at
+each capture after, `Rebind`, a release and a bind without a round trip —
+and averages it at once. On NVIDIA the X server may not yet have done on the
+GPU the drawing it was asked for and has answered: the average then reads
+the pixmap as it was before, in whole or in part. That drawing was
+subtracted from the window's damage before the capture, so no event brings
+the snapshotter back to it: a window that stops changing keeps a picture a
+step old until it changes again.
+
+`TestGPUThumbnail` (K4 of 008) shows it: a pixmap drawn anew and bound again
+gives the thumbnail of what it held before, "drawn anew … channels differ",
+under the load of the author's desktop — 4 of 6 runs on `develop` on
+2026-10-02, 8 of 10 on 2026-10-03, 3 of 3 at 17:01 that day (research).
+Specification 020, on its branch, found the same in its live passes and made
+them wait with `glXWaitX`: `TestSharedLive` failed in 5 of 55 runs without
+it and in none with it; of the passes from a frame, 10 of 200 were stale
+without it, 0 of 200 with it, 7 of 80 with an `XSync` of the GL display
+instead.
+
+The cause is an order GLX does not give: the X stream and the GL stream are
+each sequential, but not with each other; the texture bound to a pixmap
+holds the rendering completed before the binding, and GLX does no
+synchronization between the two (research). The change: the snapshotter
+calls `glXWaitX` before each binding of a window's pixmap, the first and
+every one after.
+
+The specification is a delta to `develop` at `9774075` (1.3.3). Unchanged:
+which windows are captured and when; the paths — the GPU, RENDER, the CPU —
+and the choice among them; RENDER and the CPU, which need no wait
+(research); the thumbnail and its size; the log; the configuration — no key,
+variable or flag changes.
+
+== Decisions
+
+Made on the way, 2026-10-03, for the author to confirm:
+
+* *`glXWaitX`, not a round trip.* A reply — an `XSync` of the GL display, or
+  of the connection that drew — orders the X server's requests, not its work
+  on the GPU: `TestGPUThumbnail` fails with every strip of its drawing
+  answered, and 020 had 7 of 80 passes stale with an `XSync` of the GL
+  display. A fence of the X server imported into GL
+  (`GL_EXT_x11_sync_object`) would make the GPU wait instead of the thread,
+  but needs an object of the X server per snapshotter, requests to trigger
+  and reset it at each capture, and an extension NVIDIA wrote; `glXWaitX` is
+  in GLX since 1.0 and is what 020 calls.
+* *Before the first binding as well.* `GLX_EXT_texture_from_pixmap` defines
+  the texture by the rendering completed before `glXBindTexImageEXT`, at the
+  first binding as at any other, and the round trips of naming the pixmap
+  and of `BindPixmap` order no work on the GPU. No first binding has been
+  seen stale — the check "first" of the test has not failed: the wait there
+  rests on the extension, not on a measurement.
+* *`WaitX` of 020 as it is.* `(*glx.Offscreen).WaitX` and the C function
+  under it keep the names and the text of 020's branch — added by `fd2b4a1`,
+  the comment as `de4083b` left it — so that 020 merges without a conflict
+  there. Its comment names 020's live passes, its test and its numbers,
+  which reach `develop` with that merge; the reasons of this change are told
+  where `captureGPU` calls it.
+* *The test waits as the snapshotter does.* `TestGPUThumbnail` binds through
+  `pkg/glx`, not through `captureGPU`, so the change of `captureGPU` does not
+  reach it: the test calls `WaitX` before its first binding and before the
+  second, as `captureGPU` does. Without it the test would keep failing
+  however the snapshotter waits.
+
+== Behavior
+
+. *The wait.* Before it binds the pixmap of a window — `BindPixmap` once the
+  pixmap is named, `Rebind` at each capture after — `captureGPU` calls
+  `glXWaitX` in the snapshotter's GL context: the drawing the X server has
+  executed before it is done before the GL commands after it, and the
+  average reads the pixmap as the X server drew it up to the capture.
+. *The other paths.* RENDER (018, 022) and the CPU path scale and read the
+  pixmap in the X server, ordered after its drawing by the X protocol, and
+  get the result in a reply: nothing is added to them.
+
+== Metrics
+
+F — failing runs of `TestGPUThumbnail`:: Two test binaries of
+`pkg/snapshot`, `go test -c`: B of `develop` at `9774075`, built before
+anything changed, and A of this change. They run in turn, B and A, the one
+first alternating from pair to pair, 50 runs each, `-test.run
+'^TestGPUThumbnail$'`, on E1 under the load of the author's desktop as it
+is, the service running.
+
+P — the snapshotter, a window drawn anew:: A probe outside the repository
+(research): a client window of 2556×1357 and depth 32 in a frame of depth
+24, off the screen — a window the X server redirects on its own, whose
+pixmap the snapshotter binds — drawn anew before each capture, two pictures
+in turn, and captured by `capture` of the snapshotter, 200 times. A
+thumbnail more than a mean of 1.2 per channel from the area average of the
+picture drawn is stale. Built with B's code and with A's, run in turn.
+
+S1 — cost of a snapshot:: In the same probe, the wall time of `capture` at
+p50 and p95, 200 captures each: drawn anew just before, and at rest —
+captured again with nothing drawn since.
+
+== Acceptance criteria
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| The test steady: in F, A fails none of its 50 runs, while B fails at
+  least 10 of its 50; with fewer, the load did not reproduce the issue, and
+  F is run again.
+
+| K2
+| The snapshotter: in P, none of A's 200 captures is stale; B's stale
+  captures are counted.
+
+| K3
+| Cost: S1 at rest, A's p50 no more than 0.5 ms above B's. Drawn anew, S1 is
+  recorded without a bound: there A waits for the drawing its thumbnail
+  shows.
+
+| K4
+| Unchanged: `TestCaptureFromFrame`, `TestRenderThumbnail`, `TestFallback`,
+  `TestNewAndClose`, `TestSchedule` pass.
+
+| K5
+| `go vet ./...`, `go test ./...`, `go test -race ./pkg/snapshot`,
+  `gofmt -l .` empty and `make check-specs` pass; no `Init` of an extension
+  of xgb and no `xgb.NewConn` outside `pkg/x11/extensions.go` and the tests
+  (021).
+|===
+
+== Open decisions
+
+. Mesa: whether its `glXWaitX` waits for anything with the snapshotter's
+  context current on a pbuffer, and whether its binding needs it, is not
+  known; ws2 and ws3 were not tried.
