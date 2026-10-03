@@ -5,9 +5,9 @@
 :revdate: 2026-10-03
 
 The plan of the options recommended in the specification — D1 b, D2 c, D3,
-and a for D4–D7; should the author choose others, it is written again. It
-starts from `develop` once pull request #60 (020) is merged: the code it
-changes is 020's.
+and a for D4–D7, which the author took on 2026-10-03. It starts from the
+branch of pull request #60 (020), merged into this one: the code it changes
+is 020's.
 
 == Approach
 

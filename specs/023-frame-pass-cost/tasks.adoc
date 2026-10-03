@@ -7,8 +7,9 @@
   requests of a pass counted from it; the costs 020 recorded, the runs at
   rest of 2026-10-03 and the second runs of S5 gathered (research).
 . [x] T2. The specification, its decisions laid out for the author.
-. [ ] T3. The author's answers to D1–D7, and whether to do it at all (open
-  decisions); the specification and the plan brought in line.
+. [x] T3. The author's answers to D1–D7, and whether to do it at all (open
+  decisions); the specification and the plan brought in line. Author,
+  2026-10-03: as recommended, and done.
 . [ ] T4. Before any code, on `develop` with #60 merged:
   `TestFramePassRequests` and the size of `BenchmarkLivePassFrame` written
   and run on 020's code — R, 28 and 14 expected; P at 2556×1357 and at

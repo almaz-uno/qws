@@ -55,11 +55,13 @@ open decision of 020, which proposed the chain kept and the rectangle asked
 again on a ConfigureNotify (D2 b).
 
 The author asked (issue #66) for the change to be described in a
-specification of its own and done later, if needed: the specification is a
-draft until the author decides, its decisions laid out for the author.
+specification of its own and done later, if needed; on 2026-10-03, with K9
+of 020 unmet in the rest variant of S5, the author took its decisions as
+recommended and asked for it to be done (020, K9, option c).
 
 The specification is a delta to 020 as it lands with pull request #60 — the
-branch `issue/qws#58-live-thumbnails`, read at `fe9e85f` (2026-10-03).
+branch `issue/qws#58-live-thumbnails`, read at `fe9e85f` (2026-10-03),
+merged at `be34624` into the branch of this one, which builds on it.
 Unchanged: which windows take passes and when — the schedule, the pause and
 the windows in view of 020; the passes of the windows with a pixmap of their
 own; the scaled pixmap of qws's own, its binding again, `glXWaitX` and the
@@ -72,9 +74,11 @@ patch of the release that carries 020, or with it.
 
 == Decisions
 
-None taken by the author yet. Each lists its options, with what it saves,
-its risk and what it does to the picture, and the one recommended — for the
-author to confirm.
+Author, 2026-10-03: as recommended — D1 b, D2 c, D3, and a for D4–D7 —
+and the change made (issue #66), so that K9 of 020 may be met with its
+bound kept (020, K9, option c). Each lists its options, with what it saves,
+its risk and what it does to the picture, and the one recommended, which is
+the one taken.
 
 === D1. What the passes keep in the X server
 
@@ -117,7 +121,7 @@ author to confirm.
   most once a second.
 |===
 
-*Recommended: b*, for the author to confirm.
+*Recommended: b*, taken.
 
 === D2. Where the window lies in the frame
 
@@ -160,7 +164,7 @@ author to confirm.
   another size no longer draws into.
 |===
 
-*Recommended: c*, for the author to confirm.
+*Recommended: c*, taken.
 
 === D3. The event of the copy
 
@@ -169,8 +173,8 @@ exposures on, the protocol's default: each `CopyArea` sends a NoExposure
 event, which xgb reads, the snapshotter's reader passes to its loop, and the
 loop, woken on the thread GL is locked to, matches with nothing — 30 a
 second for a window passed every 33 ms (research, "The event of each copy").
-*Recommended*, for the author to confirm: the graphics context made with
-graphics exposures off, for the snapshots too. Nothing changes in the
+*Recommended*, taken: the graphics context made with graphics exposures
+off, for the snapshots too. Nothing changes in the
 pictures.
 
 === D4. How the requests reach the X server
@@ -212,8 +216,8 @@ pictures.
   `pkg/glx`, not by xgb's cookies. The largest change.
 |===
 
-*Recommended: a* for this specification, c rejected; b or d should the
-measurement after D1–D3 leave K5 unmet — an open decision.
+*Recommended: a* for this specification, taken; c rejected; b or d should
+the measurement after D1–D3 leave K5 unmet — an open decision.
 
 === D5. How the window is scaled
 
@@ -261,8 +265,7 @@ measurement after D1–D3 leave K5 unmet — an open decision.
   the whole window a pass, as for every other window.
 |===
 
-*Recommended: a*, for the author to confirm: the same pictures, as #66
-asks. d is left open, for a specification of its own should the author want
+*Recommended: a*, taken: the same pictures, as #66 asks. d is left open, for a specification of its own should the author want
 the area average for these windows.
 
 === D6. The copy out of the frame
@@ -290,7 +293,7 @@ the area average for these windows.
   beyond the window with a weight.
 |===
 
-*Recommended: a*, for the author to confirm.
+*Recommended: a*, taken.
 
 === D7. The wait for the X server
 
@@ -319,7 +322,7 @@ the area average for these windows.
   `glXWaitX` does is to be measured anew — the 0 of 200.
 |===
 
-*Recommended: a*; b is an open decision, once D1–D3 are measured.
+*Recommended: a*, taken; b is an open decision, once D1–D3 are measured.
 
 == Behavior
 
@@ -460,13 +463,9 @@ same for the mate-terminal — 1.27 points on 2026-10-03.
 
 == Open decisions
 
-. The decisions D1–D7, for the author to confirm.
-. Whether to do it at all (issue #66: "if needed"). Should S5x meet K9 of
-  020 before the change (tasks, T5), the author may leave the specification
-  a draft, or drop it. The window of S5x is a floating xterm of 604×394,
-  k = 0, the cheapest pass from a frame; a window of E1's size changing all
-  the time — ilovlya, a maximized Dion — is measured off the screen only
-  (K5).
+. The window of S5x is a floating xterm of 604×394, k = 0, the cheapest
+  pass from a frame; a window of E1's size changing all the time —
+  ilovlya, a maximized Dion — is measured off the screen only (K5).
 . The bounds of K5 and K6, provisional until the first measurement; the
   savings they rest on are estimates (research, "What the change is
   expected to save").
