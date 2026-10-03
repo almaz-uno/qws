@@ -224,3 +224,32 @@ named, just when a range of the snapshotter's ends — and a range of the X
 server that holds them. A pixmap of RENDER made with the XID of a pixmap
 named of another window fails, and the `FreePixmap` of the pass then frees
 that window's pixmap.
+
+== After the change
+
+T-after, the binaries built from `c647afe` in a clean worktree: 5 runs of
+5 passed, in 0.46–0.49 s; built with `-race`, 3 of 3 with no race, in
+1.63–1.68 s; with `-xid-requests`, 21.17 s, Xorg's CPU 18.99 s. In each the
+log line of the test: 2 097 151 XIDs of the first range, 524 288 past it
+from 3 ranges of XC-MISC, 8 pixmaps kept, 128 made with reused XIDs.
+
+The XIDs in flight with the change: `inflight_test.go` copied into
+`pkg/x11` of `c647afe`, the consumer of probe `slowtail` on a connection of
+`x11.NewConn` — 1 ms between each of the last 20 `NewId` of the first
+range and the create of its XID — 6 of the 6 pixmaps kept were given again
+2 097 146 XIDs later, each with BadIDChoice, in 3 runs of 3; with the 1 ms
+before `NewId` and the create at once after it, as qws creates, 0 of 6 in
+3 of 3.
+
+Without XC-MISC: a build of `c647afe` with XC-MISC left out of
+`extensionNames`, run as `-test.run
+'TestMonitorsUnderEvents$|TestModelMatchesQueries$|TestXIDsReused$'`:
+`TestXIDsReused` failed at XID 2 097 152 as T-before did, the two others
+passed, and the warning was logged once.
+
+`TestGPUThumbnail`, the binaries of `pkg/snapshot` of `develop` and of
+`c647afe` run in turn, 10 times each, twice, at a load average of 4.5–5.7
+on E1: `develop` passed 5 and 3, the change 6 and 2; each failure is a
+thumbnail "drawn anew" that differs from the new contents. The test binds
+pixmaps on an `xgb.NewConn` of its own and on GLX, neither of which the
+change touches.

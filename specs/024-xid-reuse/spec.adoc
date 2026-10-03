@@ -4,7 +4,7 @@
 :sectnums:
 :revdate: 2026-10-03
 :issue: 70
-:status: draft
+:status: implemented
 
 == What and why
 
@@ -147,6 +147,50 @@ with 3 runs under `-race`.
   `TestFallback`, `TestSwitchers`, `TestModelMatchesQueries` — and
   `TestMonitorsUnderEvents`; `go vet ./...`, `go test -race ./pkg/x11` and
   `make check-specs` pass; `gofmt -l .` finds nothing.
+|===
+
+== Results
+
+2026-10-03, E1 (ws1), the commit of the fix `c647afe` in a clean worktree;
+the runs and the probes in `research.adoc`.
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | T-before: 5 runs of 5 failed at XID 2 097 152 with "there are no more
+  available resource identifiers, and no re-use configured", in 0.35–0.36
+  s; with `-race`, 2 of 2, in 1.21–1.23 s; with `-xid-requests`, at the
+  same XID after 15.53 s. T-after: 5 of 5 passed, in 0.46–0.49 s; with
+  `-race`, 3 of 3, no race, 1.63–1.68 s; with `-xid-requests`, in 21.17 s.
+  In each run the 524 288 XIDs past the first range came from 3 ranges of
+  XC-MISC, every one of the connection and none that of the 8 pixmaps
+  kept, and the 128 pixmaps made with them were made.
+| K2 | `SetIDRangeFunc`: `pkg/x11/extensions.go:63`, in `NewConn`, under
+  `opcodes["XC-MISC"]`, and nowhere else. Outside the tests the grep of
+  `\.Init(` finds the `gl.Init` of `pkg/snapshot/gpu.go`,
+  `pkg/carousel/present_glx.go` and `console/glxoverlay/main.go`, and
+  `xgb.NewConn` is called by the setup and `NewConn` in
+  `pkg/x11/extensions.go`, `console/framecmp` and `console/glxoverlay`. In
+  the tests the grep also finds three `Init` of `frameSnapshotter` in
+  `pkg/snapshot/frame_test.go`, on `develop` since 022 (issue #67).
+| K3 | `TestXIDRange` passes.
+| K4 | The probe build: `TestXIDsReused` failed at XID 2 097 152 with the
+  error of T-before; `TestMonitorsUnderEvents` and
+  `TestModelMatchesQueries` passed; the run logged "XC-MISC unavailable,
+  XIDs not reused: a connection makes no resource once it has given every
+  XID of its mask" once, at the level `warn`.
+| K5 | Build, `go vet ./...`, `gofmt -l .`, `make check-specs`, `go test
+  ./...` and `go test -race ./pkg/x11` pass for each commit of the change
+  in a clean worktree; a run of `go test ./...` that failed did so in
+  `TestGPUThumbnail`, "drawn anew", with the code of `develop` as with the
+  change, and the next run passed. With `-v`, the tests of `pkg/x11` pass
+  and none skips; `TestNewAndClose`, `TestRenderThumbnail` and
+  `TestFallback` pass, and `TestNewAndClose` logs "XSHM extension
+  available" and no "RENDER unavailable". `TestGPUThumbnail` alone fails
+  "drawn anew" in more than half of the runs on E1 that day, `develop`
+  alike: 8 runs of 20 passed for each, `develop` and the change in turn
+  (research, "After the change").
 |===
 
 == Open decisions

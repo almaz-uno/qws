@@ -8,10 +8,10 @@
 . [x] T2. The probes of XC-MISC on E1, of the cost of the requests and of
   the XIDs in flight (research).
 . [x] T3. The specification.
-. [ ] T4. `pkg/x11/xids.go`; XC-MISC in the setup; the range function in
+. [x] T4. `pkg/x11/xids.go`; XC-MISC in the setup; the range function in
   `NewConn`; K2, K3.
-. [ ] T5. T-after; K1.
-. [ ] T6. The probe build without XC-MISC; K4.
-. [ ] T7. `go vet ./...`, `go test ./...`, `-race`, `gofmt -l .`,
+. [x] T5. T-after; K1.
+. [x] T6. The probe build without XC-MISC; K4.
+. [x] T7. `go vet ./...`, `go test ./...`, `-race`, `gofmt -l .`,
   `make check-specs`, each commit on its own in a clean worktree; K5; the
   results.
