@@ -17,9 +17,9 @@
 # the workspace shown on that output — DP-4 on ws1 — viewable all along, and
 # focus goes back where it was; it is stopped with the instance. The terminal
 # is CHANGING_TERM: mate-terminal by default, a window of depth 32 under the
-# compositor of ws1, which takes live passes; or xterm, of depth 24 and drawn
-# in the pixmap of its frame, which takes none. meta has its window and
-# depth. With
+# compositor of ws1, with a pixmap of its own, passed live on the GPU; or
+# xterm, of depth 24 and drawn in the pixmap of its frame, passed live by
+# RENDER from the frame (D2 of 020, A). meta has its window and depth. With
 # LIVE=true or LIVE=false the instance runs with appearance.thumbnail.live so
 # (a build that knows the key); unset, as configured. With REST=<seconds>, the
 # rest variant of S5: after its steps each activation holds the overlay still
