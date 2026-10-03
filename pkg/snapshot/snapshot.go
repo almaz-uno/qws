@@ -6,7 +6,9 @@
 // back. A pixmap the GPU will not bind — another client holds a GLX pixmap of
 // the window — is scaled in the X server by RENDER instead
 // (specs/018-snapshot-bind-conflicts). Windows the window manager unmaps keep
-// their last thumbnail.
+// their last thumbnail. While the switcher is shown, the windows that change
+// are averaged again into textures the presenter draws: the live thumbnails of
+// live.go (specs/020-live-thumbnails).
 package snapshot
 
 import (
@@ -42,27 +44,52 @@ type Snapshotter struct {
 	conn     *xgb.Conn
 	root     xproto.Window
 	interval time.Duration
-	atoms    struct{ clientList xproto.Atom }
+	atoms    struct{ clientList, live xproto.Atom }
+	share    *glx.Share // the GL context, for the presenter's to share
 
-	mu     sync.RWMutex
-	thumbs map[xproto.Window]image.Image
+	mu       sync.RWMutex
+	thumbs   map[xproto.Window]image.Image
+	thumbGen map[xproto.Window]uint64 // the generation of each thumbnail
 
-	paused  atomic.Bool
-	wake    chan struct{} // the pause ended
-	events  chan xgb.Event
-	refresh chan chan struct{}
-	quit    chan struct{}
-	done    chan struct{}
+	// The live thumbnails shared with the presenter's thread
+	// (specs/020-live-thumbnails, live.go), under mu: the pictures published,
+	// the publications so far, those a frame being drawn took them after, the
+	// fence after the last frame that drew any, whether the switcher has been
+	// woken since its last frame, and what SetLive asked for
+	pics      map[xproto.Window]Picture
+	seq       uint64
+	fetchSeq  uint64
+	inFrame   bool
+	presFence uintptr
+	woken     bool
+	lastEnd   time.Time       // the end of the last frame
+	prevEnd   time.Time       // and of the one before
+	shown     []xproto.Window // the windows of the last frame, those the switcher shows
+	liveWant  liveSession
+
+	paused   atomic.Bool
+	wake     chan struct{} // the pause ended, or the windows shown changed
+	liveWake chan struct{} // SetLive was called
+	events   chan xgb.Event
+	refresh  chan chan struct{}
+	quit     chan struct{}
+	done     chan struct{}
 
 	// Owned by the loop
 	windows map[xproto.Window]*window
 	frames  map[xproto.Window]xproto.Window // frame of the window manager → its client
 	// The switchers of the qws instances, for the pause (specs/011-snapshot-pause)
-	switchers *x11.Switchers
+	switchers switchers
 	off       *glx.Offscreen
 	gpu       *gpu
 	render    *xrender // nil without RENDER or MIT-SHM
 	cpu       *composite.Capturer
+	live      liveSession     // the live thumbnails taken; overlay 0: none
+	lastPass  time.Time       // the last live pass
+	hold      time.Duration   // liveHold; 0 in a test: no pass waits for the frames
+	liveRetry time.Time       // a pass a frame held back is tried again then
+	trash     []*liveTextures // live textures to delete once no frame is drawn
+	noScaled  bool            // a scaled pixmap would not bind: no live pass from a frame
 }
 
 // window is what the snapshotter knows of a client window
@@ -96,6 +123,16 @@ type window struct {
 	via       xproto.Window
 	pixVisual xproto.Visualid
 	pixDepth  int
+
+	// The live thumbnails (specs/020-live-thumbnails): the pictures so far,
+	// snapshots and passes, which number their generations; the textures of
+	// the passes, nil before the first; when it is due one; for a window
+	// taken from its frame, the pixmap its passes scale it into, nil before
+	// the first
+	pictures uint64
+	live     *liveTextures
+	liveDue  liveSchedule
+	scaled   *scaledPixmap
 }
 
 // errNotViewable: the X server would not name the window's pixmap — it is not
@@ -128,18 +165,29 @@ func New(interval time.Duration, scaling string) (*Snapshotter, error) {
 	if err != nil {
 		return nil, fmt.Errorf("snapshot: %w", err)
 	}
+	return start(conn, xproto.Setup(conn).DefaultScreen(conn).Root, interval, scaling)
+}
+
+// start runs a snapshotter on conn of the client windows listed on root, the
+// root window but in a test; conn is closed should it fail
+func start(conn *xgb.Conn, root xproto.Window, interval time.Duration, scaling string) (*Snapshotter, error) {
 	s := &Snapshotter{
-		conn:     conn,
-		root:     xproto.Setup(conn).DefaultScreen(conn).Root,
-		interval: interval,
-		thumbs:   make(map[xproto.Window]image.Image),
-		wake:     make(chan struct{}, 1),
-		events:   make(chan xgb.Event, 256),
-		refresh:  make(chan chan struct{}),
-		quit:     make(chan struct{}),
-		done:     make(chan struct{}),
-		windows:  make(map[xproto.Window]*window),
-		frames:   make(map[xproto.Window]xproto.Window),
+		conn:      conn,
+		root:      root,
+		interval:  interval,
+		thumbs:    make(map[xproto.Window]image.Image),
+		thumbGen:  make(map[xproto.Window]uint64),
+		pics:      make(map[xproto.Window]Picture),
+		wake:      make(chan struct{}, 1),
+		liveWake:  make(chan struct{}, 1),
+		hold:      liveHold,
+		switchers: noSwitchers{},
+		events:    make(chan xgb.Event, 256),
+		refresh:   make(chan chan struct{}),
+		quit:      make(chan struct{}),
+		done:      make(chan struct{}),
+		windows:   make(map[xproto.Window]*window),
+		frames:    make(map[xproto.Window]xproto.Window),
 	}
 	if err := s.initX(scaling); err != nil {
 		conn.Close()
@@ -183,6 +231,11 @@ func (s *Snapshotter) initX(scaling string) error {
 		return err
 	}
 	s.atoms.clientList = atom.Atom
+	atom, err = xproto.InternAtom(s.conn, false, uint16(len(LiveAtom)), LiveAtom).Reply()
+	if err != nil {
+		return err
+	}
+	s.atoms.live = atom.Atom
 	if err := xproto.ChangeWindowAttributesChecked(s.conn, s.root, xproto.CwEventMask,
 		[]uint32{xproto.EventMaskPropertyChange}).Check(); err != nil {
 		return err
@@ -245,7 +298,9 @@ func (s *Snapshotter) Refresh(timeout time.Duration) {
 
 // Pause stops or resumes the snapshots taken on change: they are paused while
 // the switcher is shown (specs/007-animation), and while that of another qws
-// instance is (specs/011-snapshot-pause); Refresh still captures
+// instance is (specs/011-snapshot-pause); Refresh still captures, and the
+// live passes between two SetLive run paused or not, but for the switchers of
+// the other instances (specs/020-live-thumbnails)
 func (s *Snapshotter) Pause(paused bool) {
 	s.paused.Store(paused)
 	if !paused {
@@ -259,8 +314,24 @@ func (s *Snapshotter) Pause(paused bool) {
 // pausedNow reports whether the snapshots on change are paused: for this
 // instance's switcher or another's. In the loop only.
 func (s *Snapshotter) pausedNow() bool {
-	return s.paused.Load() || s.switchers.Shown()
+	return s.paused.Load() || s.switchers != nil && s.switchers.Shown(0)
 }
+
+// switchers is what the snapshotter needs of the switchers of the qws
+// instances, x11.Switchers, an interface so that a test can give switchers of
+// its own; nil, or noSwitchers, follows none
+type switchers interface {
+	// Handle takes an event and reports whether it was about the switchers
+	Handle(ev xgb.Event) bool
+	// Shown reports whether a switcher is shown, but the overlay except
+	Shown(except xproto.Window) bool
+}
+
+// noSwitchers are the switchers where none can be followed
+type noSwitchers struct{}
+
+func (noSwitchers) Handle(xgb.Event) bool    { return false }
+func (noSwitchers) Shown(xproto.Window) bool { return false }
 
 // wait is how long the loop waits for a window due at due, at now: no
 // longer than till then, and not at all once that has passed; while paused,
@@ -297,7 +368,7 @@ func (s *Snapshotter) run(ready chan<- error) {
 		return
 	}
 	defer g.close()
-	s.off, s.gpu = off, g
+	s.off, s.gpu, s.share = off, g, off.Share()
 	if x, err := newXRender(s.conn, s.root); err != nil {
 		log.Info().Err(err).Msg("RENDER unavailable, windows the GPU will not bind are captured on the CPU")
 	} else {
@@ -311,25 +382,44 @@ func (s *Snapshotter) run(ready chan<- error) {
 	timer := time.NewTimer(time.Hour)
 	defer timer.Stop()
 	for {
-		due, ok := s.nextDue()
-		timer.Reset(wait(s.pausedNow(), due, ok, time.Now()))
+		if s.live.overlay != 0 {
+			timer.Reset(s.liveWait(time.Now()))
+		} else {
+			due, ok := s.nextDue()
+			timer.Reset(wait(s.pausedNow(), due, ok, time.Now()))
+		}
 		select {
 		case ev := <-s.events:
 			s.handle(ev)
 		case <-s.wake:
+		case <-s.liveWake:
+			s.setLive()
 		case done := <-s.refresh:
 			s.captureChanged(time.Now(), causeActivation, true)
 			close(done)
 		case <-timer.C:
-			if !s.pausedNow() {
-				s.captureChanged(time.Now(), causeChange, false)
-			}
+			s.tick(time.Now())
 		case <-s.quit:
 			for id := range s.windows {
 				s.forget(id)
 			}
+			s.emptyTrash()
+			if s.presFence != 0 {
+				gl.DeleteSync(s.presFence)
+			}
 			return
 		}
+	}
+}
+
+// tick is the work of the timer: while live, the live passes and no snapshot
+// on change (specs/020-live-thumbnails); else the snapshots due, unless paused
+func (s *Snapshotter) tick(now time.Time) {
+	switch {
+	case s.live.overlay != 0:
+		s.liveTick(now)
+	case !s.pausedNow():
+		s.captureChanged(now, causeChange, false)
 	}
 }
 
@@ -359,7 +449,7 @@ func (s *Snapshotter) captureChanged(now time.Time, cause string, all bool) {
 // handle follows the windows: the client list, their structure and that of
 // their frames, their damage
 func (s *Snapshotter) handle(ev xgb.Event) {
-	if s.switchers.Handle(ev) {
+	if s.switchers != nil && s.switchers.Handle(ev) {
 		return
 	}
 	now := time.Now()
@@ -371,6 +461,7 @@ func (s *Snapshotter) handle(ev xgb.Event) {
 	case damage.NotifyEvent:
 		if w, ok := s.windows[xproto.Window(e.Drawable)]; ok {
 			w.schedule.change(now)
+			w.liveDue.change(now)
 		}
 	case xproto.MapNotifyEvent:
 		s.setMapped(e.Window, true)
@@ -506,6 +597,8 @@ func (s *Snapshotter) forget(id xproto.Window) {
 		return
 	}
 	s.release(w)
+	s.dropLive(w)
+	s.dropScaled(w)
 	if w.texture != 0 {
 		gl.DeleteTextures(1, &w.texture)
 	}
@@ -516,6 +609,7 @@ func (s *Snapshotter) forget(id xproto.Window) {
 	delete(s.windows, id)
 	s.mu.Lock()
 	delete(s.thumbs, id)
+	delete(s.thumbGen, id)
 	s.mu.Unlock()
 }
 
@@ -571,10 +665,10 @@ func (s *Snapshotter) capture(w *window, cause string) {
 		path = "cpu"
 		var cimg image.Image
 		if cimg, err = s.cpu.CaptureWindow(w.id, maxSide, maxSide); err == nil {
-			s.store(w.id, cimg)
+			s.store(w, cimg)
 		}
 	} else {
-		s.store(w.id, img)
+		s.store(w, img)
 	}
 	w.schedule.shot(time.Now())
 	if err != nil {
@@ -711,9 +805,11 @@ func (s *Snapshotter) pixmapRect(w *window) (image.Rectangle, error) {
 	return r.Add(image.Pt(int(pos.DstX)+b, int(pos.DstY)+b)), nil
 }
 
-// store keeps the thumbnail of the window
-func (s *Snapshotter) store(id xproto.Window, img image.Image) {
+// store keeps the thumbnail of the window, a picture of a new generation
+func (s *Snapshotter) store(w *window, img image.Image) {
+	w.pictures++
 	s.mu.Lock()
-	s.thumbs[id] = img
+	s.thumbs[w.id] = img
+	s.thumbGen[w.id] = w.pictures
 	s.mu.Unlock()
 }

@@ -152,13 +152,15 @@ func (s *Switchers) Handle(ev xgb.Event) bool {
 	return false
 }
 
-// Shown reports whether a switcher is shown
-func (s *Switchers) Shown() bool {
+// Shown reports whether a switcher is shown but the overlay except — the
+// instance's own, whose live thumbnails do not pause for it
+// (specs/020-live-thumbnails); 0 leaves none out
+func (s *Switchers) Shown(except xproto.Window) bool {
 	if s == nil {
 		return false
 	}
-	for _, mapped := range s.mapped {
-		if mapped {
+	for id, mapped := range s.mapped {
+		if mapped && id != except {
 			return true
 		}
 	}

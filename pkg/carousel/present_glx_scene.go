@@ -135,6 +135,8 @@ func (p *glxPresenter) DropLayers() {
 }
 
 func (p *glxPresenter) PresentScene(base LayerID, items []SceneItem, f Fade) error {
+	// A scene draws the live pictures its items carry
+	p.live.items = nil
 	if err := p.drawScene(base, items, f); err != nil {
 		return err
 	}
@@ -157,6 +159,13 @@ func (p *glxPresenter) drawScene(base LayerID, items []SceneItem, f Fade) error 
 	gl.Uniform2f(s.viewport, float32(p.width), float32(p.height))
 	gl.Uniform1f(s.scale, float32(f.Scale))
 	for _, it := range items {
+		if it.Live != nil {
+			p.drawLive(it.Live, f, true)
+			gl.Enable(gl.BLEND)
+			gl.BlendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
+			gl.UseProgram(s.program)
+			continue
+		}
 		ra, ta := p.layerRect(it.A, it.RectA)
 		rb, tb := p.layerRect(it.B, it.RectB)
 		quad := union(ra, rb)
@@ -192,14 +201,17 @@ func (p *glxPresenter) layerRect(id LayerID, r Rect) (Rect, uint32) {
 func (p *glxPresenter) PresentFaded(img *image.RGBA, f Fade) error {
 	if img != nil {
 		if err := p.draw(img); err != nil {
+			p.live.items = nil
 			return err
 		}
 		p.presented = true
 	}
 	if !p.presented {
+		p.live.items = nil
 		return fmt.Errorf("no frame to fade")
 	}
 	p.drawTexture(p.texture, f)
+	p.drawLiveItems(f)
 	p.swap()
 	return nil
 }

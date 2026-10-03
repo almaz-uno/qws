@@ -47,7 +47,7 @@ func main() {
 	root := screen.Root
 
 	// 1. Create the GL context (opens its own Xlib display, picks an ARGB FBConfig).
-	ctx, err := glx.NewContext()
+	ctx, err := glx.NewContext(nil)
 	if err != nil {
 		log.Fatal().Err(err).Msg("glx.NewContext failed")
 	}

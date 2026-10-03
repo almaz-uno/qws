@@ -82,7 +82,7 @@ The carousel displays window thumbnails in a 3D perspective view.
 
 - **2.5D Carousel UI**: Cover Flow-style window display with perspective effect
 - **MRU Ordering**: Windows sorted by Most Recently Used order
-- **Thumbnail Previews**: Live window thumbnails via XComposite
+- **Thumbnail Previews**: snapshots of every visible window via XComposite, averaged on the GPU; on the `glx` renderer they follow their windows while the switcher is shown (`appearance.thumbnail.live`, `live_interval`)
 - **Smart Placeholders**: Fallback icons when thumbnails unavailable
 - **Keyboard Navigation**: Arrow keys, Tab, Enter, and Escape support
 - **Mouse Support**: Hover to highlight windows (orange glow), click to select

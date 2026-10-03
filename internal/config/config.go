@@ -69,11 +69,24 @@ type Animation struct {
 	HoverZoom     float64       `mapstructure:"hover_zoom" yaml:"hover_zoom"`         // Scale the hover frame zooms from as it comes, and to as it goes
 }
 
-// Thumbnail contains thumbnail size configuration
+// Thumbnail contains thumbnail size configuration, and the live thumbnails of
+// the glx renderer (specs/020-live-thumbnails)
 type Thumbnail struct {
-	Width            int    `mapstructure:"width" yaml:"width"`
-	Height           int    `mapstructure:"height" yaml:"height"`
-	ScalingAlgorithm string `mapstructure:"scaling_algorithm" yaml:"scaling_algorithm"` // Scaling algorithm: "nearest", "bilinear", "catmull-rom"
+	Width            int           `mapstructure:"width" yaml:"width"`
+	Height           int           `mapstructure:"height" yaml:"height"`
+	ScalingAlgorithm string        `mapstructure:"scaling_algorithm" yaml:"scaling_algorithm"` // Scaling algorithm: "nearest", "bilinear", "catmull-rom"
+	Live             bool          `mapstructure:"live" yaml:"live"`                           // Thumbnails follow their windows while the switcher is shown; false: snapshots
+	LiveInterval     time.Duration `mapstructure:"live_interval" yaml:"live_interval"`         // A shown window that changed is averaged again at most this often; 0: once a refresh
+}
+
+// LivePeriod is the interval of the live thumbnails, and a warning when it is
+// negative: then the default is used (specs/020-live-thumbnails)
+func (t Thumbnail) LivePeriod() (time.Duration, string) {
+	if t.LiveInterval < 0 {
+		def := Default().Appearance.Thumbnail.LiveInterval
+		return def, fmt.Sprintf("appearance.thumbnail.live_interval %v is negative: %v is used", t.LiveInterval, def)
+	}
+	return t.LiveInterval, ""
 }
 
 // Grid contains grid layout configuration
@@ -193,7 +206,9 @@ func Default() *Config {
 			Thumbnail: Thumbnail{
 				Width:            256,
 				Height:           256,
-				ScalingAlgorithm: "bilinear", // Balance between speed and quality
+				ScalingAlgorithm: "bilinear",            // Balance between speed and quality
+				Live:             true,                  // on glx, thumbnails follow their windows while shown
+				LiveInterval:     33 * time.Millisecond, // some 30 pictures a second, a video's rate
 			},
 			Spacing:     300,
 			Perspective: 0.6,
@@ -414,6 +429,8 @@ func setDefaults(v *viper.Viper, cfg *Config) {
 	v.SetDefault("appearance.renderer", cfg.Appearance.Renderer)
 	v.SetDefault("appearance.thumbnail.width", cfg.Appearance.Thumbnail.Width)
 	v.SetDefault("appearance.thumbnail.height", cfg.Appearance.Thumbnail.Height)
+	v.SetDefault("appearance.thumbnail.live", cfg.Appearance.Thumbnail.Live)
+	v.SetDefault("appearance.thumbnail.live_interval", cfg.Appearance.Thumbnail.LiveInterval)
 	v.SetDefault("appearance.spacing", cfg.Appearance.Spacing)
 	v.SetDefault("appearance.perspective", cfg.Appearance.Perspective)
 	v.SetDefault("appearance.shadow.offset", cfg.Appearance.Shadow.Offset)

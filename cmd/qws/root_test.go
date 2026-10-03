@@ -39,6 +39,26 @@ func TestAnimationFlags(t *testing.T) {
 	}
 }
 
+// TestThumbnailFlags checks K10 of specs/020-live-thumbnails: the keys of the
+// live thumbnails are read from their flags
+func TestThumbnailFlags(t *testing.T) {
+	flags := rootCmd.PersistentFlags()
+	for name, value := range map[string]string{
+		"appearance-thumbnail-live":          "false",
+		"appearance-thumbnail-live-interval": "15ms",
+	} {
+		if err := flags.Set(name, value); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	cfg = config.Default()
+	applyFlags()
+
+	if got := cfg.Appearance.Thumbnail; got.Live || got.LiveInterval != 15*time.Millisecond {
+		t.Errorf("flags: live %v, interval %v; want false, 15ms", got.Live, got.LiveInterval)
+	}
+}
+
 // TestAppearanceFlags checks K5 of specs/014-appearance-keys: the keys are
 // read from their flags
 func TestAppearanceFlags(t *testing.T) {

@@ -100,8 +100,18 @@ func newGPU() (*gpu, error) {
 // thumbnail averages the window of w×h, bound as the texture of unit 0, into
 // a thumbnail and reads it back
 func (g *gpu) thumbnail(w, h int, yInverted bool) *image.RGBA {
+	tw, th := g.average(g.fbo, w, h, yInverted)
+	img := image.NewRGBA(image.Rect(0, 0, tw, th))
+	gl.ReadPixels(0, 0, int32(tw), int32(th), gl.RGBA, gl.UNSIGNED_BYTE, unsafe.Pointer(&img.Pix[0]))
+	return img
+}
+
+// average averages the window of w×h, bound as the texture of unit 0, into
+// the bottom-left thumbSize(w, h) of the framebuffer fbo, the top row of the
+// window in its bottom row; it returns that size
+func (g *gpu) average(fbo uint32, w, h int, yInverted bool) (int, int) {
 	tw, th := thumbSize(w, h)
-	gl.BindFramebuffer(gl.FRAMEBUFFER, g.fbo)
+	gl.BindFramebuffer(gl.FRAMEBUFFER, fbo)
 	gl.Viewport(0, 0, int32(tw), int32(th))
 	gl.UseProgram(g.program)
 	gl.Uniform2f(g.scale, float32(float64(w)/float64(tw)), float32(float64(h)/float64(th)))
@@ -111,10 +121,7 @@ func (g *gpu) thumbnail(w, h int, yInverted bool) *image.RGBA {
 	}
 	gl.Uniform1i(g.yInv, yInv)
 	gl.DrawArrays(gl.TRIANGLES, 0, 3)
-
-	img := image.NewRGBA(image.Rect(0, 0, tw, th))
-	gl.ReadPixels(0, 0, int32(tw), int32(th), gl.RGBA, gl.UNSIGNED_BYTE, unsafe.Pointer(&img.Pix[0]))
-	return img
+	return tw, th
 }
 
 // newWindowTexture makes the texture a window's pixmap is bound to and
