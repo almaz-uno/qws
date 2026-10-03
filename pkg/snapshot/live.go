@@ -201,11 +201,20 @@ func (s *Snapshotter) Share() *glx.Share {
 // card on its way out of the frame draws its own. Until EndFrame, no pass
 // writes the textures it gave. shown are the windows the switcher shows,
 // those the passes are for until the next frame; the snapshotter keeps the
-// slice, which the caller does not change after.
+// slice, which the caller does not change after, and gives anew when the
+// windows change. A slice other than the last wakes the loop: a window that
+// comes into view may wait a pass since it changed while out of view, and
+// DAMAGE reports nothing more of it until that pass.
 func (s *Snapshotter) BeginFrame(shown []xproto.Window) map[xproto.Window]Picture {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.inFrame, s.fetchSeq, s.woken = true, s.seq, false
+	if len(shown) != len(s.shown) || len(shown) > 0 && &shown[0] != &s.shown[0] {
+		select {
+		case s.wake <- struct{}{}:
+		default:
+		}
+	}
 	s.shown = shown
 	var pics map[xproto.Window]Picture
 	for id, p := range s.pics {

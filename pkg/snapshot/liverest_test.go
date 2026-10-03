@@ -21,7 +21,9 @@ import (
 // ClientMessage, with a window changing every 5 ms, the passes keep coming at
 // about the live interval, and each publication is followed by a frame that
 // draws it — a window with a pixmap of its own, and one of depth 24 taken
-// from its frame's pixmap (K14). The windows of the test are children of a
+// from its frame's pixmap (K14) — after steps that took the window's card out
+// of view and back, frames every 7 ms, as the carousel of S5 at rest does.
+// The windows of the test are children of a
 // window of its own off the screen, whose children the X server redirects,
 // and the snapshotter follows the windows listed on it: no window of the
 // desktop is bound.
@@ -191,6 +193,23 @@ func liveAtRest(t *testing.T, fromFrame bool) {
 			draw.Sync()
 		}
 	}()
+
+	// Steps out of view and back: the window changes while out of view, so
+	// that DAMAGE reports nothing more of it until a pass; back in view, a
+	// pass waits for the frames to stop
+	for _, in := range []bool{false, true} {
+		shown = []xproto.Window{}
+		if in {
+			shown = []xproto.Window{win}
+		}
+		for range 42 {
+			frame()
+			time.Sleep(7 * time.Millisecond)
+		}
+	}
+	for len(woken) > 0 {
+		<-woken
+	}
 
 	// At rest: a frame only when woken, no sooner than a refresh period
 	// after the one before

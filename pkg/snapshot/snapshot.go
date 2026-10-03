@@ -68,7 +68,7 @@ type Snapshotter struct {
 	liveWant  liveSession
 
 	paused   atomic.Bool
-	wake     chan struct{} // the pause ended
+	wake     chan struct{} // the pause ended, or the windows shown changed
 	liveWake chan struct{} // SetLive was called
 	events   chan xgb.Event
 	refresh  chan chan struct{}
