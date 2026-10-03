@@ -102,11 +102,53 @@ func (x *xrender) close() {
 }
 
 // thumbnail scales the rectangle r of a pixmap of the visual and the depth —
-// a window, at r — into its thumbnail and reads it back. A rectangle not at
-// the pixmap's corner — a window in its frame's pixmap — is copied first
-// into a pixmap of its own, so that the passes pad at its edges, not with the
-// frame around it (specs/022-uncaptured-windows).
+// a window, at r — into its thumbnail and reads it back
 func (x *xrender) thumbnail(pixmap xproto.Pixmap, visual xproto.Visualid, depth int, r image.Rectangle) (*image.RGBA, error) {
+	tw, th := thumbSize(r.Dx(), r.Dy())
+	dst, err := xproto.NewPixmapId(x.conn)
+	if err != nil {
+		return nil, err
+	}
+	xproto.CreatePixmap(x.conn, 32, dst, xproto.Drawable(x.root), uint16(tw), uint16(th))
+	defer xproto.FreePixmap(x.conn, dst)
+	pic, err := render.NewPictureId(x.conn)
+	if err != nil {
+		return nil, err
+	}
+	render.CreatePicture(x.conn, pic, xproto.Drawable(dst), x.argb32, 0, nil)
+	defer render.FreePicture(x.conn, pic)
+	passes, err := x.scale(pixmap, visual, depth, r, pic)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := shm.GetImage(x.conn, xproto.Drawable(dst), 0, 0, uint16(tw), uint16(th), ^uint32(0),
+		xproto.ImageFormatZPixmap, x.seg, 0).Reply(); err != nil {
+		return nil, fmt.Errorf("RENDER: %w", err)
+	}
+	for _, p := range passes {
+		if err := p.Check(); err != nil {
+			return nil, fmt.Errorf("RENDER: %w", err)
+		}
+	}
+	// BGRA to RGBA; the alpha of a window is ignored, as on the GPU and the CPU
+	img := image.NewRGBA(image.Rect(0, 0, tw, th))
+	for i := 0; i < 4*tw*th; i += 4 {
+		img.Pix[i], img.Pix[i+1], img.Pix[i+2], img.Pix[i+3] = x.shm[i+2], x.shm[i+1], x.shm[i], 255
+	}
+	return img, nil
+}
+
+// scale scales the rectangle r of a pixmap of the visual and the depth into
+// dst, a picture a8r8g8b8 of thumbSize(r) — the thumbnail, or the pixmap of
+// a live pass of specs/020-live-thumbnails — and returns the cookies of its
+// passes: a failed request leaves a pass it feeds failing too, so the passes
+// alone are checked, once the X server has answered a request after them,
+// without a round trip of their own. A rectangle not at the pixmap's corner
+// — a window in its frame's pixmap — is copied first into a pixmap of its
+// own, so that the passes pad at its edges, not with the frame around it
+// (specs/022-uncaptured-windows).
+func (x *xrender) scale(pixmap xproto.Pixmap, visual xproto.Visualid, depth int, r image.Rectangle, dst render.Picture) ([]render.CompositeCookie, error) {
 	format, ok := x.formats[visual]
 	if !ok {
 		return nil, fmt.Errorf("RENDER: no picture format for visual 0x%x", visual)
@@ -114,6 +156,8 @@ func (x *xrender) thumbnail(pixmap xproto.Pixmap, visual xproto.Visualid, depth 
 	w, h := r.Dx(), r.Dy()
 	tw, th := thumbSize(w, h)
 
+	// What the passes use is freed once they are sent: the X server frees it
+	// after the requests before
 	var pictures []render.Picture
 	var pixmaps []xproto.Pixmap
 	defer func() {
@@ -157,11 +201,7 @@ func (x *xrender) thumbnail(pixmap xproto.Pixmap, visual xproto.Visualid, depth 
 	if err != nil {
 		return nil, err
 	}
-	// A failed request leaves a pass it feeds failing too, so the passes
-	// alone are checked — once the image is back, by when the X server has
-	// answered every request before it, without a round trip of their own
 	var passes []render.CompositeCookie
-	var dst xproto.Pixmap
 	// The sides of the window in the pixels of the last pass: a halving keeps
 	// every pixel where it was, at half the scale, and pads an odd side with
 	// its last pixel, so the thumbnail is scaled from the window's own extent
@@ -169,6 +209,7 @@ func (x *xrender) thumbnail(pixmap xproto.Pixmap, visual xproto.Visualid, depth 
 	for final := false; !final; {
 		final = fw <= float64(2*tw) && fh <= float64(2*th)
 		sx, sy, nw, nh := fw/float64(tw), fh/float64(th), tw, th
+		next := dst
 		if !final {
 			sx, sy = 1, 1
 			if fw > float64(2*tw) {
@@ -179,15 +220,15 @@ func (x *xrender) thumbnail(pixmap xproto.Pixmap, visual xproto.Visualid, depth 
 			}
 			fw, fh = fw/sx, fh/sy
 			nw, nh = int(math.Ceil(fw)), int(math.Ceil(fh))
-		}
-		if dst, err = xproto.NewPixmapId(x.conn); err != nil {
-			return nil, err
-		}
-		xproto.CreatePixmap(x.conn, 32, dst, xproto.Drawable(x.root), uint16(nw), uint16(nh))
-		pixmaps = append(pixmaps, dst)
-		var next render.Picture
-		if next, err = picture(xproto.Drawable(dst), x.argb32); err != nil {
-			return nil, err
+			half, err := xproto.NewPixmapId(x.conn)
+			if err != nil {
+				return nil, err
+			}
+			xproto.CreatePixmap(x.conn, 32, half, xproto.Drawable(x.root), uint16(nw), uint16(nh))
+			pixmaps = append(pixmaps, half)
+			if next, err = picture(xproto.Drawable(half), x.argb32); err != nil {
+				return nil, err
+			}
 		}
 		// A pixel of the destination samples the source at its centre scaled:
 		// at ½ exactly, the corner of four pixels, averaged
@@ -198,22 +239,7 @@ func (x *xrender) thumbnail(pixmap xproto.Pixmap, visual xproto.Visualid, depth 
 			0, 0, 0, 0, 0, 0, uint16(nw), uint16(nh)))
 		src = next
 	}
-
-	if _, err := shm.GetImage(x.conn, xproto.Drawable(dst), 0, 0, uint16(tw), uint16(th), ^uint32(0),
-		xproto.ImageFormatZPixmap, x.seg, 0).Reply(); err != nil {
-		return nil, fmt.Errorf("RENDER: %w", err)
-	}
-	for _, p := range passes {
-		if err := p.Check(); err != nil {
-			return nil, fmt.Errorf("RENDER: %w", err)
-		}
-	}
-	// BGRA to RGBA; the alpha of a window is ignored, as on the GPU and the CPU
-	img := image.NewRGBA(image.Rect(0, 0, tw, th))
-	for i := 0; i < 4*tw*th; i += 4 {
-		img.Pix[i], img.Pix[i+1], img.Pix[i+2], img.Pix[i+3] = x.shm[i+2], x.shm[i+1], x.shm[i], 255
-	}
-	return img, nil
+	return passes, nil
 }
 
 // fixed is the 16.16 fixed point number of RENDER nearest to f

@@ -1,0 +1,266 @@
+= 020 — plan
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-02
+
+The plan of the options recommended in the specification; should the author
+choose others, it is written again.
+
+== Approach
+
+*One owner, one share group.* The snapshotter keeps owning the windows'
+pixmaps, their GLX pixmaps and their textures, as since 008. The presenter's
+context is created with the snapshotter's as its share context, so that the
+textures the snapshotter writes — and the fences after them — are objects of
+the presenter's context too (research, "Sharing"). Nothing else crosses: the
+presenter never binds a pixmap and never touches a window texture.
+
+*Live textures.* A window gets, at its first live pass, two thumbnail
+textures of the size of its snapshot, written in turn, with a framebuffer
+each; a pass averages into one and makes a fence, without the read back.
+Snapshots keep the one target of 008 and are read back from it: a window
+that is never passed while the switcher is shown — most of them, on hidden
+workspaces — gets no live textures, some 1.1 MB of the GPU's memory a
+window of E1 saved. A generation number counts the pictures of a window,
+snapshots and passes, so that the selector can tell a live picture newer
+than the snapshot a card was drawn from; the snapshots do not change
+during an activation (below), so the newest snapshot is the card's.
+
+*Fences.* The commands of the two contexts run in no order of each other
+(research of 013, "What the specifications allow"). The snapshotter tests
+the fence of a pass on its own thread, at most every 0.5 ms while a pass is
+under way, and only once it has signalled publishes the texture as the
+window's picture: the presenter draws complete pictures and tests no
+fence. A pass writes the texture published before the last publication —
+the one the presenter drew until then — so it must come after every frame
+that may draw it. The selector takes the pictures of a frame from the
+snapshotter (`BeginFrame`) and gives back, once the frame is presented, a
+fence the presenter made after it if it drew a live picture (`EndFrame`);
+a pass is not made while a frame that took the pictures before the
+window's last publication is being drawn, and waits otherwise, on the GPU,
+for the presenter's last fence — as the uploads of 013 waited for a
+texture the presenter had drawn. Textures of a window gone, or of a size
+no longer its, are deleted once no frame is being drawn: a frame may bind
+them, and a name deleted may be given again.
+
+*The live schedule.* Between `SetLive(overlay, interval)`, which the
+selector calls once its overlay is shown in full — at the end of the
+fade-in, since the first runs of S5 (D5) — and `SetLive(0, 0)`, as the
+fade-out starts, the loop of the snapshotter takes the
+windows that changed, each at most once an interval, without the settle of
+100 ms; of those due, the one that changed first. Only the windows the
+switcher shows: those of its last frame, which `BeginFrame` gives — not a
+window on a workspace the filter of the switcher leaves out, viewable on
+another monitor. The interval is
+`live_interval`, or the refresh period of the overlay's monitor where it is
+0: the selector knows it. One window a pass, the passes spread: a pass no
+sooner than the interval divided by the number of windows taking passes —
+waiting, or passed within the interval — after the one before it, the
+`spread` of the probe; each followed by a fence and a flush. Counting only
+the windows waiting, a window passed alone would hold the pass of another
+back by a whole interval, and its lag past the bound of K7.
+
+*Passes in the pauses.* While frames come one after another — the last two
+ended less than 10 ms apart — no pass is made; one due waits for them to
+stop, 30 ms after the last — the author's hold, past the pause between
+two keys — the loop's timer set for then. First, a pass
+due less than 4 ms before the next frame ended, by the period of the last
+two, waited for that end, `EndFrame` waking the loop, and ran in the
+pause after the frame: it held the frames off the screen, as below, but
+not on the desktop of E1, where the steps of the grid missed 5.63 and
+8.14 % of their frames against 0.68 and 0.91 % (research, "S5 at rest").
+A pass made whenever due ran beside a frame about one time in six. `BenchmarkLiveBeside`, the probe of "Beside the
+frames" with the code of qws: with one window changing 50 times a second,
+the frames presented in more than 2 ms were 0.57–0.75 % with passes
+whenever due, 0.13 % with them in the pauses, 0–0.18 % with none, for a
+lag at p95 of 40.2–40.4 ms against 39.1–39.7; with four windows 30 times a
+second, 1.8–3.4 % against 0.48–0.66 %, the lag 46.7–47.0 ms against
+39.7–40.7 (research, "Passes in the pauses"). Every pass right after a
+frame, as first made, cost the lag a period and more: 60.9–61.8 ms at p95
+with four windows. At rest no frame comes, and a pass goes when due. After
+a pass is published the snapshotter tells the selector (below). Windows
+changed since their snapshot when live begins wait for a pass from the
+time they changed.
+
+*The pause of 011.* `Pause` stays around an activation, as before, and
+stops the snapshots on change only: between `SetLive(overlay)` and
+`SetLive(0)` the loop of the snapshotter takes live passes, paused or not
+(D5, made in the implementation). With #35, merged in 1.3.2, the live
+passes are paused by the overlays of `_QWS_SWITCHERS` other than the one
+`SetLive` gave it — `Switchers.Shown` gets a window to leave out, and
+`othersShown` gives it the overlay of `SetLive` — and the snapshots by
+`pausedNow` of #35 as it is, the own overlay counted: the change is the
+condition of `liveTick` and of the timer of `liveWait`. The snapshotter
+holds the switchers behind an interface of its own, so that a test can
+give them.
+
+*From the frame* (D2, the author's answer A). A window taken from its
+frame's pixmap (022) has no texture of its own, and the frame's pixmap is
+the compositor's: a pass scales the window by RENDER — `xrender.scale`,
+the passes of 022's `thumbnail` without its read back — into a pixmap of
+the snapshotter's own, a8r8g8b8 of the thumbnail's size, bound on the GPU
+once (`scaledPixmap` of `live.go`); once the composites are checked — a
+round trip, by when the X server has done them — and `glXWaitX`, the
+pixmap is bound again and the average copies it, at a scale of 1, into
+the live texture not published. The live textures, the fences, the
+schedule and the drawing are those of every pass. `livePassable` takes
+such a window with RENDER at hand and the passes from frames not turned
+off; a pass that fails leaves it stale, a pixmap that will not bind turns
+the passes from frames off. The pixmap is freed with the window, or at
+another size.
+
+*Drawing.* The selector knows where each thumbnail lies: the geometry of a
+card at its offset — integer at rest, fractional in a step — and of a tile
+(`CardLive`, `CarouselLive`, `GridLive` of `pkg/carousel/live.go`, from
+`carouselCard`, `gridThumbnail` and the matrices the drawing uses). A live
+item is a texture, the matrix the CPU draws the thumbnail under, the live
+rectangle and its holes: what is drawn over the thumbnail at rest. On a
+tile, the icon and the glyphs of the labels; on a card, what the cards
+drawn after it draw — their covers, rectangles that hold every pixel a
+card draws, as `drawWindowWithData` draws them, checked against it by
+`TestLiveCovers`. The border of a card is `2 / scale` px wide, not 2: `gg`
+strokes in pixels of the canvas. The selector gives the presenter the
+items of a frame at rest (`SetLiveItems`), drawn over the next frame that
+is not a scene, through its fade; a scene carries them among its items
+(`SceneItem.Live`): in the carousel each after its card and before the
+cards after it, in the grid after the tiles and before the frames. A
+program of its own computes, for each pixel of a
+live rectangle, the kernel of `x/image/draw` `BiLinear` at the point
+the inverse of the matrix maps the pixel's centre to: a tent of support 1
+widened to the scale when shrinking, the weights normalized, summed in 16
+bits a channel and truncated, as `transform_RGBA_RGBA_Src` does —
+`~/.cache/qws-probe-live/kernel` on ws1 is that program, in single
+precision. The same program draws the live items of frames in motion, at
+the card's place and scale of the frame. The pictures are published once
+complete (above): the presenter tests no fence. It makes one before the
+swap of a frame that drew live pictures (`TakeLiveFence`), for the
+selector to give the snapshotter, and deletes the one it replaces
+(`ReleaseFence`). The presenter is a `LivePresenter`, apart from
+`Animator`, so that the presenters and the fakes of the animations stay as
+they are.
+
+*Waking at rest.* At rest the selector waits in `WaitForEvent` of its own
+connection. Once a pass is published, the snapshotter sends the overlay
+window a `ClientMessage` of the atom `_QWS_LIVE` through its own
+connection, at most one between two frames of the selector (`BeginFrame`
+clears it); the selector reads it as any event, not as a cause of the
+frames of keys, and presents the frame shown — again, with `Refresh`, or
+the scene at the target while its frame at rest is drawn — with the live
+items over it, no sooner than a refresh period after the frame before: it
+polls its connection meanwhile, as for the uploads of 007. Such a frame is
+logged as a record "Frame" of cause `live`. In motion every frame takes
+the pictures anyway. No goroutine reads the selector's connection, and the
+order of its events is kept.
+
+== Files
+
+[cols="2,5"]
+|===
+| File | What changes
+
+| `pkg/glx/glx_linux.go`, `pkg/glx/pixmap_linux.go`
+| `NewContext` takes an optional context to share with; `Offscreen` gives
+  its context for that, as an opaque handle. A failure to share is told
+  apart from a failure to create. `Offscreen.WaitX`, glXWaitX, for the
+  passes from frames.
+
+| `pkg/snapshot/gpu.go`
+| The average drawn into a framebuffer the caller gives, read back or not.
+
+| `pkg/snapshot/live.go`
+| New: the live textures of a window, their generations and fences; the
+  live schedule; `SetLive`, `Share`, `BeginFrame` and `EndFrame`; the
+  `ClientMessage`; the records "Live". The passes from frames: the scaled
+  pixmap of a window, `scaleFromFrame`, `bindScaled`.
+
+| `pkg/snapshot/xrender.go`, from 022
+| `scale`: the passes of `thumbnail` into a picture given, which
+  `thumbnail` reads back and a pass from a frame binds.
+
+| `pkg/snapshot/snapshot.go`
+| The loop runs the live schedule while live, and no snapshot on change;
+  the generations of the snapshots. With #35: the live passes are paused
+  by `Shown` with the own overlay left out, the snapshots by `pausedNow` as
+  #35 makes it; `TestLivePause`.
+
+| `pkg/x11/switchers.go`, from #35
+| `Shown` gets the window to leave out, 0 for none;
+  `TestSwitchersOwnOverlay`.
+
+| `pkg/carousel/factory.go`, `pkg/carousel/present_glx.go`
+| `NewBackend` takes the context to share with; the presenter says whether
+  it shares (`Live`), and draws the live items before each swap; the
+  fallback, said once at info level.
+
+| `pkg/carousel/present_glx_live.go`
+| New: the program of the kernel, the items drawn over a frame or in a
+  scene; a fence after each frame that drew one, for the passes to wait
+  for.
+
+| `pkg/carousel/present_glx_scene.go`, `pkg/carousel/present.go`
+| `SceneItem.Live`: a live item drawn at its place among the layers.
+
+| `pkg/carousel/live.go`
+| New: `LiveItem`, `LivePresenter`; `CardLive`, `CarouselLive` and
+  `GridLive`, the matrix of a thumbnail, its live rectangle and its holes —
+  from the geometry the drawing already uses, so that the two cannot
+  diverge.
+
+| `pkg/ui/live.go`
+| New: the live items of the layout shown, from the snapshotter's live
+  pictures newer than the activation's snapshots, the geometry kept while
+  the layers, the selection and the hover stay; at rest the frame
+  presented again on `_QWS_LIVE`, no sooner than a period after the last;
+  the lag of a frame; the fallback said once.
+
+| `pkg/ui/selector.go`, `pkg/ui/animation.go`, `pkg/ui/fade.go`,
+  `pkg/ui/timing.go`
+| `SetLive` of the snapshotter when the overlay is mapped and unmapped; the
+  pictures taken before each frame and the fence given back after it; the
+  live items over the frame at rest, after each card of a scene of the
+  carousel and after the tiles of the grid; the event; the field `live_ms`
+  of the frame records.
+
+| `cmd/qws/root.go`
+| The snapshotter given to the selector, its context to the presenter;
+  `Pause` as now.
+
+| `internal/config/config.go`, `cmd/qws/root.go`
+| `appearance.thumbnail.live`, `appearance.thumbnail.live_interval`: the
+  defaults, the flags, the warning for a negative interval.
+
+| `config.yaml.example`, `doc/configuration.asciidoc`, `README.md`
+| The two keys; the README's "Live window thumbnails via XComposite" made
+  true.
+
+| `pkg/carousel/live_test.go`, `pkg/snapshot/live_test.go`,
+  `pkg/ui/live_test.go`, `internal/config/config_test.go`,
+  `cmd/qws/root_test.go`
+| `TestLiveThumbnails`, `TestLiveCovers`, `TestLiveFallback`,
+  `BenchmarkLiveFrame`; `TestSharedLive`, `TestLiveSchedule`,
+  `BenchmarkLivePass`, `BenchmarkLiveBeside`; `TestLiveFrames`,
+  `TestLiveOff`; `TestThumbnailKeys`, the flags.
+
+| `specs/001-rendering-speed/measure.sh`
+| Session S5: the window that changes, `live` on and off in turn; the
+  summary of L.
+|===
+
+Reused: the area average of 008 and its test; the window texture and its
+binding again; the fences and the shared context of the patch of 013
+(`~/.cache/qws-013-upload-context.patch` on ws1), its X error handler for a
+display of its own; the geometry of `carouselCard`, `gridThumbnail` and
+`gridIconScale`; the fades of 007 and 010.
+
+Unchanged: the drawing of `cpu`, its frames and `testdata/scenes.json`; the
+layers of 007 and the heads of 019; the snapshots while hidden, their RENDER
+and CPU paths; `snapshot_interval`.
+
+== Order
+
+Sharing first (`pkg/glx`, K4), then the live textures and their schedule
+(`pkg/snapshot`, K5), the drawing (`pkg/carousel`, K3), the selector and
+the configuration (K6, K10), and last the sessions on E1 (K7–K9, K11), with
+`live` on and off in turn. #35 was merged after the schedule: `pkg/x11`
+came with the merge of `develop` at `759c6d3`.

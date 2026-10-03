@@ -1,0 +1,29 @@
+= 020 — tasks
+:toc: left
+:toc-title: Contents
+:revdate: 2026-10-02
+
+. [x] T1. The probes on E1, windows of their own off the screen: sharing a
+  window texture across contexts and displays, the cost of sampling, the
+  passes beside paced frames (research).
+. [x] T2. The specification, the decisions laid out for the author.
+. [ ] T3. The author's answers to D1–D7; the specification and the plan
+  brought in line with them.
+. [ ] T4. Before any code: session S5 in `measure.sh`, run on E1 with the
+  build of `develop` — the frames and the CPU with the window of S5
+  changing — the reference that the runs with `live: false` are to repeat.
+. [ ] T5. `pkg/glx`: the presenter's context sharing the snapshotter's, the
+  failure to share told apart; K4, with `TestSharedLive`.
+. [ ] T6. `pkg/snapshot`: the live textures, their generations and fences,
+  the live schedule, the `ClientMessage`; should #35 be merged, `Shown`
+  of `pkg/x11` leaving the own overlay out; K5.
+. [ ] T7. `pkg/carousel`: the geometry of a thumbnail, the live items and
+  their program; K3, with K1 and K2 unchanged.
+. [ ] T8. `pkg/ui`, `cmd/qws`: the live items of the layout shown, the
+  frame presented again at rest, `SetLive` around an activation, the
+  fallback; K6.
+. [ ] T9. The keys, their flags and documentation; K10.
+. [ ] T10. S5 on E1, `live` on and off in turn; K7–K9; the author's
+  judgement, K11.
+. [ ] T11. `go vet ./...`, `go test ./...`, `make check-specs`; K12; the
+  results.

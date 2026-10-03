@@ -107,7 +107,7 @@ func testImage(w, h int, seed int64) *image.RGBA {
 }
 
 // newPixmap makes a pixmap of the depth and size
-func newPixmap(t *testing.T, conn *xgb.Conn, root xproto.Window, depth int, size image.Point) xproto.Pixmap {
+func newPixmap(t testing.TB, conn *xgb.Conn, root xproto.Window, depth int, size image.Point) xproto.Pixmap {
 	pixmap, err := xproto.NewPixmapId(conn)
 	if err != nil {
 		t.Fatal(err)
@@ -120,7 +120,7 @@ func newPixmap(t *testing.T, conn *xgb.Conn, root xproto.Window, depth int, size
 
 // fillPixmap draws the image into the pixmap, BGRA as the X server keeps 24-
 // and 32-bit pixels on this machine
-func fillPixmap(t *testing.T, conn *xgb.Conn, pixmap xproto.Pixmap, depth int, img *image.RGBA) {
+func fillPixmap(t testing.TB, conn *xgb.Conn, pixmap xproto.Pixmap, depth int, img *image.RGBA) {
 	w, h := img.Rect.Dx(), img.Rect.Dy()
 	gc, _ := xproto.NewGcontextId(conn)
 	xproto.CreateGC(conn, gc, xproto.Drawable(pixmap), 0, nil)

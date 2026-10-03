@@ -226,12 +226,15 @@ func (s *Selector) hoverChanged(thumbnails []image.Image) {
 			return
 		}
 		start := time.Now()
+		s.liveBegin()
 		items := s.gridItems(start)
 		drawEnd := time.Now()
 		if err := s.animator.PresentScene(baseLayer, items, carousel.Opaque); err != nil {
 			log.Error().Err(err).Msg("Failed to present the scene of the grid")
 		}
-		s.logFrame(start, drawEnd, time.Now())
+		end := time.Now()
+		s.liveEnd(end)
+		s.logFrame(start, drawEnd, end)
 	default:
 		s.render(thumbnails)
 	}
@@ -492,6 +495,7 @@ func (s *Selector) uploadIdle() {
 		s.collectRest(r)
 		if s.rest.awaited && s.rest.ready != nil {
 			stepEnd := s.rest.stepEnd
+			s.liveBegin()
 			start, end := s.presentRest(carousel.Opaque)
 			if stepEnd {
 				s.logAnimationFrame(&s.step.animationLog, s.config.LayoutMode, 1, true, start, start, end)
@@ -570,6 +574,7 @@ func (s *Selector) waitFrame(t time.Time) time.Time {
 // its scene at the target; with a fade alone, the picture shown
 func (s *Selector) frame() {
 	now := s.waitFrame(s.frameDue)
+	s.liveBegin()
 	fade := s.fadeAt(now)
 	hovering := s.hover.active && s.hoverMoving(now)
 
@@ -603,12 +608,14 @@ func (s *Selector) frame() {
 		drawEnd = time.Now()
 		err = s.animator.PresentScene(baseLayer, items, fade)
 	default:
+		s.liveRest()
 		err = s.animator.PresentFaded(nil, fade)
 	}
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to present an animation frame")
 	}
 	end := time.Now()
+	s.liveEnd(end)
 	if stepped {
 		s.logAnimationFrame(&s.step.animationLog, s.config.LayoutMode, s.step.pos.progress(now), atRest, drawStart, drawEnd, end)
 	}
@@ -616,6 +623,10 @@ func (s *Selector) frame() {
 		done := !s.fade.level.moving(now)
 		s.logAnimationFrame(&s.fade.animationLog, s.fade.kind(), s.fade.level.progress(now), done, drawStart, drawEnd, end)
 		s.fade.active = !done
+		if done && !s.fade.out {
+			// Shown in full
+			s.setLive(true)
+		}
 	}
 	if s.hover.active {
 		// The frame after the last that moved is at rest: the frame at rest, or
@@ -674,6 +685,8 @@ func (s *Selector) gridItems(now time.Time) []carousel.SceneItem {
 	add(cardKey{index: gridShadow}, x, y, carousel.Opaque, 0, 0)
 	hovered(cardKey{index: gridHoverShadow})
 	add(cardKey{index: gridTiles}, 0, 0, carousel.Opaque, 0, 0)
+	// The live thumbnails over the tiles, under the frames
+	items = append(items, s.liveTiles()...)
 	hovered(cardKey{index: gridHover})
 	add(cardKey{index: gridSelection}, x, y, carousel.Opaque, 0, 0)
 	return items
@@ -708,6 +721,10 @@ func (s *Selector) carouselItems(now time.Time) []carousel.SceneItem {
 			item.B, item.RectB = s.placeLayer(data, cardKey{index: k, offset: int(n0) + 1}, x, y, scale)
 		}
 		items = append(items, item)
+		// Its live thumbnail over it, under the cards after it
+		if live, ok := s.liveCard(data, k, o); ok {
+			items = append(items, live)
+		}
 
 		// The hover frame is drawn over its card, before the cards after it
 		if v, ok := levels[k]; ok {
@@ -767,6 +784,7 @@ func (s *Selector) presentRest(f carousel.Fade) (time.Time, time.Time) {
 	s.rest.ready, s.rest.staged = nil, false
 
 	presentStart := time.Now()
+	s.liveRest()
 	var err error
 	if staged {
 		err = s.animator.PresentStaged(f)
@@ -777,6 +795,7 @@ func (s *Selector) presentRest(f carousel.Fade) (time.Time, time.Time) {
 		log.Error().Err(err).Msg("Failed to present frame")
 	}
 	end := time.Now()
+	s.liveEnd(end)
 	s.timing.cause, s.timing.start = s.rest.cause, s.rest.causeAt
 	s.logFrame(presentStart.Add(-rest.draw), presentStart, end)
 	return presentStart, end

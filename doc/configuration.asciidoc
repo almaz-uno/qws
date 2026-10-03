@@ -420,6 +420,20 @@ log:
 | `256`
 | Thumbnail height in pixels
 
+| `appearance.thumbnail.live`
+| `--appearance-thumbnail-live`
+| `QWS_APPEARANCE_THUMBNAIL_LIVE`
+| `bool`
+| `true`
+| Live thumbnails of the `glx` renderer: while the switcher is shown, a visible window that changes is averaged again on the GPU and its card or tile follows it; `false`: the snapshots taken before the switcher appeared, as in 1.3.3. No effect under `cpu`, nor where the GPU cannot share the thumbnails with the switcher, which the log says once (specification `020-live-thumbnails`)
+
+| `appearance.thumbnail.live_interval`
+| `--appearance-thumbnail-live-interval`
+| `QWS_APPEARANCE_THUMBNAIL_LIVE_INTERVAL`
+| `duration`
+| `33ms`
+| How often, at most, a shown window that changed is averaged again; `0`: once a refresh of the monitor the switcher is on. A negative interval is reported and the default used
+
 | `appearance.spacing`
 | `--appearance-spacing`
 | `QWS_APPEARANCE_SPACING`

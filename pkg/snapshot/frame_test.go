@@ -9,6 +9,7 @@ import (
 
 	"github.com/almaz-uno/qws/pkg/composite"
 	"github.com/almaz-uno/qws/pkg/glx"
+	"github.com/almaz-uno/qws/pkg/x11"
 	"github.com/jezek/xgb"
 	xcomposite "github.com/jezek/xgb/composite"
 	"github.com/jezek/xgb/damage"
@@ -16,20 +17,18 @@ import (
 	"github.com/jezek/xgb/xproto"
 )
 
-// frameSnapshotter is a snapshotter on conn without its loop, its GL context
-// current on this thread, with RENDER and the CPU path; it skips the test
-// without a compositing manager, RENDER or offscreen GLX
+// frameSnapshotter is a snapshotter on conn, a connection of x11.NewConn,
+// without its loop, its GL context current on this thread, with RENDER and
+// the CPU path; it skips the test without a compositing manager, RENDER or
+// offscreen GLX
 func frameSnapshotter(t testing.TB, conn *xgb.Conn) *Snapshotter {
 	t.Helper()
 	if !compositing(conn) {
 		t.Skip("no compositing manager: no window of the test is redirected")
 	}
 	for _, init := range []func() error{
-		func() error { return xcomposite.Init(conn) },
 		func() error { _, err := xcomposite.QueryVersion(conn, 0, 4).Reply(); return err },
-		func() error { return xfixes.Init(conn) },
 		func() error { _, err := xfixes.QueryVersion(conn, 5, 0).Reply(); return err },
-		func() error { return damage.Init(conn) },
 		func() error { _, err := damage.QueryVersion(conn, 1, 1).Reply(); return err },
 	} {
 		if err := init(); err != nil {
@@ -59,15 +58,19 @@ func frameSnapshotter(t testing.TB, conn *xgb.Conn) *Snapshotter {
 		t.Fatal(err)
 	}
 	return &Snapshotter{
-		conn:    conn,
-		root:    root,
-		thumbs:  map[xproto.Window]image.Image{},
-		windows: map[xproto.Window]*window{},
-		frames:  map[xproto.Window]xproto.Window{},
-		off:     off,
-		gpu:     g,
-		render:  x,
-		cpu:     cpu,
+		conn:     conn,
+		root:     root,
+		thumbs:   map[xproto.Window]image.Image{},
+		thumbGen: map[xproto.Window]uint64{},
+		pics:     map[xproto.Window]Picture{},
+		windows:  map[xproto.Window]*window{},
+		frames:   map[xproto.Window]xproto.Window{},
+		off:      off,
+		gpu:      g,
+		render:   x,
+		cpu:      cpu,
+		share:    off.Share(),
+		hold:     liveHold,
 	}
 }
 
@@ -142,13 +145,13 @@ func otherVisual(screen *xproto.ScreenInfo, depth int) xproto.Visualid {
 // in a frame of depth 24, which the X server redirects, is captured on the
 // GPU from its own pixmap, as before. The windows are off the screen.
 func TestCaptureFromFrame(t *testing.T) {
-	conn, err := xgb.NewConn()
+	conn, err := x11.NewConn()
 	if err != nil {
 		t.Skipf("no X display: %v", err)
 	}
 	defer conn.Close()
 	s := frameSnapshotter(t, conn)
-	other, err := xgb.NewConn()
+	other, err := x11.NewConn()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -301,7 +304,7 @@ func fillDrawable(t testing.TB, c *xgb.Conn, d xproto.Drawable, depth int, img *
 //
 //	go test -run '^$' -bench FrameRender -benchtime 200x ./pkg/snapshot
 func BenchmarkFrameRender(b *testing.B) {
-	conn, err := xgb.NewConn()
+	conn, err := x11.NewConn()
 	if err != nil {
 		b.Skipf("no X display: %v", err)
 	}
