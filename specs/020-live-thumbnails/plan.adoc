@@ -62,11 +62,14 @@ the windows waiting, a window passed alone would hold the pass of another
 back by a whole interval, and its lag past the bound of K7.
 
 *Passes in the pauses.* While frames come one after another — the last two
-ended less than 10 ms apart, the last less than 10 ms ago — a pass due
-less than 4 ms before the next frame ends, by the period of the last two,
-waits for that end: `EndFrame` wakes the loop, and the pass runs on the GPU
-in the pause after the frame. A pass made whenever due ran beside a frame
-about one time in six. `BenchmarkLiveBeside`, the probe of "Beside the
+ended less than 10 ms apart — no pass is made; one due waits for them to
+stop, 10 ms after the last, the loop's timer set for then. First, a pass
+due less than 4 ms before the next frame ended, by the period of the last
+two, waited for that end, `EndFrame` waking the loop, and ran in the
+pause after the frame: it held the frames off the screen, as below, but
+not on the desktop of E1, where the steps of the grid missed 5.63 and
+8.14 % of their frames against 0.68 and 0.91 % (research, "S5 at rest").
+A pass made whenever due ran beside a frame about one time in six. `BenchmarkLiveBeside`, the probe of "Beside the
 frames" with the code of qws: with one window changing 50 times a second,
 the frames presented in more than 2 ms were 0.57–0.75 % with passes
 whenever due, 0.13 % with them in the pauses, 0–0.18 % with none, for a

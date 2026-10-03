@@ -394,9 +394,15 @@ All of it on `glx` with `appearance.thumbnail.live: true`; otherwise as in
   window a pass: a pass no sooner than the `live_interval` divided by the
   number of windows taking passes — waiting, or passed within the
   interval — after the one before it. While the switcher presents frames
-  one after another — a step, a fade — a pass due less than 4 ms before
-  the end of the next frame waits for that end, and runs in the pause
-  after it. A fence and a flush follow each pass; once the fence has
+  one after another — a step, a hover moving; the fades take none — no
+  pass is made: one due waits for the frames to stop, 10 ms after the
+  last, and a frame in motion draws the pictures published before it.
+  Changed after the rest variant of S5, 2026-10-03: passes made in the
+  pauses between such frames, 4 ms before the next at the latest, held
+  them off the screen but not on the desktop of E1, where the steps of the
+  grid missed 5.63 and 8.14 % of their frames against 0.68 and 0.91 %,
+  the X server's work for a pass delaying the overlay's frames (research,
+  "S5 at rest"). A fence and a flush follow each pass; once the fence has
   signalled, tested by the snapshotter, the texture is published as the
   window's picture.
 . *From the frame.* A window taken from its frame's pixmap (022) is
@@ -516,8 +522,8 @@ with them.
 | The schedule: `TestLiveSchedule` — while shown, a change is averaged
   without settle at most once a `live_interval`, the window that waited
   longest first, no two passes closer than the `live_interval` divided by
-  the windows taking passes, and while frames come one after another none
-  in the 4 ms before the end of a frame; a window not viewable, of a
+  the windows taking passes, and none while frames come one after another
+  but once they have stopped; a window not viewable, of a
   changed size or not shown, is not; no snapshot with a read back while
   shown; hidden, the schedule of 008 (`TestSchedule` unchanged). No live
   pass while the switcher of another instance is shown, and none paused by
@@ -531,9 +537,11 @@ with them.
   (`TestLiveFallback`).
 
 | K7
-| Lag: in S5 with `live: true`, L p95 ≤ `live_interval` + one refresh
-  period + 5 ms, 45 ms at the defaults on E1 — provisional, confirmed by
-  the author on 2026-10-02 until the first measurement.
+| Lag: in the rest variant of S5 with `live: true`, L p95 ≤
+  `live_interval` + one refresh period + 5 ms, 45 ms at the defaults on
+  E1 — provisional, confirmed by the author on 2026-10-02 until the first
+  measurement. With the key held the passes wait for the steps to stop
+  (Behavior, "While shown"), and L there is the time held.
 
 | K8
 | Frames: in S5, the step of the carousel, the fades and the grid with
