@@ -64,14 +64,12 @@ type Snapshotter struct {
 	woken     bool
 	lastEnd   time.Time       // the end of the last frame
 	prevEnd   time.Time       // and of the one before
-	endWanted bool            // a pass waits for the end of the frame: EndFrame wakes the loop
 	shown     []xproto.Window // the windows of the last frame, those the switcher shows
 	liveWant  liveSession
 
 	paused   atomic.Bool
 	wake     chan struct{} // the pause ended
 	liveWake chan struct{} // SetLive was called
-	frameEnd chan struct{} // EndFrame was called, a pass waiting for it
 	events   chan xgb.Event
 	refresh  chan chan struct{}
 	quit     chan struct{}
@@ -88,8 +86,7 @@ type Snapshotter struct {
 	cpu       *composite.Capturer
 	live      liveSession     // the live thumbnails taken; overlay 0: none
 	lastPass  time.Time       // the last live pass
-	hold      time.Duration   // liveHold; 0 in a test: no pass waits for a frame
-	guard     time.Duration   // liveGuard
+	hold      time.Duration   // liveHold; 0 in a test: no pass waits for the frames
 	liveRetry time.Time       // a pass a frame held back is tried again then
 	trash     []*liveTextures // live textures to delete once no frame is drawn
 	noScaled  bool            // a scaled pixmap would not bind: no live pass from a frame
@@ -183,9 +180,7 @@ func start(conn *xgb.Conn, root xproto.Window, interval time.Duration, scaling s
 		pics:      make(map[xproto.Window]Picture),
 		wake:      make(chan struct{}, 1),
 		liveWake:  make(chan struct{}, 1),
-		frameEnd:  make(chan struct{}, 1),
 		hold:      liveHold,
-		guard:     liveGuard,
 		switchers: noSwitchers{},
 		events:    make(chan xgb.Event, 256),
 		refresh:   make(chan chan struct{}),
@@ -399,10 +394,6 @@ func (s *Snapshotter) run(ready chan<- error) {
 		case <-s.wake:
 		case <-s.liveWake:
 			s.setLive()
-		case <-s.frameEnd:
-			if s.live.overlay != 0 {
-				s.liveTick(time.Now(), true)
-			}
 		case done := <-s.refresh:
 			s.captureChanged(time.Now(), causeActivation, true)
 			close(done)
@@ -426,7 +417,7 @@ func (s *Snapshotter) run(ready chan<- error) {
 func (s *Snapshotter) tick(now time.Time) {
 	switch {
 	case s.live.overlay != 0:
-		s.liveTick(now, false)
+		s.liveTick(now)
 	case !s.pausedNow():
 		s.captureChanged(now, causeChange, false)
 	}

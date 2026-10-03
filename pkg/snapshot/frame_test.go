@@ -70,9 +70,7 @@ func frameSnapshotter(t testing.TB, conn *xgb.Conn) *Snapshotter {
 		render:   x,
 		cpu:      cpu,
 		share:    off.Share(),
-		frameEnd: make(chan struct{}, 1),
 		hold:     liveHold,
-		guard:    liveGuard,
 	}
 }
 

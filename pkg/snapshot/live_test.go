@@ -118,35 +118,38 @@ func TestLiveSchedule(t *testing.T) {
 		}
 	}
 
-	// While frames come one after another, a pass due just before the end
-	// of a frame waits for it; in a pause it goes at once
+	// While frames come one after another, no pass: one due waits for them
+	// to stop, a hold after the last; between frames a hold apart or more,
+	// and with a single frame, it goes when due
 	last := t0.Add(time.Second)
 	prev := last.Add(-ms(7))
 	for _, c := range []struct {
 		name           string
 		now, due, want time.Time
 	}{
-		{"due in the pause", last.Add(ms(1)), last.Add(ms(1)), last.Add(ms(1))},
-		{"due before, made now", last.Add(ms(2)), last.Add(-ms(3)), last.Add(ms(2))},
-		{"due at the end of the pause", last.Add(ms(1)), last.Add(ms(3)), last.Add(ms(3))},
-		{"due before the next frame", last.Add(ms(1)), last.Add(ms(4)), last.Add(ms(7))},
-		{"due in a pause after it", last.Add(ms(1)), last.Add(ms(8)), last.Add(ms(8))},
-		{"no frame for a while", last.Add(liveHold), last.Add(liveHold + ms(5)), last.Add(liveHold + ms(5))},
+		{"due between frames", last.Add(ms(1)), last.Add(ms(1)), last.Add(liveHold)},
+		{"due before, frames still", last.Add(ms(2)), last.Add(-ms(3)), last.Add(liveHold)},
+		{"due once they stopped", last.Add(ms(1)), last.Add(liveHold + ms(5)), last.Add(liveHold + ms(5))},
+		{"no frame for a hold", last.Add(liveHold), last.Add(liveHold), last.Add(liveHold)},
 		{"frames a hold apart", last.Add(ms(1)), last.Add(ms(5)), last.Add(ms(5))},
+		{"one frame", last.Add(ms(1)), last.Add(ms(2)), last.Add(ms(2))},
 	} {
 		p := prev
-		if c.name == "frames a hold apart" {
+		switch c.name {
+		case "frames a hold apart":
 			p = last.Add(-liveHold)
+		case "one frame":
+			p = time.Time{}
 		}
-		if got := passAt(c.now, c.due, last, p, liveHold, liveGuard); !got.Equal(c.want) {
+		if got := passAt(c.now, c.due, last, p, liveHold); !got.Equal(c.want) {
 			t.Errorf("%s: at %v, want %v", c.name, got.Sub(last), c.want.Sub(last))
 		}
 	}
 
-	// The loop: the timer for the end of the frame, no pass before it, and
-	// only the windows the switcher shows — a pass would need the GPU, which
-	// the test has not
-	hs := &Snapshotter{windows: map[xproto.Window]*window{3: &viewable}, hold: liveHold, guard: liveGuard,
+	// The loop: the timer for the frames to stop, no pass before, and only
+	// the windows the switcher shows — a pass would need the GPU, which the
+	// test has not
+	hs := &Snapshotter{windows: map[xproto.Window]*window{3: &viewable}, hold: liveHold,
 		live: liveSession{overlay: 7, interval: interval}}
 	now := t0.Add(ms(5))
 	if d := hs.liveWait(now); d != time.Hour {
@@ -157,25 +160,14 @@ func TestLiveSchedule(t *testing.T) {
 		t.Errorf("a window not shown: the timer in %v, want none", d)
 	}
 	hs.shown = []xproto.Window{2, 3}
-	hs.frameEnd = make(chan struct{}, 1)
-	hs.EndFrame(0)
-	if len(hs.frameEnd) != 0 {
-		t.Error("the end of a frame no pass waits for wakes the loop")
-	}
 	hs.lastEnd, hs.prevEnd = now.Add(-ms(6)), now.Add(-ms(13))
-	if d := hs.liveWait(now); d != ms(2) {
-		t.Errorf("due before the end of a frame: the timer in %v, want 2 ms, a millisecond after it", d)
+	if d := hs.liveWait(now); d != ms(4) {
+		t.Errorf("frames one after another: the timer in %v, want 4 ms, a hold after the last", d)
 	}
-	hs.liveTick(now, false)
+	hs.liveTick(now)
 	if !viewable.liveDue.dirty {
-		t.Error("a pass made just before the end of a frame")
+		t.Error("a pass made while frames come one after another")
 	}
-	hs.lastEnd, hs.prevEnd = now.Add(-ms(6)), now.Add(-ms(13))
-	hs.EndFrame(0)
-	if len(hs.frameEnd) != 1 || hs.endWanted {
-		t.Error("the end of the frame a pass waits for does not wake the loop, once")
-	}
-	<-hs.frameEnd
 	hs.lastEnd, hs.prevEnd = now.Add(-liveHold), now.Add(-liveHold-ms(7))
 	if d := hs.liveWait(now); d != 0 {
 		t.Errorf("no frame for a hold: the timer in %v, want at once", d)
@@ -242,8 +234,7 @@ func TestLivePause(t *testing.T) {
 		t.Errorf("another instance's switcher shown: the timer in %v, want none", d)
 	}
 	// A pass here would need the GPU, which the test has not
-	s.liveTick(now, false)
-	s.liveTick(now, true)
+	s.liveTick(now)
 	if !w.liveDue.dirty {
 		t.Error("a pass made while another instance's switcher is shown")
 	}
@@ -286,9 +277,7 @@ func newLiveSnapshotter(t testing.TB, conn *xgb.Conn) (*Snapshotter, *glThread) 
 		thumbGen: map[xproto.Window]uint64{},
 		pics:     map[xproto.Window]Picture{},
 		windows:  map[xproto.Window]*window{},
-		frameEnd: make(chan struct{}, 1),
 		hold:     liveHold,
-		guard:    liveGuard,
 	}
 	g := &glThread{do: make(chan func())}
 	ready := make(chan error)
@@ -600,9 +589,13 @@ func BenchmarkLivePass(b *testing.B) {
 // the change it shows to the end of the first frame that draws it, L of the
 // specification but for the vertical blank. b.N is the number of frames; N
 // and R are LIVE_N and LIVE_R, 4 and 30 by default, LIVE_HOLD the hold
-// (0s: passes whenever due):
+// (0s: passes whenever due). With LIVE_PAUSE, the frames come as steps of 21
+// frames, 150 ms at 144 Hz, with a pause of LIVE_PAUSE between them, and the
+// passes published in the pauses — where they are made, frames coming one
+// after another — are counted apart:
 //
 //	go test -run '^$' -bench LiveBeside -benchtime 12000x ./pkg/snapshot
+//	LIVE_PAUSE=200ms go test -run '^$' -bench LiveBeside -benchtime 8400x ./pkg/snapshot
 func BenchmarkLiveBeside(b *testing.B) {
 	const (
 		width, height = 2520, 1400
@@ -625,9 +618,11 @@ func BenchmarkLiveBeside(b *testing.B) {
 	if v := os.Getenv("LIVE_HOLD"); v != "" {
 		s.hold, _ = time.ParseDuration(v)
 	}
-	if v := os.Getenv("LIVE_GUARD"); v != "" {
-		s.guard, _ = time.ParseDuration(v)
+	var pause time.Duration
+	if v := os.Getenv("LIVE_PAUSE"); v != "" {
+		pause, _ = time.ParseDuration(v)
 	}
+	const step = 21
 
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
@@ -732,10 +727,8 @@ func BenchmarkLiveBeside(b *testing.B) {
 			select {
 			case id := <-changes:
 				s.windows[id].liveDue.change(time.Now())
-			case <-s.frameEnd:
-				s.liveTick(time.Now(), true)
 			case <-timer.C:
-				s.liveTick(time.Now(), false)
+				s.liveTick(time.Now())
 			case <-stop:
 				return
 			}
@@ -755,6 +748,10 @@ func BenchmarkLiveBeside(b *testing.B) {
 	for f := 0; f < b.N; f++ {
 		mode := modes[f/block%len(modes)]
 		passing.Store(mode == "live")
+		if pause > 0 && f%step == 0 && f > 0 {
+			// The pause after a step: the frames stop, and the passes go
+			due = due.Add(pause)
+		}
 		for d := time.Until(due) - spinAhead; d > 0; d = time.Until(due) - spinAhead {
 			time.Sleep(d)
 		}
