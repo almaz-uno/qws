@@ -56,9 +56,12 @@ type Picture struct {
 // a pass a frame holds back is tried again
 const livePoll = 500 * time.Microsecond
 
-// While frames come one after another — the last two less than liveHold
+// While frames come one after another — the last two less than liveMotion
 // apart, the last less than liveHold ago: a step, a hover moving — no pass
-// is made; one due waits for them to stop, liveHold after the last. In
+// is made; one due waits for them to stop, liveHold after the last, so that
+// it does not land in the pause between the steps of two keys either: of
+// 10 ms at first, it let the passes into those pauses, and the steps after
+// them missed a little more (the author, 2026-10-03; K8). In
 // the pauses between the frames of a step, 4 ms before the next frame at
 // the latest, as first made, the passes held the frames off the screen
 // (research, "Passes in the pauses"), but not on the desktop of E1: two
@@ -68,18 +71,21 @@ const livePoll = 500 * time.Microsecond
 // scaling by RENDER, delays the frames of the overlay after it (research,
 // "S5 at rest"). The pictures of a frame in motion are those published
 // before it.
-const liveHold = 10 * time.Millisecond
+const (
+	liveMotion = 10 * time.Millisecond
+	liveHold   = 30 * time.Millisecond
+)
 
 // passAt is when a pass due at due is made, at now: at once, or when due,
 // in a pause between frames; while frames come one after another, given the
-// ends of the last two, once they have stopped
+// ends of the last two, hold after the last
 func passAt(now, due, last, prev time.Time, hold time.Duration) time.Time {
 	t := due
 	if t.Before(now) {
 		t = now
 	}
 	period := last.Sub(prev)
-	if prev.IsZero() || period <= 0 || period >= hold {
+	if prev.IsZero() || period <= 0 || period >= liveMotion {
 		// Frames do not come one after another
 		return t
 	}

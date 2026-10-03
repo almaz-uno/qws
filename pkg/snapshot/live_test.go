@@ -119,8 +119,9 @@ func TestLiveSchedule(t *testing.T) {
 	}
 
 	// While frames come one after another, no pass: one due waits for them
-	// to stop, a hold after the last; between frames a hold apart or more,
-	// and with a single frame, it goes when due
+	// to stop, a hold after the last, 30 ms, past the pause between the
+	// steps of two keys; between frames apart by liveMotion or more, and
+	// with a single frame, it goes when due
 	last := t0.Add(time.Second)
 	prev := last.Add(-ms(7))
 	for _, c := range []struct {
@@ -132,12 +133,16 @@ func TestLiveSchedule(t *testing.T) {
 		{"due once they stopped", last.Add(ms(1)), last.Add(liveHold + ms(5)), last.Add(liveHold + ms(5))},
 		{"no frame for a hold", last.Add(liveHold), last.Add(liveHold), last.Add(liveHold)},
 		{"frames a hold apart", last.Add(ms(1)), last.Add(ms(5)), last.Add(ms(5))},
+		{"frames 15 ms apart", last.Add(ms(1)), last.Add(ms(5)), last.Add(ms(5))},
+		{"between two keys", last.Add(ms(20)), last.Add(ms(20)), last.Add(liveHold)},
 		{"one frame", last.Add(ms(1)), last.Add(ms(2)), last.Add(ms(2))},
 	} {
 		p := prev
 		switch c.name {
 		case "frames a hold apart":
 			p = last.Add(-liveHold)
+		case "frames 15 ms apart":
+			p = last.Add(-ms(15))
 		case "one frame":
 			p = time.Time{}
 		}
@@ -161,8 +166,8 @@ func TestLiveSchedule(t *testing.T) {
 	}
 	hs.shown = []xproto.Window{2, 3}
 	hs.lastEnd, hs.prevEnd = now.Add(-ms(6)), now.Add(-ms(13))
-	if d := hs.liveWait(now); d != ms(4) {
-		t.Errorf("frames one after another: the timer in %v, want 4 ms, a hold after the last", d)
+	if d := hs.liveWait(now); d != liveHold-ms(6) {
+		t.Errorf("frames one after another: the timer in %v, want %v, a hold after the last", d, liveHold-ms(6))
 	}
 	hs.liveTick(now)
 	if !viewable.liveDue.dirty {
