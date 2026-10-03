@@ -20,18 +20,22 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// frameWindow is a client window of depth 24 at 2,22 in a frame of its
-// visual off the screen, which the compositor redirects and the window is
-// drawn into, a child of the window showing the picture, and the
+// frameWindow is a client window of depth 24 at 2,22 in a frame off the
+// screen, which the compositor redirects and the window is drawn into — of
+// the frame's visual, or of the visual given, another of depth 24, as
+// ilovlya on ws1 — a child of the window showing the picture, and the
 // snapshotter's window for it, captured once from the frame by RENDER
-func frameWindow(t testing.TB, s *Snapshotter, conn *xgb.Conn, at image.Point, size image.Point) (*window, xproto.Window) {
+func frameWindow(t testing.TB, s *Snapshotter, conn *xgb.Conn, at image.Point, size image.Point, visual xproto.Visualid) (*window, xproto.Window) {
 	t.Helper()
 	screen := xproto.Setup(conn).DefaultScreen(conn)
 	frame := testWindow(t, conn, screen.Root, image.Rectangle{Min: at, Max: at.Add(size).Add(image.Pt(4, 24))}, 0, 0)
-	client := testWindow(t, conn, frame, image.Rect(2, 22, 2+size.X, 22+size.Y), 0, 0)
+	client := testWindow(t, conn, frame, image.Rect(2, 22, 2+size.X, 22+size.Y), 24, visual)
 	child := testWindow(t, conn, client, image.Rectangle{Max: size}, 0, 0)
 	waitRedirected(t, conn, frame)
-	w := &window{id: client, frame: frame, mapped: true, frameMapped: true, visual: screen.RootVisual, stale: true}
+	w := &window{id: client, frame: frame, mapped: true, frameMapped: true, visual: visual, stale: true}
+	if visual == 0 {
+		w.visual = screen.RootVisual
+	}
 	s.windows[client], s.frames[frame] = w, client
 	fillDrawable(t, conn, xproto.Drawable(child), 24, windowImage(size.X, size.Y, 99))
 	s.capture(w, "test")
@@ -93,7 +97,7 @@ func TestLiveFromFrame(t *testing.T) {
 	defer func() { bindScaled = bind }()
 
 	size := image.Pt(1500, 900)
-	w, child := frameWindow(t, s, conn, image.Pt(-3000, -3000), size)
+	w, child := frameWindow(t, s, conn, image.Pt(-3000, -3000), size, 0)
 	defer s.forget(w.id)
 	tw, th := thumbSize(size.X, size.Y)
 	for k, seed := range []int64{1, 2, 3} {
@@ -132,8 +136,29 @@ func TestLiveFromFrame(t *testing.T) {
 		t.Errorf("scaled pixmap %d×%d, want %d×%d", sp.width, sp.height, tw, th)
 	}
 
+	// Of another visual of depth 24 than its frame's
+	if v := otherVisual(xproto.Setup(conn).DefaultScreen(conn), 24); v != 0 {
+		vw, vchild := frameWindow(t, s, conn, image.Pt(-1400, -3000), image.Pt(800, 500), v)
+		picture := windowImage(800, 500, 5)
+		fillDrawable(t, conn, xproto.Drawable(vchild), 24, picture)
+		got, ok := livePicture(t, s, vw)
+		s.capture(vw, "test")
+		img, _ := s.Thumbnail(vw.id)
+		snap, _ := img.(*image.RGBA)
+		if !ok || snap == nil {
+			t.Fatalf("of visual 0x%x: pass %v, snapshot %v", v, ok, snap != nil)
+		}
+		mean, worst := difference(got, snap)
+		t.Logf("of visual 0x%x in a frame of 0x%x: via 0x%x, from the snapshot mean %.3f, worst %d",
+			v, xproto.Setup(conn).DefaultScreen(conn).RootVisual, vw.via, mean, worst)
+		if vw.via == 0 || worst > 1 {
+			t.Errorf("of visual 0x%x: via 0x%x, %d from its snapshot; want its frame and 1 at most", v, vw.via, worst)
+		}
+		s.forget(vw.id)
+	}
+
 	// Should the pixmap of qws not bind, the window keeps its snapshot
-	other, otherChild := frameWindow(t, s, conn, image.Pt(-3000, -1800), image.Pt(800, 500))
+	other, otherChild := frameWindow(t, s, conn, image.Pt(-3000, -1800), image.Pt(800, 500), 0)
 	defer s.forget(other.id)
 	bindScaled = func(*glx.Offscreen, xproto.Pixmap) (*glx.TexturePixmap, error) {
 		return nil, errors.New("no bind in the test")
@@ -248,7 +273,7 @@ func BenchmarkLivePassFrame(b *testing.B) {
 	defer zerolog.SetGlobalLevel(level)
 	s := frameSnapshotter(b, conn)
 	size := image.Pt(2556, 1357)
-	w, _ := frameWindow(b, s, conn, image.Pt(-4000, -4000), size)
+	w, _ := frameWindow(b, s, conn, image.Pt(-4000, -4000), size, 0)
 	defer s.forget(w.id)
 	if _, ok := livePicture(b, s, w); !ok {
 		b.Fatal("no pass")
