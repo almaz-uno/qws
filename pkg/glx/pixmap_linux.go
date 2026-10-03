@@ -307,11 +307,12 @@ func (p *TexturePixmap) Rebind() {
 
 // WaitX waits, as glXWaitX, until the X server has done the drawing asked
 // of it before, so that a pixmap it was asked to draw — through another
-// connection, as RENDER of the snapshotter into a pixmap of its own — is read
-// as drawn once bound again. Without it, the X server's work still on the GPU
-// of NVIDIA, 5 % of the live passes of a window scaled into such a pixmap read
-// it as it was before (specs/020-live-thumbnails, research); with it, none
-// of 200. The context must be current.
+// connection, by the window's client or by RENDER of the snapshotter — is
+// read as drawn once bound again. Without it, the X server's work still on
+// the GPU of NVIDIA, 10 of 200 live passes of a window scaled into a pixmap
+// read it as it was before, and 5 of 55 runs of TestSharedLive with the
+// desktop in use (specs/020-live-thumbnails, research); with it, none. The
+// context must be current.
 func (o *Offscreen) WaitX() {
 	C.offWaitX()
 }

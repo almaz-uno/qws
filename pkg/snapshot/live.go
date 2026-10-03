@@ -422,14 +422,18 @@ func (s *Snapshotter) livePass(w *window, now time.Time) bool {
 		damage.Subtract(s.conn, w.damage, 0, 0)
 	}
 	gl.ActiveTexture(gl.TEXTURE0)
+	if w.via != 0 && !s.scaleFromFrame(w, tw, th) {
+		return false
+	}
+	// What the X server was asked to draw into the pixmap — by the window's
+	// client, or by RENDER from the frame — is drawn on the GPU before the
+	// pixmap is bound again: without it 5 of 55 runs of TestSharedLive read
+	// the pixmap as it was, with the desktop in use, and 10 of 200 passes
+	// from frames
+	s.off.WaitX()
 	if w.via != 0 {
-		if !s.scaleFromFrame(w, tw, th) {
-			return false
-		}
-		// Of the thumbnail's size already: the average copies it, once the X
-		// server has drawn it on the GPU
+		// Of the thumbnail's size already: the average copies it
 		sp := w.scaled
-		s.off.WaitX()
 		gl.BindTexture(gl.TEXTURE_2D, sp.texture)
 		sp.bound.Rebind()
 		s.gpu.average(lv.fbo[next], tw, th, sp.bound.YInverted)
