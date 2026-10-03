@@ -1,0 +1,114 @@
+= 023 — tasks
+:toc: left
+:toc-title: Contents
+:revdate: 2026-10-03
+
+. [x] T1. The code of 020's passes from the frame and of xgb read, the
+  requests of a pass counted from it; the costs 020 recorded, the runs at
+  rest of 2026-10-03 and the second runs of S5 gathered (research).
+. [x] T2. The specification, its decisions laid out for the author.
+. [ ] T3. The author's answers to D1–D7, and whether to do it at all (open
+  decisions); the specification and the plan brought in line.
+. [ ] T4. Before any code, on `develop` with #60 merged:
+  `TestFramePassRequests` and the size of `BenchmarkLivePassFrame` written
+  and run on 020's code — R, 28 and 14 expected; P at 2556×1357 and at
+  604×394, with `BenchmarkLivePass`, three runs of 300 — the references of
+  K3 and K5.
+. [ ] T5. Before any code, on E1, by the author or with the author's
+  consent — it drives the desktop: S5x and its rest variant with the build
+  of `develop`, the commands below — the reference of K6. Should S5x meet K9
+  of 020 already, the author decides whether to go on (open decisions).
+. [ ] T6. D3: the copy's graphics context without graphics exposures; no
+  NoExposure in `TestFramePassRequests`.
+. [ ] T7. D1: the chain; the snapshots through it, `TestCaptureFromFrame`
+  logging the means it logged before; the passes keeping it for the
+  activation; K1, K4, K7.
+. [ ] T8. D2: the offset kept and checked by the round trip of the pass;
+  K2, K3.
+. [ ] T9. The benchmarks again, as T4; K5.
+. [ ] T10. S5x and its rest variant with the build of the change, as T5;
+  K6.
+. [ ] T11. `go vet ./...`, `go test ./...`, `make check-specs`, each commit
+  in a worktree of its own; K8; the results.
+
+== S5x on the desktop of E1
+
+As 020's S5 and its rest variant (020, tasks, "S5 on the desktop of E1"),
+with the xterm of `measure.sh` as the window changing. The author away, the
+overlay on DP-0 at 144 Hz — the pointer on DP-0 when it starts — the service
+stopped meanwhile and started again at the end; a run stops if `i3lock`
+comes up, or if `meta` says the window is not of the depth asked. Twelve
+runs of S5x, some 70 min (5.3–6.5 min a run in 020), and twelve of the rest
+variant, some 30 min, for each build: `develop` (T5) and the change (T10).
+
+[source,bash]
+----
+# The build of the run: develop with #60 merged (T5), or the change (T10),
+# made in a worktree of its own
+WT=<the worktree of the build>
+make -C "$WT" build && "$WT/qws" version
+M=$WT/specs/001-rendering-speed/measure.sh
+BIN=$WT/qws
+R=~/.cache/qws-runs/$(date +%Y%m%d-%H%M)-023
+mkdir -p "$R"
+systemctl --user stop qws.service
+trap 'xdotool keyup alt 2>/dev/null; systemctl --user start qws.service' EXIT
+# one <name> <terminal> <depth> <variables>...
+one() {
+	local name=$1 term=$2 depth=$3
+	shift 3
+	if pgrep -x i3lock >/dev/null; then
+		echo "i3lock is up: stopping before $name" | tee -a "$R/progress"
+		exit 1
+	fi
+	echo "$(date +%T) start $name" >>"$R/progress"
+	env QWS="$BIN" CHANGING=DP-4 CHANGING_TERM="$term" "$@" \
+		"$M" run glx "$R/$name" >"$R/$name.out" 2>&1
+	echo "$(date +%T) end $name rc=$?" >>"$R/progress"
+	if ! grep -q "^changing: DP-4, $term, window [0-9]*, depth $depth\$" "$R/$name/meta"; then
+		echo "the window is not a $term of depth $depth: stopping after $name" | tee -a "$R/progress"
+		exit 1
+	fi
+}
+# S5x: the xterm, the carousel and the grid, off and on in turn
+for i in 1 2 3; do
+	for layout in carousel grid; do
+		for v in false true; do
+			one "s5x-$layout-$v-$i" xterm 24 HOLD=2 LAYOUT=$layout LIVE=$v
+		done
+	done
+done
+# The rest variant: the grid, the xterm and the mate-terminal, off and on
+for i in 1 2 3; do
+	for t in xterm:24 mate-terminal:32; do
+		for v in false true; do
+			one "rest-${t%:*}-$v-$i" "${t%:*}" "${t#*:}" \
+				ACTIVATIONS=10 STEPS=5 HOLD=0 REST=10 LAYOUT=grid LIVE=$v
+		done
+	done
+done
+systemctl --user start qws.service
+trap - EXIT
+for layout in carousel grid; do
+	for v in false true; do
+		"$M" pool "$R"/s5x-$layout-$v-{1,2,3} >"$R/pool-s5x-$layout-$v"
+	done
+done
+for term in xterm mate-terminal; do
+	for v in false true; do
+		"$M" pool "$R"/rest-$term-$v-{1,2,3} >"$R/pool-rest-$term-$v"
+	done
+done
+grep -H '^C shown\|^R at rest\|^L live_ms\|^S live\|^A1' "$R"/pool-*
+----
+
+What to read:
+
+* K9 of 020 in S5x: `C shown` of `pool-s5x-<layout>-true` less that of
+  `pool-s5x-<layout>-false`, at most 3 % of a CPU, for the carousel and the
+  grid.
+* X: (`C shown` of `pool-rest-xterm-true` less `pool-rest-xterm-false`)
+  less (the same of the mate-terminal), at most 0.6 points; `R at rest` of
+  `pool-rest-xterm-true` at least 20 passes a second.
+* Reported: `A1` of the steps and the fades, `L live_ms in view`, and the
+  records "Live" of the xterm in `log.json`, their `ms` and `done_ms`.
