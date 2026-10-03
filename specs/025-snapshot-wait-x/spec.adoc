@@ -4,7 +4,7 @@
 :sectnums:
 :revdate: 2026-10-03
 :issue: 71
-:status: draft
+:status: implemented
 
 == What and why
 
@@ -45,21 +45,25 @@ variable or flag changes.
 
 Made on the way, 2026-10-03, for the author to confirm:
 
-* *`glXWaitX`, not a round trip.* A reply — an `XSync` of the GL display, or
-  of the connection that drew — orders the X server's requests, not its work
-  on the GPU: `TestGPUThumbnail` fails with every strip of its drawing
+* *`glXWaitX`, not `XSync`.* A reply — an `XSync` of the GL display, or of
+  the connection that drew — orders the X server's requests, not its work on
+  the GPU: `TestGPUThumbnail` fails with every strip of its drawing
   answered, and 020 had 7 of 80 passes stale with an `XSync` of the GL
-  display. A fence of the X server imported into GL
-  (`GL_EXT_x11_sync_object`) would make the GPU wait instead of the thread,
-  but needs an object of the X server per snapshotter, requests to trigger
-  and reset it at each capture, and an extension NVIDIA wrote; `glXWaitX` is
-  in GLX since 1.0 and is what 020 calls.
+  display. On E1 `glXWaitX` is a round trip as well, but one whose reply
+  comes once the X server's drawing is done (research). A fence of the X
+  server imported into GL (`GL_EXT_x11_sync_object`) would make the GPU wait
+  instead of the thread, but needs an object of the X server per
+  snapshotter, requests to trigger and reset it at each capture, and an
+  extension NVIDIA wrote; `glXWaitX` is in GLX since 1.0 and is what 020
+  calls.
 * *Before the first binding as well.* `GLX_EXT_texture_from_pixmap` defines
   the texture by the rendering completed before `glXBindTexImageEXT`, at the
   first binding as at any other, and the round trips of naming the pixmap
-  and of `BindPixmap` order no work on the GPU. No first binding has been
-  seen stale — the check "first" of the test has not failed: the wait there
-  rests on the extension, not on a measurement.
+  and of `BindPixmap` order no work on the GPU. No first binding was seen
+  stale — none of B's 400 checks "first" in F, none of its 400 captures that
+  named the pixmap in P: the wait there rests on the extension, not on a
+  measurement, and costs less than the noise of naming (P, "named": p50
+  21.11 ms before, 21.48 ms after).
 * *`WaitX` of 020 as it is.* `(*glx.Offscreen).WaitX` and the C function
   under it keep the names and the text of 020's branch — added by `fd2b4a1`,
   the comment as `de4083b` left it — so that 020 merges without a conflict
@@ -130,9 +134,43 @@ captured again with nothing drawn since.
 
 | K5
 | `go vet ./...`, `go test ./...`, `go test -race ./pkg/snapshot`,
-  `gofmt -l .` empty and `make check-specs` pass; no `Init` of an extension
-  of xgb and no `xgb.NewConn` outside `pkg/x11/extensions.go` and the tests
-  (021).
+  `gofmt -l .` empty and `make check-specs` pass; the change adds no `Init`
+  of an extension of xgb and no `xgb.NewConn` (021).
+|===
+
+== Results
+
+2026-10-03, E1, the author's desktop in use and the service of 1.3.3
+running; the runs in `research.adoc`.
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | F, 17:12–17:14: B failed 28 of its 50 runs, A none of its 50. B's 33
+  failed checks were all "drawn anew", none "first"; one in 23 runs, two
+  in 5.
+| K2 | P, two rounds of 200 captures each: none of A's 400 captures drawn
+  anew was stale, nor any of the 400 that named the pixmap anew; of B's,
+  41 of 400 drawn anew (26 and 15), none named anew. Each stale thumbnail
+  was stale at its bottom rows only: the last strips drawn.
+| K3 | S1 at rest, p50: A 0.496 ms against B 0.490 ms, 0.006 ms more; p95
+  1.321 against 1.150 ms. Drawn anew: p50 0.611 against 0.565 ms, p95
+  1.876 against 1.419 ms — the wait for the drawing. `WaitX` alone: p50
+  0.019–0.021 ms at rest, 0.058–0.061 ms right after a drawing of
+  2556×1357, p95 0.87–1.02 ms there.
+| K4 | `go test ./...` of the change: `TestRenderThumbnail`, `TestFallback`,
+  `TestNewAndClose`, `TestSchedule` pass. `TestCaptureFromFrame` skips on
+  `develop` since 021, "no RENDER" (#67); with `98e03ed` of #67 applied on
+  B and on A it passes on both, its window of depth 32 bound on the GPU and
+  drawn anew within a mean of 0.001.
+| K5 | Each commit of the change in a clean worktree on E1: build,
+  `go vet ./...`, `go test ./...`, `go test -race ./pkg/snapshot`,
+  `gofmt -l .`, `make check-specs`. `.Init(` outside tests: the three
+  `gl.Init`; `xgb.NewConn` outside tests: `pkg/x11/extensions.go` and the
+  programs `console/framecmp` and `console/glxoverlay`, as 021 left them.
+  020's tip merged into the change, tried and thrown away: no conflict,
+  one `WaitX`.
 |===
 
 == Open decisions
@@ -140,3 +178,7 @@ captured again with nothing drawn since.
 . Mesa: whether its `glXWaitX` waits for anything with the snapshotter's
   context current on a pbuffer, and whether its binding needs it, is not
   known; ws2 and ws3 were not tried.
+. Whether P becomes a test of the repository. `TestGPUThumbnail` checks the
+  wait through `pkg/glx`, not that `captureGPU` waits; `TestCaptureFromFrame`
+  goes through `captureGPU` with a window drawn anew, once a run, and skips
+  until #67 is merged.

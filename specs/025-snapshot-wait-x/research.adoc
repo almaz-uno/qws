@@ -6,8 +6,12 @@
 
 Facts the specification rests on, 2026-10-03, `develop` at `9774075`
 (1.3.3), E1: ws1 — NVIDIA GeForce RTX 4080 SUPER, driver 580.105.08,
-Debian 12, Xorg 21.1.7, picom 9.1 `--backend glx --vsync`, i3. The author's
-desktop in use, the service of 1.3.3 running.
+Debian 12, Xorg 21.1.7, picom 9.1 `--backend glx --vsync`, i3, Intel Core
+i9-7920X. The author's desktop in use, the service of 1.3.3 running; no
+window of the author's touched. The scripts and the probe are outside the
+repository, in `~/.cache/qws-probe-waitx` on ws1; the runs in
+`~/.cache/qws-runs/20261003-1712-025-F` and
+`~/.cache/qws-runs/20261003-1717-025-P`.
 
 == What the code does
 
@@ -112,8 +116,7 @@ size of depth 24, "drawn anew":
 |===
 
 Parts of a thumbnail stale, not all of it: of the 180 000 colour channels of
-300×200, a third; the strips drawn last had not reached the GPU when it was
-read. No run failed "first", the first binding of a pixmap.
+300×200, a third. No run failed "first", the first binding of a pixmap.
 
 020, on `issue/qws#58-live-thumbnails`: `de4083b`, "TestSharedLive, 55 runs
 each with the desktop in use, interleaved: 5 failed without, none with"; and
@@ -133,3 +136,95 @@ pixmap as it was before (5 runs of 40); with `glXWaitX`, 0 of 200; with an
 * *The CPU* (`pkg/composite`): `GetImage` or `ShmGetImage`, the same.
 
 Neither needs a wait.
+
+== F, the test before and after
+
+`F.sh`: B, `before.test`, `go test -c ./pkg/snapshot` at `9774075`, built
+at 17:00 before anything changed; A, `after.test`, the same at `f1209ed`.
+50 pairs, 17:12–17:14, B first in the odd pairs and A in the even;
+`-test.run '^TestGPUThumbnail$' -test.count=1 -test.v`; the load average of
+a minute 3.57–6.36 before the pairs. A run takes 1.29–1.54 s, either.
+
+[cols="3,2,2",options="header"]
+|===
+| | B | A
+
+| runs failed | 28 of 50 | 0 of 50
+| checks failed, "drawn anew" | 33: one in 23 runs, two in 5 | 0
+| checks failed, "first" | 0 of 400 | 0 of 400
+| depth 24: 300×200, 511×700, 1500×900, 2560×1381 | 4, 2, 1, 2 | 0
+| depth 32: the same | 12, 4, 5, 3 | 0
+|===
+
+== P and S1, the snapshotter
+
+`probe_test.go`, copied into `pkg/snapshot` of a worktree of B and of A and
+built there, `go test -c`: `BenchmarkProbeSnapshot` as P of the
+specification. Its snapshotter is `frameSnapshotter` of the tests on a
+connection of `x11.NewConn`, without the `Init` of an extension, which
+`frameSnapshotter` calls (#67). The window, 2556×1357 of depth 32, lies at
+2,22 in a frame of depth 24 at −4000,−4000; the pictures are `windowImage`
+of the tests, seed 1, and its negative, whose thumbnails are 208.7 apart, a
+mean per channel. Three modes of 200 captures: _drawn_ — drawn anew, bound
+again; _named_ — drawn anew, the window made stale, so that the capture
+names and binds its pixmap for the first time; _rest_ — captured again a
+second after the drawing, nothing drawn since. Only `capture` is timed.
+`P.sh` runs B and A in turn, two rounds, `-test.bench ProbeSnapshot
+-test.benchtime 200x`, 17:17–17:18, the load average 4.4–5.7.
+
+[cols="2,2,2,3,3",options="header"]
+|===
+| Mode | B stale | A stale | B, p50 / p95 / longest | A, p50 / p95 / longest
+
+| drawn | 41 of 400 (26, 15) | 0 of 400 | 0.565 / 1.419 / 1.71 ms | 0.611 / 1.876 / 2.92 ms
+| named | 0 of 400 | 0 of 400 | 21.11 / 35.11 / 49.5 ms | 21.48 / 35.56 / 55.5 ms
+| rest | 0 of 400 | 0 of 400 | 0.490 / 1.150 / 1.95 ms | 0.496 / 1.321 / 2.19 ms
+|===
+
+The figures of both rounds together; the run of `b.N` = 1 that precedes
+each, left out. Every stale thumbnail of B was a mean of 4.1 or 7.2 from
+the picture drawn. A third run of B, drawn, logging the rows of the
+thumbnail more than 10 per channel off (`rows-before.log`): 15 of 200
+stale, each at its bottom only — rows 265–270 or 261–270 of 271, the last
+30 to 50 rows of the window. `fillDrawable` draws in strips of 19 rows,
+each answered before the next is sent: the last two or three strips had
+not reached the GPU when it was read.
+
+== `WaitX` alone
+
+`probe_waitx_test.go`, in A's build only, `BenchmarkProbeWaitX`, 200 calls
+a mode, two runs: `WaitX` at rest, nothing drawn since a second; `WaitX`
+right after a pixmap of 2556×1357 of depth 32 is drawn through another
+connection, as above; a bare round trip of that connection, `GetInputFocus`.
+
+[cols="2,3",options="header"]
+|===
+| | p50 / p95 / longest, ms
+
+| `WaitX`, at rest | 0.021 / 0.041 / 0.10; 0.019 / 0.029 / 0.08
+| `WaitX`, after a drawing | 0.061 / 0.87 / 2.6; 0.058 / 1.02 / 11.2
+| round trip of xgb | 0.032 / 0.054 / 0.22; 0.052 / 0.080 / 0.15
+|===
+
+`strace -f -c` of 1000 and of 3000 calls at rest: 2000 more `writev`, 2000
+more `recvmsg` that read and 4000 that found nothing yet, 3998 more `poll`,
+no more `ioctl`. `glXWaitX` of NVIDIA is one request and its reply on the
+GL display, with no call to the driver of the GPU. `strace -T` of 100 calls
+after a drawing: the eight longest `poll` of Xlib 1.0–6.9 ms, the thread
+waiting for that reply. The drawing had been answered strip by strip, and
+`fillDrawable` ends it with a round trip of its own — `Sync` of xgb,
+`GetInputFocus`, the request `XSync` sends: the X server answered that
+before its drawing was done, and answers the request of `glXWaitX` once it
+is.
+
+== Found on the way
+
+* `TestCaptureFromFrame` and `BenchmarkFrameRender` skip on `develop` since
+  021, "no RENDER: RENDER: no extension RENDER on the connection" (#67,
+  fixed by `98e03ed` on its branch): `frameSnapshotter` takes a connection
+  of `xgb.NewConn`. With `98e03ed` applied on B and on A,
+  `TestCaptureFromFrame` passes on both; its window of depth 32 in a frame of
+  depth 24, the one case of it on the GPU, comes within a mean of 0.001 of
+  the area average, "picture 2" drawn anew included.
+* 008 dropped the round trip of the binding again on the test passing at
+  the time; B passes it now and then still, in 22 of the 50 runs of F.
