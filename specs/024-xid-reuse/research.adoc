@@ -1,0 +1,226 @@
+= 024 — research
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-03
+
+Facts the specification rests on, 2026-10-03, `develop` at `9774075`
+(1.3.3), xgb 1.3.1, Go 1.26.0. E1: ws1, Intel Core i9-7920X, NVIDIA, driver
+580.105.08, Xorg 21.1.7 (`xserver-xorg-core` 2:21.1.7-3+deb12u13), i3, picom
+`--backend glx --vsync`, two monitors of 2560×1440, DP-0 and DP-4; the
+service of the author ran. The probes are outside the repository, in
+`~/.cache/qws-probe-xid` on ws1: `main.go`, a program of its own on
+`xgb.NewConn` with modes, and `inflight_test.go`, copied into `pkg/x11` and
+run alone.
+
+== The XIDs of an xgb connection
+
+The code of xgb 1.3.1, `xgb.go`:
+
+* `generateXIds` (264–331), the goroutine every connection starts, gives
+  the XIDs `NewId` returns through the channel `xidChan`. `inc` is the
+  lowest bit of the resource-id-mask of the connection setup, `mask & -mask`
+  (283); `max` starts as the mask and `last` as 0. While `last < max - inc
+  + 1` (288) it gives `last += inc`, ORed with the resource-id-base: `inc`,
+  `2·inc`, … up to the mask — `mask / inc` XIDs; the base itself,
+  `0 | base`, never.
+* Then it reads the range function of the connection, set by
+  `SetIDRangeFunc` (177), under a lock of its own. Without one, the XID it
+  gives is 0 with the error "there are no more available resource
+  identifiers, and no re-use configured" (296) — and again at every later
+  `NewId`, since `last` and `max` stay as they are. With one, `start,
+  count, err := f(c)`: an error is given as "error getting ID re-use: " and
+  the error; `count == 0` without an error as "error getting ID re-use, none
+  returned" (301); otherwise `last = start`, `max = start + (count-1)·inc`
+  (310), and it gives `start | base` and on, `count` XIDs at the step of
+  `inc`, before it calls the function again. After an error it calls it
+  again for the next XID asked.
+* The function runs on that goroutine. A request from it is as any other:
+  `NewRequest` hands it to the goroutine that writes requests, and the
+  reply of a checked request is waited for until the reader of the
+  connection ends, when `Reply` returns `io.EOF` (`cookie.go`, 103): a
+  connection closed meanwhile ends the call, and the goroutine then ends on
+  `doneSend`.
+* `xidChan` has a buffer of `xidBuffer = 5` (28): the goroutine gives the
+  next XID as soon as there is room, and calls the range function right
+  after it has put the last XID of a range in the buffer — while up to five
+  XIDs of that range wait there.
+* The comment of `generateXIds` (261): "This needs to be updated to use the
+  XC Misc extension once we run out of new ids"; that of `SetIDRangeFunc`
+  (174): "Without this implemented an application will eventually run out
+  of identifiers."
+
+libxcb 1.15 (`src/xcb_xid.c`, `xcb_generate_id`, from the sources of
+Debian): the same arithmetic, `max = start_id + (count - 1)·inc`, from a
+reply of `GetXIDRange` asked when the range is used up, and
+
+----
+/* XXX The latter disjunct is what the server returns
+   when it is out of XIDs.  Sweet. */
+if(!range || (range->start_id == 0 && range->count == 1))
+----
+
+— no XID then. libxcb gives one XID at a call, with no buffer; libX11 1.8.4
+keeps one ahead (`next_xid`, `src/xcb_io.c`, `_XAllocID`). Teleport sets
+on an xgb connection the function this change sets
+(`lib/srv/desktop/x11/xvfb.go`, `SetIDRangeFunc` after `xcmisc.Init`, with
+the same test of start 0 and count 1).
+
+== XC-MISC
+
+The protocol, XC-MISC 1.1
+(https://www.x.org/releases/X11R7.7/doc/xcmiscproto/xc-misc.html):
+`GetXIDRange` "returns a range of available resource IDs for the client
+issuing the request. start_id is the first ID in the range. count is the
+number of IDs in the range. The returned range may or may not be the
+largest possible range." It says nothing of a client with none.
+
+The X server of X.Org, branch `server-21.1-branch` (XQuartz's mirror on
+GitHub, 2026-10-03): `ProcXCMiscGetXIDRange` (`Xext/xcmisc.c`, 68) answers
+`start_id = min` and `count = max - min + 1` of `GetXIDRange`
+(`dix/resource.c`, 707). That one starts from the whole space of the client,
+`client << CLIENTOFFSET` — the resource-id-base — to it ORed with
+`RESOURCE_ID_MASK`, and cuts it at every resource of the client inside it,
+in the order of the hash table: of the two sides it keeps the larger, if
+`AvailableID` finds a free XID in it, the other if not. When nothing is
+left, `min = max = 0`: the answer is start 0, count 1, never a count of 0.
+So a range is contiguous, holds no resource of the client at the time of
+the request, carries the base in `start_id`, and may be small.
+`RESOURCE_ID_MASK` is `(1 << CLIENTOFFSET) - 1`, `CLIENTOFFSET` 29 bits
+less those of the clients — 21 for the 256 clients of the default: the mask
+begins at bit 0, `inc` is 1, and xgb's `max` is the last XID of the range.
+On a server whose mask began higher, xgb would step past the range; none of
+X.Org's does.
+
+On E1, probe `info` on a connection of its own: XC-MISC 1.1, opcode 136
+(also `xdpyinfo -queryExtensions`); base `0x9c00000`, mask `0x1fffff`, `inc`
+1, 2 097 151 XIDs in the first range; `GetXIDRange` on the fresh connection,
+start `0x9c00000` and count 2 097 152 — the base itself among them; after
+three pixmaps at base + 1 to base + 3, start `0x9c00004` and count
+2 097 148.
+
+`xcmisc.Init` of xgb asks `QueryExtension` and writes the tables of events
+and errors as every `Init` does — empty for XC-MISC, whose `init` puts
+empty maps in `xgb.NewExtEventFuncs` and `xgb.NewExtErrorFuncs` — and
+`GetXIDRange` panics unless `c.Extensions["XC-MISC"]` is set, as every
+request of an extension of xgb.
+
+== Who takes XIDs in qws
+
+[cols="2,4,2",options="header"]
+|===
+| Connection | Takes | Lives
+
+| snapshotter's (`snapshot.New`)
+| a damage object for every window it follows (`follow`); a pixmap for
+  every naming of a window's pixmap (`namePixmap`), again after a map, an
+  unmap or a change of size; by RENDER (`xrender.thumbnail`), a picture of
+  the source and a pixmap and a picture for each pass — 7 at two halvings
+  (018) — and a pixmap and a GC more for a window drawn into its frame, 9
+  (022); a segment of MIT-SHM at the start; on the CPU, a pixmap and a
+  segment a capture (`pkg/composite`)
+| the damage as long as the window; the pixmap named until it is stale;
+  those of RENDER and the CPU for the capture
+
+| main (`x11.Connect`)
+| the window of the switcher, its colormap, pixmap and GC when the monitor
+  changes (`ui.Selector`); without the snapshotter, the capturer of 1.0.0
+| the window until the next; a capture
+
+| model's (`x11.NewModel`)
+| none
+|
+|===
+
+A window of 2560×1440 halves twice to the 512 of a thumbnail: 2 097 151 /
+9 = 233 017 s, 2.70 days, at a snapshot a second.
+
+The connections of Xlib — the GL contexts and the GLX pixmaps of `pkg/glx`,
+`XOpenDisplay` — take XIDs through `_XAllocIDs`, which calls
+`xcb_generate_id` (libX11 1.8.4, `src/xcb_io.c`): libxcb asks XC-MISC on
+its own.
+
+== Reproduction
+
+`TestXIDsReused` (`pkg/x11/xids_test.go`, committed with the change):
+a connection of `x11.NewConn` takes the XIDs of its whole first range and
+524 288 past it; it keeps a pixmap of 1×1 made with the first XID and with
+every 262 144th of the first range, eight in all, and makes, checked, and
+frees one with every 4 096th past it. It asks the X server whether it has
+XC-MISC with `QueryExtension` of its own, so that it runs on `develop` too,
+and skips without it. On `develop` with only the test file added (T-before
+of the specification), the binary of `go test -c ./pkg/x11` run 5 times:
+
+----
+xids_test.go:81: XID 2097152, 1 past the first range of 2097151: there are no more available resource identifiers, and no re-use configured
+--- FAIL: TestXIDsReused (0.34s)
+----
+
+in each, in 0.35–0.36 s; built with `-race`, 2 of 2 alike, in 1.21–1.23 s.
+With `-xid-requests`, a pixmap made and freed with every XID: the same
+failure after 15.53 s, Xorg's CPU — `utime` + `stime` of
+`/proc/<pid>/stat` — 13.96 s.
+
+The cost, by the probes: `exhaust`, the 2 097 151 XIDs of a range taken
+with `NewId` alone, 0.34 s, Xorg 0.00–0.02 s of CPU; `requests`, a pixmap
+of 1×1 made and freed with each of 2 101 247 XIDs, a checked one every
+65 536, 14.9 s, Xorg 13.5 s; `gc`, a GC instead, 15.0 s and 13.6 s. xgb does
+not know whether an XID it gave names a resource: the XIDs alone go through
+the range as the program's do, and the X server's ranges then leave out the
+resources kept, which the pixmaps of the test are.
+
+== Designs
+
+[cols="3,5",options="header"]
+|===
+| Design | Why not, or why
+
+| *`GetXIDRange` in the range function of every connection of
+  `x11.NewConn`*
+| *Chosen.* The function xgb provides for it, at the one place every
+  connection of qws is made (021); what libxcb and Teleport do.
+
+| `GetXIDList`, a list of free XIDs
+| The range function of xgb returns one range: a list would be a round trip
+  for every XID, or a store of XIDs of qws's own.
+
+| XIDs freed kept and given again by qws
+| Every `NewId` of the extension packages of xgb takes its XIDs from
+  `generateXIds`; a store of qws would need a wrapper at every call.
+
+| `xcmisc.Init` on every connection
+| It writes the tables of events and errors while the reader runs — empty
+  for XC-MISC, but an `Init` on a live connection is what 021 leaves out;
+  the setup of 021 gives every connection the opcode with no `Init`.
+|===
+
+== XIDs in flight
+
+The range the X server answers holds no resource of the client _at the
+time of the request_. When xgb asks for a range, the XIDs in its buffer —
+up to five — and the one `NewId` returned last, whose resource may not have
+been made yet, are free to the X server, and may be in the range; xgb gives
+them again once it has walked through it, some two million XIDs later at
+the first range of E1. A resource made with one of them that lives that
+long — a damage object, a pixmap named — is then still there: the request
+that would make another with its XID fails with BadIDChoice.
+
+Probe `slowtail` (`main.go`, with a range function of its own, the same as
+the change's): a consumer as slow as the snapshotter — 1 ms after each of
+the last 20 `NewId` of the first range, so that the buffer is full and the
+XID it took is made after `GetXIDRange` — keeps a pixmap with each of the
+last six XIDs of the range, then walks the next range. In 3 runs of 3 the
+range was start `0x9c00000`, count 2 097 152 — the whole space, the six
+among them — and the `NewId` 4 194 298 to 4 194 303 gave the six again, a
+`CreatePixmapChecked` with each failing with BadIDChoice. Without the 1 ms
+(probe `tail`), the X server had the six before the request, and its range
+ended below them: count 2 097 146.
+
+In qws a create follows its `NewId` at once, so the XID taken last races
+the request of the range; the five in the buffer reach the X server after
+it. The failure needs a resource that lives for a walk through a range on
+one of those six XIDs — the damage of a window that appears, or a pixmap
+named, just when a range of the snapshotter's ends — and a range of the X
+server that holds them. A pixmap of RENDER made with the XID of a pixmap
+named of another window fails, and the `FreePixmap` of the pass then frees
+that window's pixmap.

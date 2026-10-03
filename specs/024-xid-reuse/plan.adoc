@@ -1,0 +1,50 @@
+= 024 — plan
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-03
+
+== Approach
+
+A file of its own in `pkg/x11`, `xids.go`: `nextXIDs`, the range function,
+which asks `xcmisc.GetXIDRange` and returns the range of its reply through
+`xidRange`, which turns the answer of none, start 0 and count 1, into the
+error `errNoXIDs`.
+
+`pkg/x11/extensions.go`: XC-MISC joins `extensionNames`, and its package
+the blank imports, so that the setup of 021 asks for it with the others and
+every connection gets its opcode; `NewConn` sets `nextXIDs` with
+`SetIDRangeFunc` on the connection it made when the opcodes of the setup
+have XC-MISC; `setupExtensions`, run once per process, logs the warning
+when they have not.
+
+Nothing else changes: `x11.Connect`, `x11.NewModel` and `snapshot.New`
+connect through `NewConn` already, and `cmd/qws/root.go` does not change.
+
+== Files
+
+[cols="2,5"]
+|===
+| File | What changes
+
+| `pkg/x11/xids.go`
+| New: `nextXIDs`, `xidRange`, `errNoXIDs`.
+
+| `pkg/x11/xids_test.go`
+| New: `TestXIDsReused` (K1), with the flag `-xid-requests`; a file of
+  its own, which builds on `develop` too, for T-before.
+
+| `pkg/x11/xidrange_test.go`
+| New: `TestXIDRange` (K3).
+
+| `pkg/x11/extensions.go`
+| XC-MISC in `extensionNames` and the imports; the range function in
+  `NewConn`; the warning in `setupExtensions`.
+|===
+
+== Preserved
+
+The rules of 021: no `Init` of an extension package of xgb in qws, the
+tables of events and errors written by the setup alone, every connection
+of qws made by `NewConn`. The first range of a connection, as xgb gives it.
+The console programs, which keep `xgb.NewConn`.
