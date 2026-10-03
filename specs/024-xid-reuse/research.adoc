@@ -253,3 +253,96 @@ on E1: `develop` passed 5 and 3, the change 6 and 2; each failure is a
 thumbnail "drawn anew" that differs from the new contents. The test binds
 pixmaps on an `xgb.NewConn` of its own and on GLX, neither of which the
 change touches.
+
+== XIDs given ahead left out
+
+Decided by the author, 2026-10-03 (issue #74): no XID xgb has given ahead
+comes again. `develop` at `4415462`; the fix `10826e3`.
+
+=== The bound
+
+* xgb calls the range function once the send of the last XID of a range
+  to `xidChan` is done (`generateXIds`, 327, then 288). The buffer holds
+  `xidBuffer = 5`: after that send it holds at most the 5 XIDs given last,
+  and every XID given before them has been taken by `NewId`. The function
+  then writes `GetXIDRange`, on the same goroutine.
+* xgb writes a connection's requests in the order `NewRequest` hands them
+  to its one writer, and the X server serves them in that order: an XID
+  whose request was written before `GetXIDRange` is named, or refused,
+  before the X server answers.
+* So the XIDs the X server takes for free only because they are not named
+  yet are those 5, and the XIDs taken by a goroutine whose request is not
+  written yet. All are among the last given as long as no XID is held
+  unnamed while more than 64 − 5 = 59 others are taken on its connection.
+* In qws every XID is named by the request that follows its `NewId`. On the
+  snapshotter's connection one goroutine, the loop, takes XIDs — the other
+  reads events — and `namePixmap`, which names one XID for an ancestor
+  after another with round trips between, takes no other meanwhile. On the
+  main connection the switcher's window holds two, the window's and its
+  colormap's, until `CreateWindow`; without the snapshotter the capturer of
+  1.0.0 takes one in each goroutine of the focus watcher, named at once by
+  `NameWindowPixmap` or `Attach`. The model's connection takes none. At
+  most 5 and a few, then; 64 leaves the margin, and costs at most 64 XIDs
+  of an answer — 0.003 % of the first range of E1.
+* The 64 are the last given across ranges: a range of fewer than 64 XIDs
+  leaves part of those before it among them. `xidRanges` keeps them as
+  spans, in the order given (`TestXIDRangesAhead`). An XID left out comes
+  again in a later answer, once 64 others have been given after it: by then
+  it has been taken, the buffer holding 5, and named.
+
+=== The X server's answer
+
+`GetXIDRange` cuts at resources: the answer is a hole whose ends border on
+resources of the client or on the ends of its space. The XIDs given ahead
+lie at the end of the range given last, free to the X server, and the hole
+around them runs down to the last resource below them that lives. Of the
+answer the function gives its longest part without the 64 — usually the
+answer less its last 64, as at the first range of a connection (the probe
+below).
+
+An answer with no XID outside the 64 makes the function return
+`errXIDsAhead`: `NewId` fails, and xgb calls the function again for each
+XID it is to give — at once while its buffer has room, then at each
+`NewId`. The function does not ask again on its own: the answer changes
+only as the client's resources change, and it cannot tell an XID still
+unnamed from one named and freed. Such an answer is a hole of at most 64
+XIDs among those given last, bordered by resources on both sides. Every cut
+of the X server keeps its larger side, (n − 1) / 2 of the n XIDs left at
+least, unless that side names resources only; so to come down from the
+2^21^ XIDs of a client to 64 takes at least 15 cuts by resources near the
+middle of what is left, in the order of the server's hash table, or a part
+of the space every XID of which names a resource. The connections of qws
+hold tens of resources: a damage object and a pixmap named for each window,
+a segment of MIT-SHM, the switcher's window. Nothing is given twice either
+way; `NewId` fails, as when no XID is free.
+
+=== Reproduction and the fix
+
+`TestXIDsAheadNotGivenAgain` (`pkg/x11/xids_test.go`): the scenario of
+probe `slowtail` on a connection of `x11.NewConn` — the last 20 XIDs of the
+first range taken a millisecond apart, each named a millisecond after its
+`NewId`, pixmaps kept with the last six — and 2 097 167 XIDs more. On
+`develop` at `4415462` with only the test file of the fix added (A-before),
+the binary of `go test -c ./pkg/x11`, 5 runs of 5:
+
+----
+xids_test.go:178: XID 4194298, 0x9dffffa, given again while the pixmap of XID 2097146 lives
+--- FAIL: TestXIDsAheadNotGivenAgain (0.75s)
+----
+
+in 0.73–0.76 s; with `-race`, 2 of 2, in 2.56–2.60 s. A-after, built from
+`10826e3` in a clean worktree: 5 of 5 passed, in 0.74–0.78 s; with
+`-race`, 3 of 3 with no race, in 2.51–2.58 s.
+
+`ranges_test.go` of the probes, copied into `pkg/x11` of the fix and run
+alone, logs the answers and the ranges given in that scenario, on a
+connection of base `0xa200000`: the X server answered start `0xa200000`,
+count 2 097 152 — the whole space, the six among them — and the function
+gave 2 097 088, the space less its top 64; then the X server answered
+2 097 146, up to `0xa3ffff9`, the six kept left out, and the function gave
+2 097 024, its part below the 64 given last, `0xa3fff80`–`0xa3fffbf`; the
+part above them, 58 XIDs, is the shorter.
+
+`TestXIDsReused` with the fix: passes, the log as before — 3 ranges past
+the first, 8 pixmaps kept, 128 made — and with `-xid-requests` in 23.83 s,
+Xorg's CPU 20.69 s.

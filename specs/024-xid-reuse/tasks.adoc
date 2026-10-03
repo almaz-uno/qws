@@ -15,3 +15,9 @@
 . [x] T7. `go vet ./...`, `go test ./...`, `-race`, `gofmt -l .`,
   `make check-specs`, each commit on its own in a clean worktree; K5; the
   results.
+. [x] T8. `TestXIDsAheadNotGivenAgain` on `develop` at `4415462`, before the
+  fix of #74: A-before (research, "XIDs given ahead left out").
+. [x] T9. `xidRanges` in `pkg/x11/xids.go`; `TestXIDRangesAhead`; K7.
+. [x] T10. A-after, the probe of the ranges given; K6.
+. [x] T11. The checks of K5 for each commit of #74 in a clean worktree; the
+  results.
