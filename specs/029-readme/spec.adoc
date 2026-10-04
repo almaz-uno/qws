@@ -1,0 +1,101 @@
+= 029 — the README
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-05
+:status: draft
+:issue: 85
+
+== What and why
+
+`README.md` lags behind qws. It ends with "Phase 4 is complete" and a list
+of enhancements long made; it shows a tree of packages that no longer
+exists; its section "Screenshots" has no picture; it names DejaVu Sans as
+the font of the placeholders, while every text is drawn from the fonts of
+`appearance.font.paths`, Noto Sans and DejaVu Sans by default. It says
+nothing of what sets qws
+apart: the animation at the refresh rate on the GPU, the frames at rest
+byte for byte those of the CPU, the live thumbnails, the grid and its keys,
+the measurements behind every one of them.
+
+The author, 2026-10-05: a README that everyone reads and is struck by. The
+constitution gives it its place — `README.md`: build, usage, features, an
+overview of the configuration; the details in `doc/`.
+
+The specification is a delta to `develop` at `c3c598e` (1.4.1). Unchanged:
+the code, the documents of `doc/`, the configuration.
+
+== Decisions
+
+D1 and D2 decided by the author on 2026-10-05, each the option recommended;
+D3–D5 made in the specification.
+
+D1. *The picture: drawn by qws itself.* At the top an animated picture — a
+step of the carousel, a switch to the grid with `q`, a step of the grid —
+drawn off the screen by qws's own drawing code from synthetic windows: a
+terminal, an editor with qws's source, a browser, and the like, drawn by
+the program that makes the picture. The frames in motion are composed of
+the layers of `pkg/carousel` as the presenter of `glx` composes them (007):
+the cards at their integer offsets cross-faded, the selection frame of the
+grid moving over its tiles; the frames at rest are those of `cpu`. Nothing
+of the author's screen. Rejected: a recording of the author's desktop,
+which needs a desktop of windows fit to publish and the author at it; still
+pictures only, which show nothing of the motion.
+
+D2. *A landing page, then the engineering.* What qws is in a sentence and
+the picture; the figures that set it apart; an install in a minute — the
+release binary, its checksum, a `systemd --user` unit; the keys; the
+features; a short section on how it keeps the refresh rate; the
+configuration in brief, `doc/configuration.asciidoc` for the rest; building,
+the specifications, releases, the licence. Rejected: a landing page alone,
+the engineering in a document of its own; one reference of every key and
+package.
+
+D3. *Every figure from a measurement.* A figure the README gives comes from
+the specification that measured it, on the machine it names, and links to
+it; a claim of what qws does holds on `develop` (research: the table of the
+claims and their sources). Nothing the README says is planned.
+
+D4. *The pictures in the repository.* `doc/images/`: the animated picture
+as WebP — GitHub shows animated WebP in a README — at most 3 MB; a still of
+the carousel and of the grid as PNG, for where the animation does not play.
+The program that makes them, `console/readme-demo`, runs with `make
+readme-images`; it draws the same bytes on every run, the encoders' output
+aside.
+
+D5. *English,* as every document of the repository (017).
+
+== Acceptance criteria
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| The claims: every statement of `README.md` about what qws does, and every
+  figure, in the table of `research.adoc` with its source — a file of the
+  code, a test, a specification and its criterion; none without one.
+
+| K2
+| The pictures: `make readme-images` makes `doc/images/` again; the PNG
+  stills byte for byte as committed; the animation at most 3 MB, its frames
+  in motion composed of the layers of `pkg/carousel`, its frames at rest
+  those of `cpu`; no picture of the author's screen.
+
+| K3
+| The links: every relative link of `README.md` to a file of the
+  repository resolves; every link to a specification names one that
+  exists.
+
+| K4
+| `go build ./...`, `gofmt -l` empty, `go vet ./...`, `make check-specs` and
+  `go test ./...` on every commit, in a worktree of its own.
+
+| K5
+| The author reads the README on GitHub, in the pull request: the picture
+  plays, the page reads as the author wants it.
+|===
+
+== Open decisions
+
+None.
