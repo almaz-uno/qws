@@ -2,8 +2,8 @@
 :toc: left
 :toc-title: Contents
 :sectnums:
-:revdate: 2026-10-02
-:status: draft
+:revdate: 2026-10-04
+:status: implemented
 :issue: 58
 
 == What and why
@@ -622,10 +622,184 @@ with them.
   and the CPU of the X server and of qws a pass, reported in the results.
 |===
 
+== Results
+
+2026-10-02 to 2026-10-04, ws1 — E1, the author's desktop. Off the screen:
+windows of the tests off every monitor, in frames or pixmaps of their own
+(research, "The implementation off the screen", "Passes from the frame").
+On the desktop, the service stopped, three sessions of S5 and the
+author's trials:
+
+* S5 with the key held, 2026-10-02 14:27–16:07, the branch at `2abf3b5`
+  against `develop` at `759c6d3` (research, "S5 on the desktop, the first
+  runs"): its xterm took no pass — of depth 24, drawn into its frame's
+  pixmap — and the runs showed what the rework since changed.
+* The rest variant of S5 (tasks), 2026-10-03 from 11:24 at `fe9e85f` and
+  from 16:02 at `8a47cb3` (research, "S5 at rest", "The second runs").
+* The rest variant again, 2026-10-04 from 10:57, with the build of 023 —
+  this branch with the passes from the frame made cheaper — at `9f84a68`,
+  `live: true` against `live: false` of that build, at the default
+  `live_interval` of 50 ms, two runs each of the carousel and the grid
+  with a mate-terminal and with an xterm changing all the time
+  (`~/.cache/qws-runs/20261004-1057-020-rest3` on ws1). Of the 17 675
+  passes of the runs on, 17 595 were of the terminal, 80 of a window of
+  the desktop.
+* The author's trials on Alt+F11, at `e2c2fda` on 2026-10-02 and after D2
+  A on 2026-10-03 at 08:30 (K11).
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | Met. `TestScenes`: all the scenes of Σ, the host scenes with them;
+  `testdata/scenes.json` unchanged — the drawing of `cpu` is not.
+| K2 | Met. `TestGLXPresenterMatchesCPU`, `TestLayers` and
+  `TestParallelDrawing` unchanged and passing, a compositor running: a
+  presenter draws live pictures only those the selector gives it for a
+  frame.
+| K3 | Met. `TestLiveThumbnails`: the carousel of E1 at offsets 0 to ±3 —
+  ±4 and ±5 lie outside its frame — and the carousel at the sizes of the
+  defaults at 0 to ±5; the grid of 36 of E1, icons over 18 thumbnails, and
+  that grid in a font whose titles reach into them. Outside the live
+  rectangles no pixel differs from the `cpu` frame; inside, worst 1, equal
+  in 99.932–99.954 % of 222 266 to 1 529 364 pixels; the same in a scene.
+  Through the zoom of 0.92 the live rectangle lies where the zoom takes
+  it, within a pixel. `TestLiveCovers` checks the holes against the
+  drawing.
+| K4 | Met. `TestSharedLive`: a context of a display and a thread of its
+  own, created sharing the snapshotter's, reads a live picture equal to the
+  area average of its pixmap within 1; drawn anew and averaged again, the
+  new picture — since `de4083b` with `glXWaitX` before the pixmap is bound
+  again, without which 5 of 55 runs read it as it was with the desktop in
+  use; a pass into the texture a frame being drawn took is not made until
+  the frame ends; a frame gets the pictures of the windows it does not
+  show; a picture older than the window's snapshot is not given.
+  `TestShareError` of `pkg/glx`.
+| K5 | Met. `TestLiveSchedule`: the interval, the spreading, the windows
+  shown, no pass while frames come one after another — the last two less
+  than 10 ms apart — but 30 ms after they stop; a window taken from its
+  frame passed by RENDER, not without it. `TestLivePause` and
+  `TestSwitchersOwnOverlay` of `pkg/x11`: no live pass while another
+  instance's switcher is shown, none paused by the own overlay;
+  `TestSchedule`, and `TestWait` and `TestSwitchers` of 011, passing.
+| K6 | Met. `TestLiveFallback`: the presenter's context made unable to
+  share, no live pictures, one record "Live thumbnails off" at info level,
+  the frames byte for byte. `TestLiveOff`: off with the key off, under
+  `cpu`, and without the snapshotter, which says so once.
+| K7 | Met. 2026-10-04, at 50 ms: L in view at p95 52.65 and 52.85 ms with
+  the mate-terminal, carousel and grid, 52.82 and 52.98 ms with the xterm
+  — the bound 62 ms. Before, at 33 ms against 45 ms: 36.9 and 39.4 ms in
+  the carousel, 35.9 and 37.5 in the grid (2026-10-03, 16:02); the first
+  S5, 2 208 ms in the carousel, of cards off the strip taking passes, since
+  passed only in view and counted from when they came into view.
+| K8 | Not met in the grid, accepted by the author (2026-10-04, option C).
+  2026-10-04, at 50 ms, the share of intervals above 1.5 periods on
+  against off, and the p95: the carousel 1.31 against 1.48 % with the
+  mate-terminal, p95 7.70 against 7.59 ms (+0.11), 1.50 against 1.34 %
+  with the xterm (+0.16), p95 7.44 against 7.31 (+0.13); the grid 1.74
+  against 0.88 % (+0.86), p95 7.59 against 7.39 (+0.20), and 1.42 against
+  0.88 % (+0.54), p95 7.24 against 7.13 (+0.11); the fades within. The
+  off runs missed 0.9–1.5 % that day against 0.2–0.35 % the day before,
+  the desktop noisier. What is left: the steps right after a rest of live
+  frames one after another, where a pass already under way meets the
+  first frames of a step before two close frames tell the motion. Before:
+  +0.15 and +0.19 points in the grid, +0.19 and +0.29 in the carousel,
+  with a hold of 10 ms (2026-10-03, 16:02); 5.63 and 8.14 % against 0.68
+  and 0.91 % with passes in the pauses between the frames of a step
+  (11:24), none in motion since `ae12383`.
+| K9 | Met at the default of 50 ms. 2026-10-04, read as K9 says — C of a
+  pool without the `glFinish` of `-v`: 1.97 and 2.08 points with the
+  mate-terminal, carousel and grid; 2.31 and 2.27 with the xterm, passed
+  from its frame through the chain of 023 — the bound 3. Before, at 33 ms:
+  4.70 and 5.38 points with `glFinish`, 3.97 and 4.54 without, in the
+  grid (2026-10-03, 16:02); 7.40 and 8.67 with two windows changing all
+  the time (11:24). The author: option c on 2026-10-03, 023; option a on
+  2026-10-04, the default of 50 ms.
+| K10 | Met. `TestThumbnailKeys` — the default 50 ms since `535a432` — and
+  `TestThumbnailFlags`; `TestRoundTrip` and `TestTagNames` with the two
+  keys.
+| K11 | Met by the second trial. The first, at `e2c2fda`, at rest: no live
+  thumbnail seen; the window changing all the time on the desktop, ilovlya,
+  of depth 24 drawn into its frame's pixmap, took no pass then, and the
+  windows of depth 32 that changed, few, took theirs (research, "The
+  author's trial at rest"). The second, 2026-10-03 at 08:30, after D2 A:
+  7 activations, 608 passes of ilovlya and 557 of Yandex Music, both of
+  depth 24 passed from their frame, 1 141 frames of cause `live`
+  (`~/.cache/qws-trial-020/log-1003-0830.json` on ws1); the author went on
+  to the decisions on K8 and K9.
+| K12 | Met. `go vet ./...`, `go test ./...` and `make check-specs` on
+  every commit, in a worktree of its own, and `go test -race` of
+  `pkg/snapshot`, `pkg/ui` and `pkg/x11`; on the merges with `develop` at
+  `759c6d3`, `9774075` and `7c76a35` too. With the desktop in use
+  `TestGPUThumbnail` failed now and then, "drawn anew", as on `develop`
+  until 025 — `glXWaitX` for the snapshots, merged with 1.3.4 — and
+  `TestLiveAtRest` 3 times of some 60 runs of `go test ./...`, once each,
+  not again when run again or alone.
+| K13 | Met. `TestLiveAtRest`, the loop of the snapshotter, a window drawn
+  every 5 ms, its card out of view and back before the rest: 44–45
+  pictures in 1.5 s at an interval of 33 ms, each by a frame, for a window
+  of its own pixmap and one from its frame; 0 without the wake of
+  `c70c4e1`. 2026-10-04, at 50 ms: R at rest 19.7 passes a second, the
+  fewest 19.7, in every pool on — the bound 15 and 10.
+| K14 | Met. `TestLiveFromFrame`: windows of depth 24 in frames, of their
+  frame's visual and of another, each picture equal to the snapshot of the
+  same picture, worst 0, from the area average a mean of 0.67–1.31 —
+  RENDER's filter; the one pixmap bound qws's own; a pixmap that would not
+  bind: no pass, the snapshot kept, passes from frames off. `TestLiveAtRest`
+  with a window in a frame, as K13. On the desktop, the xterm of S5 and
+  the author's ilovlya and Yandex Music passed from their frames (K9, K11).
+  The cost of a pass from a frame, lowered by 023: 0.67–0.73 ms of qws's
+  CPU at 2556×1357, as from a window's own pixmap (023, research).
+|===
+
+Made in the implementation, in the plan and above:
+
+* `root.go` keeps `Pause` around an activation (D5): the snapshots of the
+  cards stay the newest during it, and a live picture is drawn exactly
+  when newer than its window's snapshot.
+* Snapshots keep the one framebuffer of 008; live textures are made at a
+  window's first pass.
+* The snapshotter publishes a pass once its fence has signalled; the
+  presenter tests no fence. A pass waits on the GPU for the presenter's
+  last fence, and is not made while a frame that may draw its texture is
+  drawn; before binding a pixmap again it waits for the X server's
+  drawing, `glXWaitX`.
+* The passes spread over the windows taking passes, waiting or passed
+  within the interval; only of the cards and tiles in view, from the end
+  of the fade-in to the start of the fade-out; none while frames come one
+  after another, but 30 ms after they stop. A slice of windows shown
+  other than the last wakes the snapshotter's loop.
+* The live rectangle leaves out what the cards drawn after a card, and
+  the labels of a tile, draw over the thumbnail; the border of a card is
+  `2 / scale` px wide; a face keeps the bounds of its glyphs.
+* A frame at rest presented again for a pass is a record "Frame" of cause
+  `live`; `measure.sh` does not count it as a frame of a key. L counts a
+  card in view, from when it came into view if later than the change.
+* With 011 merged, `Switchers.Shown` takes the overlay to leave out; the
+  snapshotter holds the switchers behind an interface of its own.
+* D2 A: a window drawn into its frame's pixmap is passed by RENDER into a
+  pixmap of qws's own, bound on the GPU; never the frame's.
+* `live_interval` 50 ms by default (D6, the author, 2026-10-04).
+* `measure.sh`: S5's window a mate-terminal or an xterm (`CHANGING_TERM`),
+  second in the order of the switcher; the rest variant (`REST`), and K9
+  read without `glFinish` from the pools (tasks).
+
+Not checked: Mesa and ws3 (D7); ws7.
+
 == Open decisions
 
 . The bounds of K7 and K9, provisional until the first measurement on
   the screen.
+. Passes in motion: none since `ae12383`, the guard of 4 ms before a
+  frame having held the frames off the screen but not on the desktop.
+  Should the pictures follow during long motions — a key held — a pass
+  every few hundred milliseconds in motion might cost the frames little;
+  not measured on the desktop.
+. The pools of the font sets (007) and of the canvases of the heads (019)
+  are `sync.Pool`s, which the drawings of the frames at rest found empty a
+  third more often with live thumbnails on, and made their faces anew: a
+  third of a point of a CPU in S5 (research, "S5 on the desktop, the first
+  runs"). A list of free sets under a mutex would keep them on and off.
 . The passes made cheaper by the damaged rectangles: a terminal that prints
   a line damages a band of a window, and a pass could average only the
   thumbnail rows under it — DAMAGE reports the region through XFIXES at a
