@@ -336,7 +336,7 @@ func (s *Selector) liveIdle() {
 	var err error
 	if s.rest.awaited {
 		// The scene at the target, its frame at rest still being drawn
-		err = s.animator.PresentScene(baseLayer, s.sceneItems(now), carousel.Opaque)
+		err = s.animator.PresentScene(s.base(), s.sceneItems(now), carousel.Opaque)
 	} else {
 		s.liveRest()
 		_, err = s.presenter.Refresh()

@@ -526,7 +526,9 @@ func (s *Selector) Show() (*x11.WindowInfo, error) {
 	return result, nil
 }
 
-// restoreInitialLayoutMode restores the initial layout mode before hiding
+// restoreInitialLayoutMode restores the initial layout mode as the overlay
+// is unmapped, so that the next activation opens in it (specs/026-layout-keys,
+// D2); the fade-out shows the layout shown (specs/028-grid-locate)
 func (s *Selector) restoreInitialLayoutMode() {
 	if s.config.LayoutMode != s.initialLayoutMode {
 		log.Debug().
@@ -581,21 +583,45 @@ func layoutHint(key, mode string, header bool) string {
 // setLayout makes mode the layout mode, with the hint of the layout key for
 // it in the header
 func (s *Selector) setLayout(mode string) {
-	s.config.LayoutMode = mode
-	s.config.LayoutHint = layoutHint(s.keyConfig.layoutToggleName, mode, s.appearance.Header.Enabled)
+	s.config = s.layoutConfig(mode)
 }
 
-// switchLayout shows the layout mode, when it is not shown: the layers of the
-// other are dropped, and the frame is drawn anew
+// layoutConfig is the configuration of the frames of the layout mode: the
+// mode, and the hint of the layout key for it in the header
+func (s *Selector) layoutConfig(mode string) carousel.Config {
+	cfg := s.config
+	cfg.LayoutMode = mode
+	cfg.LayoutHint = layoutHint(s.keyConfig.layoutToggleName, mode, s.appearance.Header.Enabled)
+	return cfg
+}
+
+// switchLayout shows the layout mode, when it is not shown, ending what moves.
+// On a presenter that composes, with the layers of that layout held — drawn
+// in the background while the other is shown — it is shown from them at
+// once, and its frame at rest, drawn in the background, follows; otherwise
+// its frame is drawn now. The layers of both layouts stay
+// (specs/028-grid-locate).
 func (s *Selector) switchLayout(mode string, thumbnails []image.Image) {
 	if s.config.LayoutMode == mode {
 		return
 	}
-	log.Debug().Str("layout", mode).Msg("Switching layout")
+	held := s.animates() && (mode == "grid" && s.gridReady() || mode != "grid" && s.carouselReady())
+	log.Debug().Str("layout", mode).Bool("layers", held).Msg("Switching layout")
+	s.cancelStep()
 	s.setLayout(mode)
-	s.dropLayers()
-	s.render(thumbnails)
+	if !held {
+		s.render(thumbnails)
+		s.prefetch()
+		return
+	}
 	s.prefetch()
+	s.requestRest(causeKey)
+	s.rest.awaited, s.rest.stepEnd = true, false
+	if s.fade.active {
+		// The frames of the fade show the scene
+		return
+	}
+	s.presentScene()
 }
 
 // handleEventsSync processes keyboard events synchronously
@@ -656,7 +682,6 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 
 			// Handle Enter key - select current window
 			if enterKeycode != 0 && e.Detail == enterKeycode {
-				s.restoreInitialLayoutMode()
 				if s.selectedIndex >= 0 && s.selectedIndex < len(s.windows) {
 					return &s.windows[s.selectedIndex]
 				}
@@ -665,7 +690,6 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 
 			if s.handleKeyPressSimple(e, thumbnails) {
 				// Cancel key pressed
-				s.restoreInitialLayoutMode()
 				return nil
 			}
 
@@ -700,8 +724,6 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 				// Only react to modifier release if modifier was pressed while selector was open
 				if s.modifierPressed {
 					s.modifierPressed = false
-					// Restore layout mode before exiting
-					s.restoreInitialLayoutMode()
 					// Return selected window when modifier is released
 					if s.selectedIndex >= 0 && s.selectedIndex < len(s.windows) {
 						return &s.windows[s.selectedIndex]
@@ -743,8 +765,6 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 			if e.Detail == 1 {
 				windowIndex := s.getWindowIndexAtPosition(int(e.EventX), int(e.EventY))
 				if windowIndex >= 0 && windowIndex < len(s.windows) {
-					// Restore layout mode before exiting
-					s.restoreInitialLayoutMode()
 					// Select and return the clicked window
 					return &s.windows[windowIndex]
 				}

@@ -4,6 +4,7 @@ import (
 	"image"
 	"math"
 	"runtime"
+	"slices"
 	"sync"
 	"time"
 
@@ -63,17 +64,19 @@ type restDrawing struct {
 // restFrame is the frame at rest drawn in the background
 type restFrame struct {
 	img      *image.RGBA
-	gen      int // of the layers: the window list and geometry it was drawn for
+	gen      int    // of the layers: the window list and geometry it was drawn for
+	layout   string // the layout mode it was drawn in (specs/028-grid-locate)
 	selected int
 	hover    int
 	draw     time.Duration
 }
 
 // layerCache is what the animator holds, and what is being drawn for it: the
-// base and the card layers of the current window list and geometry
+// layers of the current window list and geometry — of both layouts, side by
+// side, so that a switch shows the other from its layers
+// (specs/028-grid-locate)
 type layerCache struct {
 	gen     int // changes when the layers are dropped; older results are stale
-	base    bool
 	cards   map[cardKey]cardLayer
 	pending map[cardKey]bool
 	results chan layerResult
@@ -82,19 +85,21 @@ type layerCache struct {
 
 // cardKey names a card layer: the card of window index at an integer offset
 // from the selection, or its hover frame — or, with a negative index, a layer
-// of the grid
+// of the grid or the base of a layout
 type cardKey struct {
 	index, offset int
 	hover         bool
 }
 
-// Layers of the grid among the card layers
+// Layers of the grid among the card layers, and the bases
 const (
 	gridTiles       = -1 - iota // the tiles
 	gridShadow                  // the shadow of the selected tile
 	gridSelection               // the selection frame
 	gridHoverShadow             // the shadow of the hovered tile
 	gridHover                   // the hover frame
+	carouselBase                // the canvas and the header of the carousel
+	gridBase                    // of the grid: the hint of the layout key differs (specs/028-grid-locate)
 )
 
 // gridLayers are the layers of a scene of the grid
@@ -111,7 +116,21 @@ type layerResult struct {
 	img *image.RGBA
 }
 
-const baseLayer carousel.LayerID = 1
+// baseKey is the key of the base of the layout mode: the canvas, under the
+// cards or the tiles, and the header with the hint of the layout key for that
+// layout (specs/026-layout-keys)
+func baseKey(mode string) cardKey {
+	if mode == "grid" {
+		return cardKey{index: gridBase}
+	}
+	return cardKey{index: carouselBase}
+}
+
+// base is the base layer of the layout shown; 0 while the animator does not
+// hold it
+func (s *Selector) base() carousel.LayerID {
+	return s.layers.cards[baseKey(s.config.LayoutMode)].id
+}
 
 // fontSets lends a FontSet to each drawing that runs in parallel
 var fontSets = sync.Pool{New: func() any { return carousel.NewFontSet() }}
@@ -224,19 +243,25 @@ func (s *Selector) hoverChanged(thumbnails []image.Image) {
 			// The frames of the fade show the scene
 			return
 		}
-		start := time.Now()
-		s.liveBegin()
-		items := s.gridItems(start)
-		drawEnd := time.Now()
-		if err := s.animator.PresentScene(baseLayer, items, carousel.Opaque); err != nil {
-			log.Error().Err(err).Msg("Failed to present the scene of the grid")
-		}
-		end := time.Now()
-		s.liveEnd(end)
-		s.logFrame(start, drawEnd, end)
+		s.presentScene()
 	default:
 		s.render(thumbnails)
 	}
+}
+
+// presentScene presents the scene of the layout shown at once, for the event
+// read last: what its layers show while its frame at rest is drawn
+func (s *Selector) presentScene() {
+	start := time.Now()
+	s.liveBegin()
+	items := s.sceneItems(start)
+	drawEnd := time.Now()
+	if err := s.animator.PresentScene(s.base(), items, carousel.Opaque); err != nil {
+		log.Error().Err(err).Msg("Failed to present a scene")
+	}
+	end := time.Now()
+	s.liveEnd(end)
+	s.logFrame(start, drawEnd, end)
 }
 
 // cancelStep ends the step and the hover motion in progress without their
@@ -265,7 +290,7 @@ func (s *Selector) dropLayers() {
 		cards:   make(map[cardKey]cardLayer),
 		pending: make(map[cardKey]bool),
 		results: results,
-		next:    baseLayer + 1,
+		next:    1,
 	}
 }
 
@@ -278,7 +303,7 @@ func (s *Selector) startRest() {
 	s.rest.busy, s.rest.want = true, false
 	data := s.prepareWindowData()
 	cfg := s.config
-	frame := restFrame{gen: s.layers.gen, selected: s.selectedIndex, hover: s.hoverIndex}
+	frame := restFrame{gen: s.layers.gen, layout: cfg.LayoutMode, selected: s.selectedIndex, hover: s.hoverIndex}
 	renderer, results := s.renderer, s.rest.results
 	go func() {
 		fonts := fontSets.Get().(*carousel.FontSet)
@@ -299,7 +324,7 @@ func (s *Selector) startRest() {
 // current target, or else the start of the drawing of that target
 func (s *Selector) collectRest(r restFrame) {
 	s.rest.busy = false
-	if r.gen == s.layers.gen && r.selected == s.selectedIndex && r.hover == s.hoverIndex {
+	if r.gen == s.layers.gen && r.layout == s.config.LayoutMode && r.selected == s.selectedIndex && r.hover == s.hoverIndex {
 		s.rest.ready, s.rest.want = &r, false
 		s.rest.staged, s.rest.failed = false, false
 	} else if s.rest.want {
@@ -307,16 +332,13 @@ func (s *Selector) collectRest(r restFrame) {
 	}
 }
 
-// ensureBase uploads the base layer
+// ensureBase uploads the base of the layout shown, drawn on the spot when
+// the animator does not hold it
 func (s *Selector) ensureBase() {
-	if s.layers.base {
+	if s.base() != 0 {
 		return
 	}
-	if err := s.animator.SetLayer(baseLayer, carousel.CarouselBase(s.config)); err != nil {
-		log.Error().Err(err).Msg("Failed to set the base layer")
-		return
-	}
-	s.layers.base = true
+	s.setLayer(layerResult{s.layers.gen, baseKey(s.config.LayoutMode), carousel.CarouselBase(s.config)})
 }
 
 // motionLayers are the card layers a motion from p to target passes
@@ -335,18 +357,23 @@ func (s *Selector) motionLayers(p, target float64) []cardKey {
 
 // prefetch requests the layers of the next step either way from the
 // selection: of the carousel, the cards it passes, and the hover frame of the
-// hovered card; of the grid, all of its layers
+// hovered card; of the grid, all of its layers. Then those of the other
+// layout at rest, for a switch to it (specs/028-grid-locate): from the
+// carousel, the grid's; from the grid, the carousel's base and its cards at
+// the selection.
 func (s *Selector) prefetch() {
 	if !s.animates() {
 		return
 	}
+	sel := float64(s.selectedIndex)
 	if s.grid() {
 		s.requestLayers(gridLayers)
+		s.requestLayers(append([]cardKey{baseKey("carousel")}, s.motionLayers(sel, sel)...))
 		return
 	}
-	sel := float64(s.selectedIndex)
 	s.requestLayers(append(s.motionLayers(sel-1, sel), s.motionLayers(sel, sel+1)...))
 	s.requestHoverLayers()
+	s.requestLayers(append(slices.Clone(gridLayers), baseKey("grid")))
 }
 
 // sceneReady reports whether the animator holds the layers of a scene at rest
@@ -359,9 +386,9 @@ func (s *Selector) sceneReady() bool {
 }
 
 // carouselReady reports whether the animator holds the base and the card
-// layers of the carousel at rest
+// layers of the carousel at rest, whichever layout is shown
 func (s *Selector) carouselReady() bool {
-	if !s.layers.base {
+	if s.layers.cards[baseKey("carousel")].id == 0 {
 		return false
 	}
 	sel := float64(s.selectedIndex)
@@ -374,9 +401,9 @@ func (s *Selector) carouselReady() bool {
 }
 
 // gridReady reports whether the animator holds the layers of a scene of the
-// grid, and its base
+// grid, and its base, whichever layout is shown
 func (s *Selector) gridReady() bool {
-	if !s.layers.base {
+	if s.layers.cards[baseKey("grid")].id == 0 {
 		return false
 	}
 	for _, key := range gridLayers {
@@ -395,6 +422,9 @@ func drawLayer(data []carousel.WindowData, key cardKey, cfg carousel.Config) *im
 	if key.index >= 0 {
 		return carousel.CardLayer(data, key.index, key.offset, cfg)
 	}
+	if key.index == carouselBase || key.index == gridBase {
+		return carousel.CarouselBase(cfg)
+	}
 	_, _, w, h := carousel.GridTile(len(data), 0, cfg)
 	switch key.index {
 	case gridTiles:
@@ -410,7 +440,7 @@ func drawLayer(data []carousel.WindowData, key cardKey, cfg carousel.Config) *im
 }
 
 // requestLayers draws in the background the layers that are neither held
-// nor being drawn
+// nor being drawn; a base with the header of its layout
 func (s *Selector) requestLayers(keys []cardKey) {
 	var data []carousel.WindowData
 	gen, results := s.layers.gen, s.layers.results
@@ -423,6 +453,12 @@ func (s *Selector) requestLayers(keys []cardKey) {
 		}
 		s.layers.pending[key] = true
 		cfg := s.config
+		switch key {
+		case baseKey("carousel"):
+			cfg = s.layoutConfig("carousel")
+		case baseKey("grid"):
+			cfg = s.layoutConfig("grid")
+		}
 		go func() {
 			layerSlots <- struct{}{}
 			defer func() { <-layerSlots }()
@@ -453,6 +489,10 @@ func (s *Selector) setLayer(r layerResult) int {
 		return 0
 	}
 	delete(s.layers.pending, r.key)
+	if s.layers.cards[r.key].id != 0 {
+		// A base drawn on the spot meanwhile
+		return 0
+	}
 	layer := cardLayer{}
 	if r.img != nil {
 		layer = cardLayer{id: s.layers.next, bounds: r.img.Rect}
@@ -473,7 +513,7 @@ func (s *Selector) setLayer(r layerResult) int {
 // nothing moves: the base or card layers to go to the animator, or the frame
 // at rest of a step that has ended
 func (s *Selector) backgroundDue() bool {
-	return s.animates() && (!s.layers.base || len(s.layers.pending) > 0) || s.rest.awaited
+	return s.animates() && (s.base() == 0 || len(s.layers.pending) > 0) || s.rest.awaited
 }
 
 // uploadIdle uploads the base, or waits a moment for a card layer or the
@@ -481,7 +521,7 @@ func (s *Selector) backgroundDue() bool {
 // step has the layers it needs and uploads none, and a frame at rest that
 // came after its step is presented when it comes
 func (s *Selector) uploadIdle() {
-	if !s.layers.base {
+	if s.base() == 0 {
 		s.ensureBase()
 		return
 	}
@@ -585,7 +625,7 @@ func (s *Selector) frame() {
 		stepped = s.step.active && s.step.pos.moving(now)
 		items := s.sceneItems(now)
 		drawEnd = time.Now()
-		err = s.animator.PresentScene(baseLayer, items, fade)
+		err = s.animator.PresentScene(s.base(), items, fade)
 	case s.step.active || s.rest.awaited:
 		stepped = s.step.active
 		if s.step.active {
@@ -605,7 +645,7 @@ func (s *Selector) frame() {
 		}
 		items := s.sceneItems(now)
 		drawEnd = time.Now()
-		err = s.animator.PresentScene(baseLayer, items, fade)
+		err = s.animator.PresentScene(s.base(), items, fade)
 	default:
 		s.liveRest()
 		err = s.animator.PresentFaded(nil, fade)
