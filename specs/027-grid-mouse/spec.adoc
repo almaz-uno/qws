@@ -1,0 +1,79 @@
+= 027 — the mouse in the grid
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-04
+:issue: 80
+:status: draft
+
+== What and why
+
+The mouse hovers and clicks the tiles of the grid through
+`getWindowIndexAtPositionGrid` of `pkg/ui/selector.go`, which lays the grid
+out again in a copy of its own of `layoutGrid` (`pkg/carousel`). The copy
+lays the tiles out over the whole window; the grid is drawn below the band
+of the header since specification 005. With the header shown, the tile the
+copy finds under the pointer is that of a grid laid out higher: by half the
+band where the tiles are of their largest size, and with tiles taller than
+those drawn where the height limits them, by more toward the last row. The
+hover frame then lands on another tile than the one under the pointer, and
+a click activates that other window, or none. Seen in specification 026
+(open decisions); 026 exported `carousel.GridColumns`, but the copy keeps
+its own column formula too.
+
+The change: the hit test of the grid takes each tile where the grid draws
+it, from `carousel.GridTile`, and the copy goes. A fix without new
+behaviour: a patch version (constitution, "Releases and versions").
+
+The specification is a delta to `develop` at `53dc14c` (1.4.0). Unchanged:
+the hit test of the carousel, the hover and the click as events, the
+drawing of both layouts.
+
+== Decisions
+
+D1. *The rectangles of the drawing.* The hit test of the grid asks
+`carousel.GridTile` — the rectangle of a tile that the layers of the grid
+(specification 007) and its tests take — for each tile, below the band of
+the header as the grid is drawn. The bounds stay inclusive and a point in
+no tile gives none, as before. Rejected: correcting the copy by the band,
+which would leave two layouts of the grid to keep equal.
+
+D2. *The carousel as it is.* Its cards are placed about the centre of the
+window, which the header does not move, and its hit test computes them so;
+not changed here.
+
+== Behavior
+
+In the grid the tile the mouse hovers and clicks is the tile drawn under the
+pointer: with the header on and off, for any number of windows and of
+columns. The gaps between the tiles and the band of the header hover none.
+
+== Acceptance criteria
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| `TestGridMouse` in `pkg/ui`, with the header on and off, for 1, 2, 5, 12,
+  24 and 37 windows, `appearance.grid.columns` 0 and 3, on the selector of
+  the tests of 026 (1260×700): for every tile its centre and the four
+  points a pixel inside its corners give the tile; the middle of the gap to
+  the right of a tile not in the last column, of the gap below a tile not in
+  the last row, and the point half a gap above the first row give none.
+  On the code before the change the test fails with the header on.
+
+| K2
+| `go build ./...`, `gofmt -l` empty, `go vet ./...`, `make check-specs` and
+  `go test ./...` on every commit, in a worktree of its own; `go test -race`
+  of `pkg/ui`.
+
+| K3
+| The author's check on E1: in the grid, with the header shown, the hover
+  frame comes under the pointer on the tiles of each row, and a click
+  activates the window of the tile under it.
+|===
+
+== Open decisions
+
+None.
