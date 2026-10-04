@@ -334,7 +334,7 @@ Two keys under `appearance.thumbnail`, beside `width`, `height` and
   `false`: snapshots, as in 1.3.3.
 
 | `appearance.thumbnail.live_interval`
-| `33ms`
+| `50ms`
 | A shown window that changed is averaged again at most this often; `0`:
   at most once a refresh of the monitor the overlay is on.
 |===
@@ -350,6 +350,16 @@ most 33 ms and a frame. At 0 — once a refresh, 144 a second on E1 — the
 frames hold as well (research, R = 144), but the snapshotter's CPU follows
 the rate: 0.1–0.2 ms a pass, so four windows changing all the time take
 some 2.6 % of a CPU at 30 a second and 6.6 % at 144.
+
+*Author, 2026-10-04: 50 ms, for K9.* In the rest variant of S5 one window
+changing all the time, passed every 33 ms, cost qws 4.70 points of a CPU
+above `live: false`: a pass costs, with the frame of cause `live` it
+brings, some 1.7 ms, of which 0.35 ms is the `glFinish` the timings of
+`-v` add (research, "The second runs"), and 023 lowers the passes from the
+frame to the cost of the others, not below. At 50 ms, 20 pictures a second
+at most a window, such a window costs some 2.3 % of a CPU without that
+`glFinish`, within K9; a window lags behind by at most 50 ms and a frame
+(K7).
 
 Rejected: one key whose 0 means off — 0 means "at once" for
 `animation.duration`; reusing `snapshot_interval` while shown, which would
@@ -540,9 +550,10 @@ with them.
 
 | K7
 | Lag: in the rest variant of S5 with `live: true`, L p95 ≤
-  `live_interval` + one refresh period + 5 ms, 45 ms at the defaults on
-  E1 — provisional, confirmed by the author on 2026-10-02 until the first
-  measurement. With the key held the passes wait for the steps to stop
+  `live_interval` + one refresh period + 5 ms — provisional, confirmed by
+  the author on 2026-10-02 until the first measurement: 62 ms at the
+  default of 50 ms since 2026-10-04 and a refresh of 6.94 ms on E1 (45 ms
+  at 33 ms). With the key held the passes wait for the steps to stop
   (Behavior, "While shown"), and L there is the time held.
 
 | K8
@@ -555,13 +566,21 @@ with them.
   not land in the pause between two keys.
 
 | K9
-| CPU: in S5, C with `live: true` no more than 3 % of a CPU above
-  `live: false` over the time the switcher is shown — provisional,
+| CPU: in S5 and its rest variant — one window changing all the time,
+  the terminal of S5, of its own pixmap or from its frame — C with `live:
+  true` no more than 3 % of a CPU above `live: false` over the time the
+  switcher is shown, the `glFinish` of `-v` left out of both: from the
+  pools, C of a setting is 100 × (the ms of CPU of `C shown` less the ms in
+  `glFinish` of `C profile`) / the ms shown of `C shown`, and K9 is C on
+  less C off. `glFinish` runs only while timings are logged, as S5 runs,
+  and NVIDIA busy-waits in it; a user's qws does not. Provisional,
   confirmed by the author on 2026-10-02 until the first measurement. In
   the rest variant, one window changing all the time, it was 4.70 and
-  5.38 points in the grid, a window of its own pixmap and one from its
-  frame. Author, 2026-10-03: option c — the cost of a pass lowered, by
-  specification 023 (#66), the bound kept.
+  5.38 points in the grid with `glFinish`, a window of its own pixmap and
+  one from its frame, at a `live_interval` of 33 ms. Author, 2026-10-03:
+  option c — the cost of a pass from the frame lowered, by specification
+  023 (#66), the bound kept; 2026-10-04: option a — the default
+  `live_interval` 50 ms (D6).
 
 | K10
 | Configuration: the two keys from a file, their `QWS_` variables and
@@ -583,8 +602,10 @@ with them.
   passes ask for, a window drawn anew every 5 ms — draws a picture about
   every `live_interval`, at least a third of those the time allows, each
   by a frame of its own. In the rest variant of S5 with `live: true`, R at
-  least 20 passes a second, and no activation under 10 — provisional,
-  until the first measurement. The author's trial at rest is K11.
+  least three quarters of what the default `live_interval` allows the
+  window of S5 — 15 passes a second at 50 ms, of the 20 at most — and no
+  activation under half, 10 — provisional, until the first measurement.
+  The author's trial at rest is K11.
 
 | K14
 | From the frame: `TestLiveFromFrame` in `pkg/snapshot` — a window of
