@@ -48,3 +48,31 @@ The rules of 021: no `Init` of an extension package of xgb in qws, the
 tables of events and errors written by the setup alone, every connection
 of qws made by `NewConn`. The first range of a connection, as xgb gives it.
 The console programs, which keep `xgb.NewConn`.
+
+== XIDs given ahead (issue #74)
+
+`pkg/x11/xids.go`: `nextXIDs` becomes the method `next` of `xidRanges`, a
+range function of each connection's own. It keeps the last `xidsAhead` = 64
+XIDs xgb gave as spans, starting from the end of the connection's first
+range, which `newXIDRanges` takes from the setup; `pick` gives the longest
+part of the X server's range without them, and `gave` records the range
+given. Only xgb's goroutine of a connection's XIDs calls it, so it needs no
+lock. `NewConn` sets `newXIDRanges(xproto.Setup(conn)).next`.
+
+[cols="2,5"]
+|===
+| File | What changes
+
+| `pkg/x11/xids.go`
+| `xidRanges`, `xidsAhead`, `errXIDsAhead`; `nextXIDs` folded into `next`.
+
+| `pkg/x11/extensions.go`
+| `NewConn` sets the range function of the connection's own.
+
+| `pkg/x11/xids_test.go`
+| New: `TestXIDsAheadNotGivenAgain` (K6), building on `develop` too, for
+  A-before.
+
+| `pkg/x11/xidrange_test.go`
+| New: `TestXIDRangesAhead` (K7).
+|===
