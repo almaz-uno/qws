@@ -53,6 +53,16 @@ they need glibc 2.36 or newer and the OpenGL and X11 libraries.
   is no toggle and no hint, which the log says, until
   `keybindings.layout_toggle` names another key.
 
+=== 1.4.1 — 2026-10-04
+
+*The mouse in the grid* (link:specs/027-grid-mouse/spec.adoc[specification
+027]):
+
+* With the header shown, the mouse hovered and clicked another tile of the
+  grid than the one under the pointer — one of a grid laid out higher, the
+  band of the header left out. It now finds each tile where the grid draws
+  it.
+
 == 1.3.0 — 2026-10-02
 
 *Faster to open* (link:specs/003-window-list/spec.adoc[specification 003]):
