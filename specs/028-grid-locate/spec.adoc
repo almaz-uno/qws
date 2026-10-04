@@ -27,7 +27,10 @@ the pictures at rest of both layouts and of both renderers — the frames of
 `cpu` and the scene set Σ with its digests; the carousel; the grid's steps,
 hover and mouse; the live thumbnails of 020 at rest.
 
-== Decisions — recommended, for the author to confirm
+== Decisions
+
+D1–D4 decided by the author on 2026-10-04, each the option recommended;
+D5 and D6 made in the specification and taken with them.
 
 D1. *The selection frame converges onto the tile.* After the switch the
 selection frame of the grid and the shadow of the selected tile appear
@@ -163,7 +166,6 @@ kind `locate`, against those of the fade-ins of the same runs.
 
 == Open decisions
 
-. D1–D6, for the author to confirm.
 . The time from the key to the grid's layers without D3, measured before
   the change (T1): the estimate of D3 rests on the drawing of the tiles
   layer, some 60 ms after the frame of the CPU.

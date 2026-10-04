@@ -64,8 +64,9 @@ The author's animations on ws1 (`qws config show`, 2026-10-04): `enabled`,
 The tiles layer, drawn with no tile selected or hovered (`GridTiles`), is
 cropped to its tiles, at most the window's size: on E1 the overlay is
 2520×1400 (2560×1440 less the padding of 20 px), 14.1 MB at 4 bytes a
-pixel; the other layers of the grid are of a tile's size. The carousel's layers are its card
-layers at the offsets −5 to 5 the motions pass and its base (007).
+pixel; the other layers of the grid are of a tile's size. The carousel's
+layers are its card layers at the offsets −5 to 5 the motions pass and its
+base (007).
 
 What drops the layers now drops them all: a change of the window list, of
 the thumbnails, of the workspace filter, of the geometry (`dropLayers`). The
