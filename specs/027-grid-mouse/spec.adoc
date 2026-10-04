@@ -4,7 +4,7 @@
 :sectnums:
 :revdate: 2026-10-04
 :issue: 80
-:status: draft
+:status: implemented
 
 == What and why
 
@@ -72,6 +72,30 @@ columns. The gaps between the tiles and the band of the header hover none.
 | The author's check on E1: in the grid, with the header shown, the hover
   frame comes under the pointer on the tiles of each row, and a click
   activates the window of the tile under it.
+|===
+
+== Results
+
+2026-10-04, ws1 — E1, the author's desktop. Off the screen: the tests of
+the commits `a94857f` and `ba30dab`, each in a worktree of its own. On the
+desktop: the author's check (K3).
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | Met. `TestGridMouse` passes in all 24 configurations. On the code
+  before, `develop` at `53dc14c`, it failed 561 checks, all with the header
+  on, in each of its 12 configurations — from 3 for one window to 177 for
+  37 in three columns — and none with the header off.
+| K2 | Met. `go build`, `gofmt -l`, `go vet`, `make check-specs` and
+  `go test ./...` on both commits; `go test -race ./pkg/ui`.
+| K3 | Met for the hover. The build of `ba30dab` on Alt+F11 beside the
+  service, opening in the grid with the header shown: one activation, 20
+  hovers of tiles, 20 frames for the pointer, no warning or error in the log
+  (`~/.cache/qws-trial-027/log.txt` on ws1); the author: all is well. No
+  click activated a window in the trial; the click finds its tile through
+  the same hit test as the hover (`ButtonPressEvent` in `pkg/ui/selector.go`).
 |===
 
 == Open decisions
