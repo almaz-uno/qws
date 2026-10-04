@@ -431,7 +431,7 @@ log:
 | `--appearance-thumbnail-live-interval`
 | `QWS_APPEARANCE_THUMBNAIL_LIVE_INTERVAL`
 | `duration`
-| `33ms`
+| `50ms`
 | How often, at most, a shown window that changed is averaged again; `0`: once a refresh of the monitor the switcher is on. A negative interval is reported and the default used
 
 | `appearance.spacing`

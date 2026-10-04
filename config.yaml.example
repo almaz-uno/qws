@@ -40,7 +40,7 @@ appearance:
     live: true
     # A shown window that changed is averaged again at most this often;
     # 0: once a refresh of the monitor the switcher is on
-    live_interval: 33ms
+    live_interval: 50ms
   spacing: 300
   perspective: 0.6
 

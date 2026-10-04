@@ -208,7 +208,7 @@ func Default() *Config {
 				Height:           256,
 				ScalingAlgorithm: "bilinear",            // Balance between speed and quality
 				Live:             true,                  // on glx, thumbnails follow their windows while shown
-				LiveInterval:     33 * time.Millisecond, // some 30 pictures a second, a video's rate
+				LiveInterval:     50 * time.Millisecond, // 20 pictures a second: a window changing all the time within K9 of specs/020-live-thumbnails
 			},
 			Spacing:     300,
 			Perspective: 0.6,

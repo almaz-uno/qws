@@ -261,13 +261,13 @@ func TestAppearanceKeys(t *testing.T) {
 // Criteria of specs/020-live-thumbnails
 
 // TestThumbnailKeys checks K10: the live thumbnails are on by default, a
-// window averaged again at most every 33 ms; the keys are read from a file,
+// window averaged again at most every 50 ms; the keys are read from a file,
 // and from their QWS_ variables over the file; a negative interval is
 // reported and the default used, 0 kept
 func TestThumbnailKeys(t *testing.T) {
 	def := Default().Appearance.Thumbnail
-	if !def.Live || def.LiveInterval != 33*time.Millisecond {
-		t.Errorf("defaults: live %v, interval %v; want true, 33ms", def.Live, def.LiveInterval)
+	if !def.Live || def.LiveInterval != 50*time.Millisecond {
+		t.Errorf("defaults: live %v, interval %v; want true, 50ms", def.Live, def.LiveInterval)
 	}
 
 	clearEnvironment(t)
@@ -326,7 +326,7 @@ func changedConfig(t *testing.T) *Config {
 		Appearance: Appearance{
 			Layout:      "grid",
 			Renderer:    "none", // neither default, cpu here or glx after 001
-			Thumbnail:   Thumbnail{Width: 300, Height: 200, ScalingAlgorithm: "nearest", Live: false, LiveInterval: 50 * time.Millisecond},
+			Thumbnail:   Thumbnail{Width: 300, Height: 200, ScalingAlgorithm: "nearest", Live: false, LiveInterval: 75 * time.Millisecond},
 			Spacing:     450,
 			Perspective: 0.5,
 			Grid:        Grid{Columns: 4, Spacing: 12},
