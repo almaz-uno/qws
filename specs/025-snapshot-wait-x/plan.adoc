@@ -1,0 +1,43 @@
+= 025 — plan
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-03
+
+== Approach
+
+`pkg/glx` gets `(*Offscreen).WaitX`, `glXWaitX` through a C function
+`offWaitX`, as 020's branch has them. `captureGPU` calls it right before
+`BindPixmap` of a pixmap just named and right before `Rebind`; the paths
+that return before binding — a window taken from its frame, a pixmap the GPU
+refused — do not call it. `TestGPUThumbnail` calls it before its
+`BindPixmap` and before its `Rebind`.
+
+== Files
+
+[cols="2,5"]
+|===
+| File | What changes
+
+| `pkg/glx/pixmap_linux.go`
+| `offWaitX` and `WaitX`: the two hunks of 020's branch, byte for byte.
+
+| `pkg/snapshot/snapshot.go`
+| `captureGPU` waits before binding.
+
+| `pkg/snapshot/gpu_test.go`
+| `TestGPUThumbnail` waits before binding; its comment says so.
+|===
+
+== Kept for the merge of 020
+
+020's branch adds the same two hunks to `pkg/glx/pixmap_linux.go` and
+changes neither `captureGPU` nor the body of `TestGPUThumbnail` — in
+`gpu_test.go` only the signatures of `newPixmap` and `fillPixmap`. A merge
+of its tip into this change, tried in a worktree that is thrown away, shows
+whether it conflicts.
+
+== Order
+
+Binary B of `develop` before anything changes; the specification; the
+change; F, then the probe P with S1; the results.

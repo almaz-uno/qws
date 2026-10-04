@@ -17,9 +17,11 @@ import (
 // pixels computed on the CPU, within 1 per channel; a pixmap no larger than
 // a thumbnail comes out as it is. Then the pixmap is drawn anew and bound
 // again, as a window that changed is, and the thumbnail is that of the new
-// contents. Pixmaps of depth 24 and 32, as windows have. Needs an X display
-// with GLX_EXT_texture_from_pixmap, not a compositor: the pixmaps are made
-// here.
+// contents. Pixmaps of depth 24 and 32, as windows have. Each binding waits
+// for the X server's drawing first, as captureGPU does: without it the
+// thumbnail drawn anew was stale in most runs on NVIDIA with the desktop in
+// use (specs/025-snapshot-wait-x). Needs an X display with
+// GLX_EXT_texture_from_pixmap, not a compositor: the pixmaps are made here.
 func TestGPUThumbnail(t *testing.T) {
 	conn, err := xgb.NewConn()
 	if err != nil {
@@ -48,6 +50,7 @@ func TestGPUThumbnail(t *testing.T) {
 			fillPixmap(t, conn, pixmap, depth, first)
 
 			tex := newWindowTexture()
+			o.WaitX()
 			tp, err := o.BindPixmap(uint32(pixmap), depth)
 			if err != nil {
 				t.Fatalf("depth %d: %v", depth, err)
@@ -56,6 +59,7 @@ func TestGPUThumbnail(t *testing.T) {
 
 			second := testImage(size.X, size.Y, int64(depth*size.X+1))
 			fillPixmap(t, conn, pixmap, depth, second)
+			o.WaitX()
 			tp.Rebind()
 			checkThumbnail(t, g.thumbnail(size.X, size.Y, tp.YInverted), second, "drawn anew", depth, size)
 
