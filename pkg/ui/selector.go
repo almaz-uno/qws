@@ -1218,66 +1218,17 @@ func (s *Selector) getWindowIndexAtPositionCarousel(mouseX, mouseY int) int {
 	return -1
 }
 
-// getWindowIndexAtPositionGrid calculates position for grid layout
+// getWindowIndexAtPositionGrid is the tile of the grid under the mouse, or
+// -1: each tile where the grid draws it, below the band of the header
+// (specs/027-grid-mouse)
 func (s *Selector) getWindowIndexAtPositionGrid(mouseX, mouseY int) int {
-	// Calculate grid dimensions (same logic as in DrawGridLayout)
-	cols := s.config.GridColumns
-	if cols <= 0 {
-		// Auto-calculate columns
-		cols = int(math.Ceil(math.Sqrt(float64(len(s.windows)) * 1.5)))
-		if cols < 2 {
-			cols = 2
-		}
-		if cols > 6 {
-			cols = 6
-		}
-	}
-
-	rows := (len(s.windows) + cols - 1) / cols
-
-	spacing := s.config.GridSpacing
-	if spacing == 0 {
-		spacing = 20
-	}
-
-	// Calculate tile size
-	availableWidth := float64(s.config.Width) - spacing*(float64(cols)+1)
-	availableHeight := float64(s.config.Height) - spacing*(float64(rows)+1)
-
-	tileW := availableWidth / float64(cols)
-	tileH := availableHeight / float64(rows)
-
-	// Respect max thumbnail size
-	maxTileW := float64(s.config.ThumbWidth) + 40
-	maxTileH := float64(s.config.ThumbHeight) + 60
-	if tileW > maxTileW {
-		tileW = maxTileW
-	}
-	if tileH > maxTileH {
-		tileH = maxTileH
-	}
-
-	// Center the grid
-	totalGridW := float64(cols)*tileW + (float64(cols)+1)*spacing
-	totalGridH := float64(rows)*tileH + (float64(rows)+1)*spacing
-	offsetX := (float64(s.config.Width) - totalGridW) / 2
-	offsetY := (float64(s.config.Height) - totalGridH) / 2
-
-	// Check each tile
+	px, py := float64(mouseX), float64(mouseY)
 	for i := range s.windows {
-		row := i / cols
-		col := i % cols
-
-		x := offsetX + spacing + float64(col)*(tileW+spacing)
-		y := offsetY + spacing + float64(row)*(tileH+spacing)
-
-		// Check if mouse is within tile bounds
-		if float64(mouseX) >= x && float64(mouseX) <= x+tileW &&
-			float64(mouseY) >= y && float64(mouseY) <= y+tileH {
+		x, y, w, h := carousel.GridTile(len(s.windows), i, s.config)
+		if px >= x && px <= x+w && py >= y && py <= y+h {
 			return i
 		}
 	}
-
 	return -1
 }
 
