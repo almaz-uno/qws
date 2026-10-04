@@ -1,0 +1,13 @@
+= 026 — tasks
+:toc: left
+:toc-title: Contents
+:revdate: 2026-10-04
+
+. [x] T1. The specification (D1–D4 of the author, D5–D9 for the author to confirm) and its research.
+. [ ] T2. The key: configuration, flag, variable, documentation; K3.
+. [ ] T3. pkg/carousel: the hint, GridColumns; K4; the scenes of Σ (D9); K5, K6.
+. [ ] T4. pkg/ui: the toggle, the hint, Up and Down, the wrap given to stepTo; K1, K2, K7, K8.
+. [ ] T5. K9 on every commit in a worktree of its own.
+. [ ] T6. Frames of the carousel and the grid at 2560×1440 with the hint, for the author, outside the repository.
+. [ ] T7. The author's trial on E1, K10.
+. [ ] T8. The results.

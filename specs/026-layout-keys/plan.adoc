@@ -1,0 +1,38 @@
+= 026 — plan
+:toc: left
+:toc-title: Contents
+:revdate: 2026-10-04
+
+[cols="2,5"]
+|===
+| File | What changes
+
+| `internal/config/config.go`
+| `LayoutToggle` at the end of `Keybindings`, `layout_toggle`; `q` in `Default()` and `setDefaults`, which makes the variable read.
+
+| `cmd/qws/root.go`
+| The flag `--keybindings-layout-toggle` and `applyFlags`.
+
+| `pkg/carousel/renderer-cpu.go`
+| `Config.LayoutHint`. `drawHeader` keeps where the hostname or the version ends and draws the hint after them, `drawLayoutHint`: the face and colour of the version, its baseline, ending at the margin, none closer than the gap to the version (D6); `headerBand` unchanged (D8). `GridColumns`, the columns of `layoutGrid`, exported; `layoutGrid` calls it.
+
+| `pkg/ui/selector.go`
+| `keyConfig` gets the keysym and name of the layout key, `parseLayoutToggle` reads them and reports a name it does not know or one of the switcher's keys (D5); `layoutHint` makes the text; `setLayout` sets the mode with its hint — in `NewSelector`, for `c`, `g`, the key and `restoreInitialLayoutMode`; `switchLayout` is the code of `c` and `g` made one. After Left and Right: Down and Up (`selectRow`), then the layout key (D5). `columnStep` is the formula of D4; `selectRow` takes the columns from `carousel.GridColumns` and gives `stepTo` the wrap of D7.
+
+| `pkg/ui/animation.go`
+| `stepTo` takes the wrap from its caller; `animateTransition` computes it as `stepTo` did.
+
+| `pkg/ui/keys_test.go`
+| K1, K2, K7, K8.
+
+| `pkg/carousel/hint_test.go`, `scenes_test.go`, `testdata/scenes.json`
+| K4–K6; digests rewritten with `-update`, the diff read.
+
+| `internal/config/config_test.go`, `cmd/qws/root_test.go`
+| K3.
+
+| `README.md`, `doc/configuration.asciidoc`, `config.yaml.example`
+| The key, the hint, Up and Down.
+|===
+
+What must stay: the drawing of a frame without the hint; the band; the geometry of both layouts; the key handling before the new keys, in its order; the step of Left, Right and the main key, by the rule `stepTo` had.
