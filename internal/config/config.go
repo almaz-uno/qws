@@ -29,6 +29,7 @@ type Keybindings struct {
 	Backward          string `mapstructure:"backward" yaml:"backward"`
 	WorkspaceModifier string `mapstructure:"workspace_modifier" yaml:"workspace_modifier"`
 	Cancel            string `mapstructure:"cancel" yaml:"cancel"`
+	LayoutToggle      string `mapstructure:"layout_toggle" yaml:"layout_toggle"` // toggles the carousel and the grid while shown; empty: none (specs/026-layout-keys)
 }
 
 // Appearance contains visual configuration
@@ -199,6 +200,7 @@ func Default() *Config {
 			Backward:          "Shift",
 			WorkspaceModifier: "Ctrl",
 			Cancel:            "Escape",
+			LayoutToggle:      "q",
 		},
 		Appearance: Appearance{
 			Layout:   "carousel", // Default to carousel mode
@@ -424,6 +426,7 @@ func setDefaults(v *viper.Viper, cfg *Config) {
 	v.SetDefault("keybindings.backward", cfg.Keybindings.Backward)
 	v.SetDefault("keybindings.workspace_modifier", cfg.Keybindings.WorkspaceModifier)
 	v.SetDefault("keybindings.cancel", cfg.Keybindings.Cancel)
+	v.SetDefault("keybindings.layout_toggle", cfg.Keybindings.LayoutToggle)
 
 	v.SetDefault("appearance.layout", cfg.Appearance.Layout)
 	v.SetDefault("appearance.renderer", cfg.Appearance.Renderer)

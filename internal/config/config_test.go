@@ -318,11 +318,53 @@ func TestThumbnailKeys(t *testing.T) {
 	}
 }
 
+// Criteria of specs/026-layout-keys
+
+// TestLayoutToggle checks K3: the layout key is q by default, as config init
+// writes it and config show prints it, and in a file without it; it is read
+// from a file, an empty name too, and from its QWS_ variable over the file
+func TestLayoutToggle(t *testing.T) {
+	if got := Default().Keybindings.LayoutToggle; got != "q" {
+		t.Errorf("default %q, want q", got)
+	}
+	data, err := yaml.Marshal(Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "\n    layout_toggle: q\n") {
+		t.Errorf("config init writes no layout_toggle: q under keybindings:\n%s", data)
+	}
+
+	clearEnvironment(t)
+	for _, c := range []struct{ file, want string }{
+		{"keybindings:\n  cancel: Escape\n", "q"},
+		{"keybindings:\n  layout_toggle: F2\n", "F2"},
+		{"keybindings:\n  layout_toggle: \"\"\n", ""},
+	} {
+		cfg, warnings, err := Load(writeFile(t, c.file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Keybindings.LayoutToggle != c.want || len(warnings) != 0 {
+			t.Errorf("%q: %q, warnings %v; want %q, none", c.file, cfg.Keybindings.LayoutToggle, warnings, c.want)
+		}
+	}
+
+	t.Setenv("QWS_KEYBINDINGS_LAYOUT_TOGGLE", "g")
+	cfg, _, err := Load(writeFile(t, "keybindings:\n  layout_toggle: F2\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Keybindings.LayoutToggle != "g" {
+		t.Errorf("environment: %q, want g", cfg.Keybindings.LayoutToggle)
+	}
+}
+
 // changedConfig is a configuration with every field different from its
 // default
 func changedConfig(t *testing.T) *Config {
 	cfg := &Config{
-		Keybindings: Keybindings{Modifier: "Super", Key: "grave", Backward: "Ctrl", WorkspaceModifier: "Shift", Cancel: "q"},
+		Keybindings: Keybindings{Modifier: "Super", Key: "grave", Backward: "Ctrl", WorkspaceModifier: "Shift", Cancel: "q", LayoutToggle: ""},
 		Appearance: Appearance{
 			Layout:      "grid",
 			Renderer:    "none", // neither default, cpu here or glx after 001

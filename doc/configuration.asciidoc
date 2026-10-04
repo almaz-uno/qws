@@ -143,6 +143,10 @@ viper.BindPFlag("keybindings.workspace_modifier",
 | `cancel_key`
 | `Escape`
 | Key to cancel selection and close switcher
+
+| `layout_toggle`
+| `q`
+| Key that toggles the carousel and the grid while the switcher is shown; empty: none
 |===
 
 .Proposed CLI flags
@@ -162,6 +166,7 @@ keybindings:
   backward: Shift
   workspace_modifier: Ctrl  # Filter to current workspace when held
   cancel: Escape
+  layout_toggle: q          # Toggles the carousel and the grid; "" for none
 ----
 
 === Appearance — Carousel
@@ -317,6 +322,7 @@ keybindings:
   backward: Shift
   workspace_modifier: Ctrl
   cancel: Escape
+  layout_toggle: q
 
 appearance:
   thumbnail:
@@ -398,6 +404,13 @@ log:
 | `string`
 | `Escape`
 | Key to cancel selection
+
+| `keybindings.layout_toggle`
+| `--keybindings-layout-toggle`
+| `QWS_KEYBINDINGS_LAYOUT_TOGGLE`
+| `string`
+| `q`
+| Key that toggles the carousel and the grid while the switcher is shown, without the workspace modifier, as `c` (carousel) and `g` (grid) choose one; the next activation opens in `appearance.layout` again. A key name as for `keybindings.key`. With the header shown, its top right says what the key does now: `Q — grid` in the carousel, `Q — carousel` in the grid (a name of one letter upper-cased, any other as written). Empty: no toggle and no hint; set it so in the file or with the flag, since an empty environment variable counts as unset. A name qws does not know is reported, and there is no toggle. A key the switcher already uses — Enter, the cancel and main keys, `c`, `g`, the arrows — keeps its meaning: then there is no toggle and no hint, which is reported (specification `026-layout-keys`)
 
 | `appearance.renderer`
 | `--appearance-renderer` / `-r`
@@ -909,6 +922,10 @@ qws --keybindings-backward=Control
 
 # Change cancel key (default is Escape)
 qws --keybindings-cancel=q
+
+# Toggle the carousel and the grid with F2 instead of q, or with no key
+qws --keybindings-layout-toggle=F2
+qws --keybindings-layout-toggle=
 ----
 
 .Configuration file example
@@ -920,6 +937,7 @@ keybindings:
   backward: Shift         # Reverse direction
   workspace_modifier: Alt # Filter current workspace
   cancel: Escape          # Cancel selection
+  layout_toggle: q        # Toggle the carousel and the grid
 ----
 
 [[phase-3-status]]

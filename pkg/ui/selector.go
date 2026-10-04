@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"image"
 	"math"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/almaz-uno/qws/internal/config"
 	"github.com/almaz-uno/qws/pkg/carousel"
@@ -26,6 +28,8 @@ type keyConfig struct {
 	workspaceModifierMask uint16 // Workspace filter modifier (Ctrl)
 	mainKeysym            uint32 // Main trigger key keysym (Tab, F10, etc.)
 	cancelKeysym          uint32 // Cancel key keysym (Escape)
+	layoutToggleKeysym    uint32 // Key that toggles the carousel and the grid; 0: none (specs/026-layout-keys)
+	layoutToggleName      string // Its name as configured, for the hint of the header
 }
 
 // Selector provides a graphical carousel interface for window selection
@@ -193,6 +197,11 @@ func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, window
 		keyConf.cancelKeysym = keysym
 	}
 
+	// The keys of the switcher the layout key cannot be: Enter, the cancel and
+	// main keys, c, g and the arrows
+	keyConf.layoutToggleKeysym, keyConf.layoutToggleName = parseLayoutToggle(keybindings.LayoutToggle,
+		0xFF0D, keyConf.cancelKeysym, keyConf.mainKeysym, 0x0063, 0x0067, 0xFF51, 0xFF52, 0xFF53, 0xFF54)
+
 	s := &Selector{
 		ctx:                 ctx,
 		conn:                conn,
@@ -213,6 +222,7 @@ func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, window
 		initialLayoutMode:   appearance.Layout, // Save initial layout mode
 		watcher:             watcher,
 	}
+	s.setLayout(appearance.Layout)
 
 	// Initialize renderer and presenter
 	var share *glx.Share
@@ -523,8 +533,69 @@ func (s *Selector) restoreInitialLayoutMode() {
 			Str("from", s.config.LayoutMode).
 			Str("to", s.initialLayoutMode).
 			Msg("Restoring initial layout mode")
-		s.config.LayoutMode = s.initialLayoutMode
+		s.setLayout(s.initialLayoutMode)
 	}
+}
+
+// parseLayoutToggle is the keysym of the layout key named by
+// keybindings.layout_toggle and the name its hint shows; 0 and "" for no
+// key: an empty name, one keygrab does not know, or one of the keys taken by
+// the switcher, which keep their meaning — the last two reported
+// (specs/026-layout-keys)
+func parseLayoutToggle(name string, taken ...uint32) (uint32, string) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return 0, ""
+	}
+	keysym, err := keygrab.GetKeysym(name)
+	if err != nil {
+		log.Warn().Err(err).Str("layout_toggle", name).Msg("Failed to parse layout toggle key, no layout toggle")
+		return 0, ""
+	}
+	for _, k := range taken {
+		if keysym == k {
+			log.Warn().Str("layout_toggle", name).Msg("Layout toggle key is another key of the switcher, no layout toggle")
+			return 0, ""
+		}
+	}
+	return keysym, name
+}
+
+// layoutHint is the hint at the top right of the header of what the layout
+// key named key does in the layout mode: "Q — grid" in the carousel, "Q —
+// carousel" in the grid, a name of one letter upper-cased, any other as
+// written; none without the key or the header (specs/026-layout-keys)
+func layoutHint(key, mode string, header bool) string {
+	if key == "" || !header {
+		return ""
+	}
+	if r := []rune(key); len(r) == 1 && unicode.IsLetter(r[0]) {
+		key = strings.ToUpper(key)
+	}
+	if mode == "grid" {
+		return key + " — carousel"
+	}
+	return key + " — grid"
+}
+
+// setLayout makes mode the layout mode, with the hint of the layout key for
+// it in the header
+func (s *Selector) setLayout(mode string) {
+	s.config.LayoutMode = mode
+	s.config.LayoutHint = layoutHint(s.keyConfig.layoutToggleName, mode, s.appearance.Header.Enabled)
+}
+
+// switchLayout shows the layout mode, when it is not shown: the layers of the
+// other are dropped, and the frame is drawn anew
+func (s *Selector) switchLayout(mode string, thumbnails []image.Image) {
+	if s.config.LayoutMode == mode {
+		return
+	}
+	log.Debug().Str("layout", mode).Msg("Switching layout")
+	s.setLayout(mode)
+	s.dropLayers()
+	s.render(thumbnails)
+	s.prefetch()
 }
 
 // handleEventsSync processes keyboard events synchronously
@@ -838,24 +909,12 @@ func (s *Selector) handleKeyPressSimple(e xproto.KeyPressEvent, thumbnails []ima
 	ctrlPressed := (state & s.keyConfig.workspaceModifierMask) != 0
 
 	if !ctrlPressed && s.isKeycode(keycode, cKeysym) {
-		if s.config.LayoutMode != "carousel" {
-			log.Debug().Msg("Switching to carousel layout")
-			s.config.LayoutMode = "carousel"
-			s.dropLayers()
-			s.render(thumbnails)
-			s.prefetch()
-		}
+		s.switchLayout("carousel", thumbnails)
 		return false
 	}
 
 	if !ctrlPressed && s.isKeycode(keycode, gKeysym) {
-		if s.config.LayoutMode != "grid" {
-			log.Debug().Msg("Switching to grid layout")
-			s.config.LayoutMode = "grid"
-			s.dropLayers()
-			s.render(thumbnails)
-			s.prefetch()
-		}
+		s.switchLayout("grid", thumbnails)
 		return false
 	}
 
@@ -893,6 +952,28 @@ func (s *Selector) handleKeyPressSimple(e xproto.KeyPressEvent, thumbnails []ima
 		return false
 	}
 
+	// Up and Down move by a row in the grid; the carousel has none
+	// (specs/026-layout-keys)
+	if s.isKeycode(keycode, 0xFF54) { // XK_Down
+		s.selectRow(1, thumbnails)
+		return false
+	}
+	if s.isKeycode(keycode, 0xFF52) { // XK_Up
+		s.selectRow(-1, thumbnails)
+		return false
+	}
+
+	// The layout key, after every other key of the switcher, as c and g
+	// without the workspace modifier: the other layout
+	if !ctrlPressed && s.keyConfig.layoutToggleKeysym != 0 && s.isKeycode(keycode, s.keyConfig.layoutToggleKeysym) {
+		if s.grid() {
+			s.switchLayout("carousel", thumbnails)
+		} else {
+			s.switchLayout("grid", thumbnails)
+		}
+		return false
+	}
+
 	return false
 }
 
@@ -919,9 +1000,46 @@ func (s *Selector) selectPrevious(thumbnails []image.Image) {
 	s.animateTransition(targetIndex, thumbnails)
 }
 
-// animateTransition animates transition from current to target index
+// animateTransition animates transition from current to target index; a
+// step around the list, from the last window to the first or back, is not
+// animated (specs/007-animation)
 func (s *Selector) animateTransition(targetIndex int, thumbnails []image.Image) {
-	s.stepTo(targetIndex, thumbnails)
+	wrap := targetIndex-s.selectedIndex > 1 || s.selectedIndex-targetIndex > 1
+	s.stepTo(targetIndex, wrap, thumbnails)
+}
+
+// selectRow moves the selection of the grid a row down, dir 1, or up, -1,
+// within its column and around it; nothing in the carousel. The selection
+// frame slides to the tile above or below; around a column of three tiles or
+// more it is at once, as a step around the list (specs/026-layout-keys).
+func (s *Selector) selectRow(dir int, thumbnails []image.Image) {
+	if !s.grid() || len(s.windows) == 0 {
+		return
+	}
+	cols := carousel.GridColumns(len(s.windows), s.config)
+	target := columnStep(s.selectedIndex, len(s.windows), cols, dir)
+	if target == s.selectedIndex {
+		return
+	}
+	s.stepTo(target, target-s.selectedIndex != cols && s.selectedIndex-target != cols, thumbnails)
+}
+
+// columnStep is the tile a row down, dir 1, or up, -1, from tile i of n laid
+// out row after row in cols columns, the last row from the left: within the
+// column of i and around it — down from its last tile to its top, up from
+// its top to its last tile; i itself in a column of one tile
+func columnStep(i, n, cols, dir int) int {
+	c := i % cols
+	if dir > 0 {
+		if i+cols < n {
+			return i + cols
+		}
+		return c
+	}
+	if i-cols >= 0 {
+		return i - cols
+	}
+	return c + cols*((n-1-c)/cols)
 }
 
 // Close closes the selector window and frees resources

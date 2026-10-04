@@ -82,3 +82,18 @@ func TestAppearanceFlags(t *testing.T) {
 			cfg.Appearance.Header, a.HoverDuration, a.OverlayZoom, a.HoverZoom)
 	}
 }
+
+// TestLayoutToggleFlag checks K3 of specs/026-layout-keys: the layout key is
+// read from its flag, an empty name too
+func TestLayoutToggleFlag(t *testing.T) {
+	for _, name := range []string{"F3", ""} {
+		if err := rootCmd.PersistentFlags().Set("keybindings-layout-toggle", name); err != nil {
+			t.Fatal(err)
+		}
+		cfg = config.Default()
+		applyFlags()
+		if got := cfg.Keybindings.LayoutToggle; got != name {
+			t.Errorf("flag %q: %q", name, got)
+		}
+	}
+}

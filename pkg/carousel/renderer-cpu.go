@@ -56,6 +56,7 @@ type Config struct {
 	GridSpacing             float64  // Spacing between tiles in grid mode
 	Hostname                string   // Drawn large at the top left (empty draws none)
 	Version                 string   // Drawn after the hostname (empty draws none)
+	LayoutHint              string   // Drawn at the top right of the header, what the layout key does (specs/026-layout-keys); empty draws none
 	Fonts                   *FontSet // Faces of a drawing that runs in parallel with others; nil: the shared cache
 }
 
@@ -213,7 +214,8 @@ const (
 )
 
 // drawHeader draws the header and returns the bottom of its band, or 0 when
-// there is nothing to draw
+// there is nothing to draw. The hint of the layout key is a part of the
+// header, drawn only with it: it never changes the band.
 func drawHeader(dc *gg.Context, cfg Config) float64 {
 	if cfg.Hostname == "" && cfg.Version == "" {
 		return 0
@@ -226,20 +228,43 @@ func drawHeader(dc *gg.Context, cfg Config) float64 {
 	metrics := large.Metrics()
 	baseline := headerMargin + float64(metrics.Ascent)/64
 
-	x := headerMargin
+	x, end := headerMargin, headerMargin // where the next text starts; where the last ends
 	if cfg.Hostname != "" {
 		dc.SetFontFace(large)
 		setColor(dc, cfg.TextColor, 0.9)
 		dc.DrawString(cfg.Hostname, x, baseline)
 		width, _ := dc.MeasureString(cfg.Hostname)
-		x += width + headerGap
+		end = x + width
+		x = end + headerGap
 	}
 	if cfg.Version != "" {
 		dc.SetFontFace(small)
 		setColor(dc, cfg.TextColor, 0.6)
 		dc.DrawString(cfg.Version, x, baseline)
+		width, _ := dc.MeasureString(cfg.Version)
+		end = x + width
 	}
+	drawLayoutHint(dc, cfg, small, baseline, end)
 	return headerMargin + float64(metrics.Height)/64 + headerGap
+}
+
+// drawLayoutHint draws the hint of the layout key at the top right of the
+// header: as the version — its face, its colour, its baseline — ending at the
+// margin of the header from the right edge. It is not drawn where it would
+// come closer than the gap of the header to end, where the hostname or the
+// version ends (specs/026-layout-keys).
+func drawLayoutHint(dc *gg.Context, cfg Config, face font.Face, baseline, end float64) {
+	if cfg.LayoutHint == "" {
+		return
+	}
+	dc.SetFontFace(face)
+	width, _ := dc.MeasureString(cfg.LayoutHint)
+	x := float64(cfg.Width) - headerMargin - width
+	if x < end+headerGap {
+		return
+	}
+	setColor(dc, cfg.TextColor, 0.6)
+	dc.DrawString(cfg.LayoutHint, x, baseline)
 }
 
 // headerBand is the bottom of the band drawHeader takes, without drawing it
@@ -834,9 +859,9 @@ type gridLayout struct {
 	tileW, tileH, offsetX, offsetY, spacing float64
 }
 
-// layoutGrid lays out n tiles in the window below top, the bottom of the header
-func layoutGrid(n int, top float64, cfg Config) gridLayout {
-	// Calculate grid dimensions
+// GridColumns is the number of columns the grid lays n tiles out in, row
+// after row: appearance.grid.columns, or when it is 0 a number that suits n
+func GridColumns(n int, cfg Config) int {
 	cols := cfg.GridColumns
 	if cols <= 0 {
 		// Auto-calculate columns based on window count and aspect ratio
@@ -848,7 +873,13 @@ func layoutGrid(n int, top float64, cfg Config) gridLayout {
 			cols = 6
 		}
 	}
+	return cols
+}
 
+// layoutGrid lays out n tiles in the window below top, the bottom of the header
+func layoutGrid(n int, top float64, cfg Config) gridLayout {
+	// Calculate grid dimensions
+	cols := GridColumns(n, cfg)
 	rows := (n + cols - 1) / cols
 
 	spacing := cfg.GridSpacing
