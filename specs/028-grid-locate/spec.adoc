@@ -1,0 +1,169 @@
+= 028 — the selected tile shown after a switch to the grid
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-04
+:status: draft
+:issue: 83
+
+== What and why
+
+In the carousel the selected window is the card in the middle, where the
+eye already is. A switch to the grid — the layout key `q` (specification
+026) or `g` — puts it in one tile of up to 36, anywhere in the window,
+marked only by the selection frame of the grid, which appears with the grid
+at once: the eye has to search for it. The author, 2026-10-04: after a
+switch to the grid, an explicit animation of the selected window, so that
+the eye sees it at once.
+
+What a switch does now (research): the layers are dropped, the grid's frame
+is drawn on the CPU and presented — 62–74 ms of drawing and 7–22 ms of
+presenting, 76–97 ms in all, at six switches with 33 windows on E1 — and
+only then are the grid's layers drawn in the background. Until they are there nothing of the grid moves: a step
+is made at once (`stepTo`), and so would an animation of the selection.
+
+The specification is a delta to `develop` at `c3c598e` (1.4.1). Unchanged:
+the pictures at rest of both layouts and of both renderers — the frames of
+`cpu` and the scene set Σ with its digests; the carousel; the grid's steps,
+hover and mouse; the live thumbnails of 020 at rest.
+
+== Decisions — recommended, for the author to confirm
+
+D1. *The selection frame converges onto the tile.* After the switch the
+selection frame of the grid and the shadow of the selected tile appear
+scaled up about the tile's centre by `locate_zoom` and transparent, and
+within `locate_duration` shrink onto the tile and become opaque, eased out
+as the other animations (007): a motion from all sides toward the tile,
+which the eye catches wherever it is, ending as the frame of the grid is at
+rest. Through the layers and the scale the hover frame zooms with
+(`zoomRect`, 010 and 014); no new layer.
+Rejected:
+(b) a pulse — the frame and the shadow grow to some 1.15 and back, twice:
+little motion, near the tile only, a small change the eye still has to
+find;
+(c) a flight — the selected card moves from the middle of the carousel to
+its tile while the grid fades in: the eye follows it from where it was, but
+it needs the layers of both layouts at once, a cross-fade of the two and
+the card's picture at both sizes — several times the work of (a), and
+nothing of the grid could move until all of it is drawn.
+
+D2. *When.* After a switch to the grid, by the layout key or by `g`. Not
+when an activation opens in the grid: the overlay then has its own
+appearance, the fade and zoom of `show`, and the eye no place to come from.
+Not after a switch to the carousel, whose selection is in the middle.
+Alternative: also when an activation opens in the grid, after its fade-in.
+
+D3. *At once.* While the carousel is shown, the grid's layers are drawn in
+the background — after the carousel's own, at the priority of the layers
+of the next step — and kept beside the carousel's: a switch shows the grid
+from its layers in the next frame, without the frame of the CPU, and the
+frame converges from that frame. A switch to the carousel the same way,
+its layers kept. The cost: the layers of the grid drawn once an
+activation, a tiles layer of at most the window's size — up to some 14 MB
+of GPU memory on E1 (2520×1400×4 bytes) — while they were drawn only after a switch;
+whatever drops the layers now (the window list, the thumbnails, the
+workspace filter) drops both.
+Alternative: as now, the grid drawn on the CPU and its layers after it, the
+frame converging from when they are there — some 140 ms after the key on
+E1, an estimate to be measured (research, T1).
+
+D4. *Two keys,* as the hover has (`hover_duration`, `hover_zoom`, 010 and
+014): `appearance.animation.locate_duration`, 400 ms by default — longer
+than a step, 150 ms by the author's `duration`, as it is to be seen, not
+only followed; `0s`: no animation, the grid as now. And
+`appearance.animation.locate_zoom`, 1.6 by default: the scale the frame
+converges from; a factor not above 1 gives a warning and the default is
+used. Both to be tried in the author's trial (K9).
+
+D5. *Not under `cpu`*, nor with `appearance.animation.enabled: false`: the
+grid as now, like every animation of 007.
+
+D6. *Keys during the animation.* A step — an arrow, the main key — ends the
+animation at once, and the step moves the selection frame from the tile, as
+now; a switch back to the carousel ends it; the hover of another tile does
+not. The live thumbnails make no pass while it runs, frames coming one
+after another (020), and start 30 ms after it ends.
+
+== Behavior
+
+After `q` or `g` from the carousel, with `glx` and animations on: the grid
+in the next frame, its selection frame and the shadow of the selected tile
+at `locate_zoom` and transparent; within `locate_duration` they shrink onto
+the tile and become opaque; then the grid at rest as now. Nothing else of
+the grid moves. With the grid's layers not yet drawn — a switch right after
+the activation opens — the grid as now, the animation from when they are
+there if within `locate_duration` of the key, else none.
+
+== Metrics
+
+L:: time from the key of a switch to the presenting of the first frame of
+the grid: `activation_ms` of the record "Frame" of cause `key` against the
+time of the key; and to the first frame of the animation.
+F:: the frames of the animation: the share of intervals above 1.5 refresh
+periods and the p95 of the intervals, from the records "Animation frame" of
+kind `locate`, against those of the fade-ins of the same runs.
+
+== Acceptance criteria
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| The scene: a test in `pkg/ui` on the presenter of the tests of 026 — after
+  a switch to the grid, the selection frame and the shadow of the selected
+  tile in `gridItems` at the scale `locate_zoom` and alpha 0 at the start,
+  1 and 1 at `locate_duration`, both monotone, eased as the hover; at the
+  end the scene of the grid at rest, item for item; nothing else of the
+  scene scaled or faded.
+
+| K2
+| When: after the layout key and after `g` from the carousel; not at the
+  opening of an activation in the grid, nor after a switch to the carousel,
+  nor under `cpu`, with animations off or with `locate_duration: 0s`.
+
+| K3
+| D6: an arrow during the animation ends it, and the step starts from the
+  tile; a switch back ends it; a hover does not; no live pass while it runs.
+
+| K4
+| D3: with the carousel shown, the grid's layers drawn in the background and
+  kept; a switch presents the grid from its layers, no frame of the CPU
+  drawn; back to the carousel the same. L off the screen: the first frame of
+  the grid within one refresh period of the key once the layers are there.
+  The frames at rest of both layouts as before: `TestGLXPresenterMatchesCPU`,
+  `TestLayers`, `TestScenes` with `testdata/scenes.json` unchanged.
+
+| K5
+| The keys: defaults, `config init`, `config show`, flags, variables, the
+  warning for a zoom not above 1; `TestRoundTrip`, `TestTagNames`; the
+  documentation and `config.yaml.example`.
+
+| K6
+| L on E1, in the author's trial (K9): the first frame of the grid within
+  10 ms of the key at p95 once the layers are there — before, 76–97 ms
+  (research).
+
+| K7
+| F on E1, in the author's trial: the frames of the animation miss no more
+  intervals than the fade-ins of the same activations, the p95 within
+  0.5 ms of theirs.
+
+| K8
+| `go build ./...`, `gofmt -l` empty, `go vet ./...`, `make check-specs` and
+  `go test ./...` on every commit, in a worktree of its own; `go test -race`
+  of `pkg/ui`, `pkg/carousel`, `pkg/snapshot` and `pkg/x11`; the rule of
+  021.
+
+| K9
+| The author's trial on E1, `glx`, the service stopped: after `q` the
+  selected tile is seen at once; `locate_duration` and `locate_zoom` tried
+  at their defaults and, if the author wants, others.
+|===
+
+== Open decisions
+
+. D1–D6, for the author to confirm.
+. The time from the key to the grid's layers without D3, measured before
+  the change (T1): the estimate of D3 rests on the drawing of the tiles
+  layer, some 60 ms after the frame of the CPU.

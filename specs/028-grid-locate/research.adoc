@@ -1,0 +1,81 @@
+= 028 — research
+:toc: left
+:toc-title: Contents
+:revdate: 2026-10-04
+
+What a switch to the grid does now, what the animation can be built of,
+and the figures the specification quotes, with where they come from.
+`develop` at `c3c598e` (1.4.1).
+
+== A switch now
+
+`switchLayout` (`pkg/ui/selector.go`, specification 026) sets the layout and
+its hint, then `dropLayers` forgets every layer — of the carousel and of the
+grid — and ends a step; `render` draws the whole frame of the grid on the CPU
+and presents it; `prefetch` asks the background for the layers of the grid,
+`gridLayers`: the tiles, the shadow of the selected tile, the selection
+frame, the shadow and the frame of the hover (`pkg/ui/animation.go`).
+
+While they are not there, `gridReady` is false and `stepTo` makes a step at
+once: nothing of the grid moves before its layers are drawn and uploaded.
+
+The trial of 026 on E1 (2026-10-04, 16:53, 33 windows, the build of
+`5834543`, `~/.cache/qws-trial-026/log.json` on ws1), the record "Frame"
+of cause `key` right after each "Switching layout":
+
+[cols="2,1,2,2,2"]
+|===
+| To | Switches | `draw_ms` | `present_ms` | `total_ms`
+
+| the grid | 6 | 61.8–73.9 | 6.8–22.4 | 76.2–96.5
+| the carousel | 5 | 51.7–61.5 | 6.4–20.5 | 68.0–79.2
+|===
+
+The time from the switch to the grid's layers is not logged. An estimate:
+the tiles layer is drawn as the tiles of a frame of the grid are, in some
+60 ms on E1 (019: some 80 ms for a frame of 36 windows, the tiles in
+parallel), after the frame of the CPU, which `prefetch` follows; the small
+layers and the upload some milliseconds more — some 140 ms after the key in
+all. To be measured before the change (T1).
+
+== What the animation can be built of
+
+`gridItems` places the shadow of the selected tile and the selection frame
+at the selected tile — or where a step has taken them — opaque, and each
+hover frame through `hoverLook(v)`, a `carousel.Fade` of an alpha and a
+scale, the rectangle scaled by `zoomRect` about the tile's centre: the
+presenter draws a layer at any rectangle and alpha. A selection frame and a
+shadow converging onto the tile are those two items scaled and faded so, no
+new layer.
+
+The animations move along ease-out cubic (`easeOut`, `pkg/ui/motion.go`),
+the hover's levels too (`pkg/ui/effects.go`). The frames of an animation are
+logged as "Animation frame" with their kind — `step`, `grid`, `hover`,
+`fade-in`, `fade-out` — their progress and the interval since the previous
+frame (007), which F reads.
+
+The author's animations on ws1 (`qws config show`, 2026-10-04): `enabled`,
+`duration` 150 ms, `step`, `show`, `hide` and `hover` with `fade` and `zoom`,
+`hover_duration` 0 s — that of `duration` —, `overlay_zoom` 0.92,
+`hover_zoom` 1.05.
+
+== The layers kept
+
+The tiles layer, drawn with no tile selected or hovered (`GridTiles`), is
+cropped to its tiles, at most the window's size: on E1 the overlay is
+2520×1400 (2560×1440 less the padding of 20 px), 14.1 MB at 4 bytes a
+pixel; the other layers of the grid are of a tile's size. The carousel's layers are its card
+layers at the offsets −5 to 5 the motions pass and its base (007).
+
+What drops the layers now drops them all: a change of the window list, of
+the thumbnails, of the workspace filter, of the geometry (`dropLayers`). The
+layers of the two layouts depend on the same window list and thumbnails;
+the grid's tiles layer on the selection not at all — the selection frame
+and the shadow are layers of their own.
+
+== The live thumbnails
+
+The snapshotter makes no live pass while frames come less than 10 ms apart,
+and makes one 30 ms after they stop (020, K5): an animation of 400 ms at
+144 Hz takes none; the live pictures of the tiles follow from 30 ms after
+its end.
