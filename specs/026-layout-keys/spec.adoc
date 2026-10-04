@@ -3,7 +3,7 @@
 :toc-title: Contents
 :sectnums:
 :revdate: 2026-10-04
-:status: draft
+:status: implemented
 :issue: 78
 
 == What and why
@@ -278,6 +278,67 @@ change.
   a terminal changing on the visible workspace follows on its card and its
   tile after a toggle.
 |===
+
+== Results
+
+2026-10-04, ws1 — E1, the author's desktop. Off the screen: the tests of
+the two commits of the change, `11d5f66` and `5834543`, each in a worktree
+of its own, a compositor running. On the desktop: the author's trial (K10).
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | Met. `TestLayoutKeys`: `q` in the carousel the grid and `Q — carousel`,
+  the layers dropped, Shift+`q` back with `Q — grid`, Ctrl+`q` nothing; `c`
+  and `g` as before, the hint following them; at the end of the activation
+  `appearance.layout` and its hint, for the carousel and for the grid; no
+  toggle and no hint without the key, no hint without the header.
+| K2 | Met. `TestLayoutToggleKey`: `q`, ` Q `, `F2`, `space` and their hints;
+  an empty name no key, nothing logged; an unknown one and `q` taken by the
+  cancel key no key, no hint and one warning naming it (D5).
+| K3 | Met. `TestLayoutToggle`, `TestLayoutToggleFlag`, `TestRoundTrip` with an
+  empty value, `TestTagNames`, `TestJoinedKeys`; `qws config show` of the
+  build prints `layout_toggle: q`. The key in `README.md`,
+  `doc/configuration.asciidoc` and `config.yaml.example`.
+| K4 | Met. `TestLayoutHint`: the hint of the version's text is the version's
+  picture moved to end at the margin, pixel for pixel, in both layouts at
+  2520×1400; the band and the grid unchanged; drawn at 348 px of width, not
+  at 347; none in the narrow scenes, none without the header.
+| K5 | Met. `TestScenes`: `carousel-e1-header`, `carousel-header-light`,
+  `carousel-header-no-hostname` and the three of the grid changed on purpose,
+  the hint `Q — grid` or `Q — carousel` drawn; `-e1-header-no-hint` of both
+  layouts with the digests the `-e1-header` scenes had; the two
+  `-header-narrow` scenes, 280 px wide, with no hint; every other digest
+  unchanged.
+| K6 | Met. `TestGLXPresenterMatchesCPU`, `TestLayers` and
+  `TestParallelDrawing`, run, not skipped.
+| K7 | Met. `TestColumnStep` for 1 to 40 tiles, columns 0 and 1 to 6;
+  `TestLayoutKeys` through Down and Up in a grid of 12, nothing in the
+  carousel; `TestRowSlide`.
+| K8 | Met. `TestLayoutKeys` with the snapshotter and presenter of
+  `TestLiveFrames`: the live items of the grid after `q`, of the carousel
+  after `q` again; the tests of 020 pass.
+| K9 | Met. `go build`, `gofmt -l`, `go vet`, `make check-specs` and
+  `go test ./...` on both commits, each in a worktree of its own;
+  `go test -race` of `pkg/ui`, `pkg/snapshot`, `pkg/x11`, `pkg/carousel`.
+  The rule of 021 holds.
+| K10 | Met. The author's trial, 2026-10-04 at 16:53, the build of `5834543`
+  on Alt+F11, the service stopped: one activation, `q` 11 times — 6 to the
+  grid, 5 back to the carousel —, the arrows in the grid, the switcher
+  closed from the grid onto a window and the layout of
+  `appearance.layout` restored; 78 frames, 32 of cause `key`, 27 of them in
+  the grid; a window changing on the visible workspace, of depth 32, passed
+  41 times, its frames of cause `live` 11 in the carousel and 30 in the
+  grid, across the toggles; no warning or error in the log
+  (`~/.cache/qws-trial-026/log.json` on ws1). The author: it works well.
+|===
+
+Made in the implementation, beside the plan: a layout key that is another
+key of the switcher gives no hint either, and a warning (D5) — the draft of
+the change drew the hint of a key that did nothing.
+
+Not checked: Mesa and ws3; ws7.
 
 == Open decisions
 

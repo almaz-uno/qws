@@ -9,5 +9,5 @@
 . [x] T4. pkg/ui: the toggle, the hint, Up and Down, the wrap given to stepTo; K1, K2, K7, K8.
 . [x] T5. K9 on every commit in a worktree of its own.
 . [x] T6. Frames of the carousel and the grid at 2560×1440 with the hint, for the author, outside the repository.
-. [ ] T7. The author's trial on E1, K10.
-. [ ] T8. The results.
+. [x] T7. The author's trial on E1, K10.
+. [x] T8. The results.
