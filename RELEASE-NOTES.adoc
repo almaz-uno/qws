@@ -2,7 +2,7 @@
 :toc: left
 :toc-title: Contents
 :toclevels: 2
-:revdate: 2026-10-02
+:revdate: 2026-10-04
 
 Every minor or major release is a chapter, its patches are subsections, the
 newest come first (link:specs/004-releases/spec.adoc[specification 004]). The
@@ -50,6 +50,28 @@ incompatible change, released in a minor version by the author's decision:
 
 The documents under `doc/` are in English
 (link:specs/017-english-documents/spec.adoc[specification 017]).
+
+=== 1.3.4 — 2026-10-04
+
+*Thumbnails current under load*
+(link:specs/025-snapshot-wait-x/spec.adoc[specification 025]):
+
+* A thumbnail taken on the GPU could show a window a step old — its last
+  rows as they were before the window's latest drawing — when the desktop
+  was busy: the snapshot read the window before the X server had finished
+  drawing it. It now waits for that drawing, some hundredths of a
+  millisecond at rest.
+
+*Resource identifiers reused*
+(link:specs/024-xid-reuse/spec.adoc[specification 024]):
+
+* Each connection to the X server has some two million identifiers for the
+  pixmaps, pictures and other resources it creates, and qws never reused
+  them: a window of depth 24 changing all the time on a visible workspace
+  would have used up the snapshots' connection in some three days, after
+  which its thumbnail and those of new windows stopped. They are now
+  reused through the XC-MISC extension, and none handed out ahead is
+  given again.
 
 === 1.3.3 — 2026-10-02
 

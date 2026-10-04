@@ -7,6 +7,7 @@ import (
 
 	"github.com/jezek/xgb"
 	"github.com/jezek/xgb/xproto"
+	"github.com/rs/zerolog/log"
 
 	// The packages of the extensions, for the constructors of their events
 	// and errors their init functions put in xgb.NewExtEventFuncs and
@@ -16,6 +17,7 @@ import (
 	_ "github.com/jezek/xgb/randr"
 	_ "github.com/jezek/xgb/render"
 	_ "github.com/jezek/xgb/shm"
+	_ "github.com/jezek/xgb/xcmisc"
 	_ "github.com/jezek/xgb/xfixes"
 )
 
@@ -32,16 +34,17 @@ import (
 // the place of Init.
 
 // extensionNames are the extensions set up, by the names xgb gives them
-var extensionNames = []string{"Composite", "DAMAGE", "MIT-SHM", "RANDR", "RENDER", "XFIXES"}
+var extensionNames = []string{"Composite", "DAMAGE", "MIT-SHM", "RANDR", "RENDER", "XC-MISC", "XFIXES"}
 
 // extensionOpcodes are the major opcodes of the extensions the X server has,
 // asked and set up at the first call; an error of that call is kept
 var extensionOpcodes = sync.OnceValues(setupExtensions)
 
 // NewConn connects to the X server of $DISPLAY, as xgb.NewConn does, with the
-// extensions of the X server among extensionNames ready to use. Every X
-// connection of the program qws is made by it, so that its first call sets
-// the extensions up for the process before any of them exists.
+// extensions of the X server among extensionNames ready to use and, with
+// XC-MISC, its XIDs reused (specs/024-xid-reuse). Every X connection of the
+// program qws is made by it, so that its first call sets the extensions up
+// for the process before any of them exists.
 func NewConn() (*xgb.Conn, error) {
 	opcodes, err := extensionOpcodes()
 	if err != nil {
@@ -56,6 +59,9 @@ func NewConn() (*xgb.Conn, error) {
 		conn.Extensions[name] = opcode
 	}
 	conn.ExtLock.Unlock()
+	if _, ok := opcodes["XC-MISC"]; ok {
+		conn.SetIDRangeFunc(newXIDRanges(xproto.Setup(conn)).next)
+	}
 	return conn, nil
 }
 
@@ -120,6 +126,10 @@ func setupExtensions() (map[string]byte, error) {
 			xgb.NewErrorFuncs[int(reply.FirstError)+n] = f
 		}
 		opcodes[name] = reply.MajorOpcode
+	}
+	if _, ok := opcodes["XC-MISC"]; !ok {
+		log.Warn().Msg("XC-MISC unavailable, XIDs not reused: a connection makes no resource " +
+			"once it has given every XID of its mask")
 	}
 	return opcodes, nil
 }
