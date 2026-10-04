@@ -28,7 +28,10 @@ mate-terminal of depth 32 changing, used 2.36 of them in the grid. In the
 runs at rest of 2026-10-03, an xterm of 604×394 passed from its frame,
 beside the Claude app changing all the time, raised `C shown` of the grid
 by 8.67 points, against 7.40 with a mate-terminal in its place: 1.27 points
-are the frame's (research, "At rest, 2026-10-03").
+are the frame's (research, "At rest, 2026-10-03"). These were measured at
+the `live_interval` of 33 ms of the time; since 2026-10-04 its default is
+50 ms (020, D6), for K9 of 020, which is read without the `glFinish` that
+the timings of `-v` add (020, K9).
 
 Where it goes (research, "What a pass from the frame sends"): a pass sends
 14 + 7k requests on the snapshotter's connection, k the number of halvings —
@@ -444,11 +447,13 @@ same for the mate-terminal — 1.27 points on 2026-10-03.
   measurement.
 
 | K6
-| On the desktop of E1: in S5x, K9 of 020 — C with `live: true` at most 3 %
-  of a CPU above `live: false` over the time shown, in the carousel and in
-  the grid; in its rest variant, X at most 0.6 points, half of the 1.27 of
-  2026-10-03, and R at rest with the xterm at least 20 passes a second, as
-  K13 of 020 — the bounds provisional, until the first measurement.
+| On the desktop of E1, at the default `live_interval` of 50 ms: in S5x,
+  K9 of 020 as 020 reads it — C with `live: true` at most 3 % of a CPU
+  above `live: false` over the time shown, each without the `glFinish` of
+  `-v` — in the carousel and in the grid; in its rest variant, X at most
+  0.6 points, half of the 1.27 of 2026-10-03, and R at rest with the xterm
+  at least 15 passes a second, as K13 of 020 at 50 ms — the bounds
+  provisional, until the first measurement.
 
 | K7
 | Unchanged: `TestLiveFromFrame`, `TestLiveAtRest` with a window in a frame,
