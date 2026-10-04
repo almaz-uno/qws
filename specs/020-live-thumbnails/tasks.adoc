@@ -1,0 +1,241 @@
+= 020 — tasks
+:toc: left
+:toc-title: Contents
+:revdate: 2026-10-04
+
+. [x] T1. The probes on E1, windows of their own off the screen: sharing a
+  window texture across contexts and displays, the cost of sampling, the
+  passes beside paced frames (research).
+. [x] T2. The specification, the decisions laid out for the author.
+. [x] T3. The author's answers to D1–D7; the specification and the plan
+  brought in line with them.
+. [x] T4. Before any code: session S5 in `measure.sh`, run on E1 with the
+  build of `develop` — the frames and the CPU with the window of S5
+  changing — the reference that the runs with `live: false` are to repeat.
+  `measure.sh` runs S5 (`CHANGING`, `LIVE`, `pool`); the runs of `develop`
+  could not be taken before the code, off the desktop, and are taken with
+  T10, in turn with the change.
+. [x] T5. `pkg/glx`: the presenter's context sharing the snapshotter's, the
+  failure to share told apart; K4, with `TestSharedLive`.
+. [x] T6. `pkg/snapshot`: the live textures, their generations and fences,
+  the live schedule, the `ClientMessage`; should #35 be merged, `Shown`
+  of `pkg/x11` leaving the own overlay out; K5. #35 came with the merge
+  of `develop` at `759c6d3` (1.3.2): `Switchers.Shown` leaves the own
+  overlay out, `TestLivePause`, `TestSwitchersOwnOverlay`.
+. [x] T7. `pkg/carousel`: the geometry of a thumbnail, the live items and
+  their program; K3, with K1 and K2 unchanged.
+. [x] T8. `pkg/ui`, `cmd/qws`: the live items of the layout shown, the
+  frame presented again at rest, `SetLive` around an activation, the
+  fallback; K6.
+. [x] T9. The keys, their flags and documentation; K10.
+. [x] T10. S5 on E1, `live` on and off in turn; K7–K9; the author's
+  judgement, K11. The commands below. The first runs, 2026-10-02
+  14:27–16:07, changed an xterm, which took no pass then (spec, D2), and
+  showed the causes the rework since removed (research, "S5 on the
+  desktop, the first runs"); the rest variant, 2026-10-03 at 11:24 and
+  16:02, and 2026-10-04 at 10:57 with the build of 023 and the default of
+  50 ms; the author's trials, 2026-10-02 and 2026-10-03 (spec, Results).
+. [x] T11. `go vet ./...`, `go test ./...`, `make check-specs`; K12; the
+  results.
+
+== S5 on the desktop of E1
+
+The author away, the overlay on DP-0 at 144 Hz — the pointer on DP-0 when
+it starts — and the window of S5 on the workspace shown on DP-4: a
+mate-terminal of its own (`CHANGING_TERM`, `--disable-factory`), of depth
+32 like the mate-terminals of ws1, so that it takes live passes; the
+xterm of the first runs, of depth 24, took none. A run stops the session
+when `meta` says the window is of another depth. The service is stopped
+meanwhile and started again at the end; a run stops if `i3lock` comes up.
+The reference is `develop` at v1.3.3, `9774075`, the base the branch is
+now merged with — the first runs had 1.3.2, `759c6d3`; the change is the
+branch at its head, with `live: false` and
+`live: true`; the three in turn, three runs each, for the carousel and for
+the grid: 18 runs of S2, some 1.6 hours (5.3–6.5 min a run in the first
+runs).
+
+[source,bash]
+----
+# The builds. The worktree of the reference of the first runs is at
+# 759c6d3, 1.3.2: removed, and made anew at v1.3.3
+git -C ~/.cache/qws-wt-live worktree remove ~/.cache/qws-wt-ref020
+git -C ~/.cache/qws-wt-live worktree add --detach ~/.cache/qws-wt-ref020 v1.3.3
+make -C ~/.cache/qws-wt-ref020 build
+make -C ~/.cache/qws-wt-live build
+~/.cache/qws-wt-ref020/qws version; ~/.cache/qws-wt-live/qws version
+
+# The runs
+M=~/.cache/qws-wt-live/specs/001-rendering-speed/measure.sh
+REF=~/.cache/qws-wt-ref020/qws
+NEW=~/.cache/qws-wt-live/qws
+R=~/.cache/qws-runs/$(date +%Y%m%d-%H%M)-020
+mkdir -p "$R"
+systemctl --user stop qws.service
+trap 'xdotool keyup alt 2>/dev/null; systemctl --user start qws.service' EXIT
+one() {
+	local name=$1 bin=$2
+	shift 2
+	if pgrep -x i3lock >/dev/null; then
+		echo "i3lock is up: stopping before $name" | tee -a "$R/progress"
+		exit 1
+	fi
+	echo "$(date +%T) start $name" >>"$R/progress"
+	env QWS="$bin" HOLD=2 CHANGING=DP-4 CHANGING_TERM=mate-terminal "$@" \
+		"$M" run glx "$R/$name" >"$R/$name.out" 2>&1
+	echo "$(date +%T) end $name rc=$?" >>"$R/progress"
+	if ! grep -q '^changing: DP-4, mate-terminal, window [0-9]*, depth 32$' "$R/$name/meta"; then
+		echo "the window of S5 is not of depth 32: stopping after $name" | tee -a "$R/progress"
+		exit 1
+	fi
+}
+for i in 1 2 3; do
+	for layout in carousel grid; do
+		one "s5-$layout-ref-$i" "$REF" LAYOUT=$layout
+		one "s5-$layout-off-$i" "$NEW" LAYOUT=$layout LIVE=false
+		one "s5-$layout-on-$i" "$NEW" LAYOUT=$layout LIVE=true
+	done
+done
+systemctl --user start qws.service
+trap - EXIT
+
+# The three runs of each taken together
+for layout in carousel grid; do
+	for v in ref off on; do
+		"$M" pool "$R"/s5-$layout-$v-{1,2,3} >"$R/pool-$layout-$v"
+	done
+done
+----
+
+What to read:
+
+* K7: `L live_ms in view` of `pool-*-on`, p95 at most 45 ms — 33 ms, a
+  period of 6.94 ms and 5 ms; the cards and tiles in view only, from when
+  they came into view if later than the change. `S live done_ms` is a pass
+  from its start to its publication; the records "Live" of `log.json`
+  give the window of each pass, the mate-terminal's among them.
+* K8: `A1 <kind> interval` p95 and `A1 <kind> missed` of `pool-*-on`
+  against `pool-*-off`, for `carousel`, `grid`, `fade-in`, `fade-out` and
+  `hover`: p95 at most 0.1 ms longer, the share of intervals above 1.5
+  periods at most 0.2 percentage points higher. `pool-*-ref` against
+  `pool-*-off` is the change without live thumbnails against `develop`.
+  K2–K6 of 007 in the `summary` of each run — K2 frames, K4 period, K5 at
+  rest and selection, K6 activation — alike for `off` and `on`.
+* K9: `C shown` of `pool-*-on` less that of `pool-*-off`, at most 3 % of a
+  CPU. `C profile` gives the part of the CPU in `glFinish`, which runs
+  only while timings are logged — `-v` here — and in which NVIDIA
+  busy-waits: its difference between `on` and `off`, over the milliseconds
+  shown of `C shown`, is the part of K9 that the logging adds.
+* Each `summary`: `frames by cause` counts the frames of cause `live`, and
+  `changing: DP-4, mate-terminal, window <id>, depth 32` and `live:` in
+  the header say how the run was made.
+
+The rest variant of S5, short, with the build of 023 — 020 with the
+passes from the frame made cheaper, `issue/qws#66-frame-pass-cost` in
+`~/.cache/qws-wt-023` — `live: true` against `live: false` of that same
+build, at the defaults, `live_interval` 50 ms since 2026-10-04: the
+carousel and the grid, two runs each, with each of two windows changing —
+a mate-terminal, of depth 32, passed from its own pixmap, and an xterm, of
+depth 24 drawn into its frame's pixmap, passed by RENDER from the frame
+(D2, A): 16 runs of some 3 min — 10 activations of 5 steps, each then 5
+steps back to the card of the terminal, held still 10 s, and 5 steps on,
+Escape at the end, no held key — some 45 min. A run stops the session when
+`meta` says the window is not of the depth asked:
+
+[source,bash]
+----
+W=~/.cache/qws-wt-023
+make -C "$W" build
+"$W/qws" version
+M=$W/specs/001-rendering-speed/measure.sh
+BIN=$W/qws
+R=~/.cache/qws-runs/$(date +%Y%m%d-%H%M)-020-rest3
+mkdir -p "$R"
+systemctl --user stop qws.service
+trap 'xdotool keyup alt 2>/dev/null; systemctl --user start qws.service' EXIT
+# rest <name> <terminal> <depth> <variables>...
+rest() {
+	local name=$1 term=$2 depth=$3
+	shift 3
+	if pgrep -x i3lock >/dev/null; then
+		echo "i3lock is up: stopping before $name" | tee -a "$R/progress"
+		exit 1
+	fi
+	echo "$(date +%T) start $name" >>"$R/progress"
+	env QWS="$BIN" ACTIVATIONS=10 STEPS=5 HOLD=0 REST=10 CHANGING=DP-4 CHANGING_TERM="$term" "$@" \
+		"$M" run glx "$R/$name" >"$R/$name.out" 2>&1
+	echo "$(date +%T) end $name rc=$?" >>"$R/progress"
+	if ! grep -q "^changing: DP-4, $term, window [0-9]*, depth $depth\$" "$R/$name/meta"; then
+		echo "the window of S5 is not a $term of depth $depth: stopping after $name" | tee -a "$R/progress"
+		exit 1
+	fi
+}
+for i in 1 2; do
+	for t in mate-terminal:32 xterm:24; do
+		term=${t%:*} depth=${t#*:}
+		for layout in carousel grid; do
+			rest "rest-$term-$layout-off-$i" "$term" "$depth" LAYOUT=$layout LIVE=false
+			rest "rest-$term-$layout-on-$i" "$term" "$depth" LAYOUT=$layout LIVE=true
+		done
+	done
+done
+systemctl --user start qws.service
+trap - EXIT
+for term in mate-terminal xterm; do
+	for layout in carousel grid; do
+		for v in off on; do
+			"$M" pool "$R"/rest-$term-$layout-$v-{1,2} >"$R/pool-$term-$layout-$v"
+		done
+	done
+done
+grep -H '^R at rest\|^L live_ms\|^C shown\|^C profile\|missed' "$R"/pool-*
+
+# K9: C of a pool without the glFinish of -v — 100 × (the CPU of C shown
+# less the glFinish of C profile) / the time shown — on less off
+c() {
+	awk '/^C shown/ { cpu = $3; wall = $8 } /^C profile/ { glf = $10 }
+		END { printf "%.2f", 100 * (cpu - glf) / wall }' "$1"
+}
+for term in mate-terminal xterm; do
+	for layout in carousel grid; do
+		on=$(c "$R/pool-$term-$layout-on") off=$(c "$R/pool-$term-$layout-off")
+		echo "K9 $term $layout: $on - $off = $(awk -v a="$on" -v b="$off" 'BEGIN { printf "%.2f", a - b }') points"
+	done
+done
+----
+
+What to read, at the default `live_interval` of 50 ms:
+
+* K7: `L live_ms in view` of `pool-*-on`, p95 at most 62 ms — 50 ms, a
+  period of 6.94 ms and 5 ms.
+* K8: `A1 <kind> missed` and the p95 of `A1 <kind> interval` of
+  `pool-*-on` against `pool-*-off`: at most 0.2 percentage points and
+  0.1 ms more.
+* K9: the lines `K9 …` the commands print, at most 3 points — one window
+  changing all the time, the terminal of S5, should the Claude app be
+  quiet; the records "Live" of `log.json` say which windows were passed.
+* K13 and K14: `R at rest` of `pool-*-on` at least 15 passes a second,
+  the fewest of an activation at least 10, for the mate-terminal and for
+  the xterm; of `pool-*-off`, none.
+
+K11, the author's judgement, is apart: the build of the branch on its own
+key, the service stopped — its snapshotter holds the GLX pixmaps of the
+windows, and the trial's could bind none of them (018) — with ilovlya and
+the windows of the author's desktop, a terminal scrolling, a video on
+DP-4, the carousel and the grid, at rest, stepped and faded, its log in
+`~/.cache/qws-trial-020`:
+
+[source,bash]
+----
+make -C ~/.cache/qws-wt-live build
+~/.cache/qws-wt-live/qws version
+mkdir -p ~/.cache/qws-trial-020
+systemctl --user stop qws.service
+env 'QWS_LOG.FORMAT=json' QWS_LOG_FORMAT=json ~/.cache/qws-wt-live/qws -v -m Alt -k F11 \
+	--appearance-thumbnail-live=true 2>~/.cache/qws-trial-020/log-$(date +%m%d-%H%M).json &
+echo $! >~/.cache/qws-trial-020/pid
+# The trial, on Alt+F11; then
+kill -INT "$(cat ~/.cache/qws-trial-020/pid)"
+systemctl --user start qws.service
+----
+
+And with `live` off, the same with `--appearance-thumbnail-live=false`.

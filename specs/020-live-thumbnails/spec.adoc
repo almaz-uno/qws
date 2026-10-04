@@ -1,0 +1,819 @@
+= 020 — live thumbnails
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-04
+:status: implemented
+:issue: 58
+
+== What and why
+
+The thumbnails of the switcher are snapshots (specification 008): a window
+is captured when DAMAGE reports a change, at most once a
+`behavior.snapshot_interval` (1 s), and the windows changed since their
+snapshot are captured again before the first frame of an activation. While
+the switcher is shown no snapshot is taken (007): a card or a tile keeps
+the picture it opened with, and a video, a terminal that scrolls, a build
+log stand still on it. The author asks (issue #58) for thumbnails that
+follow their windows while the switcher is shown.
+
+What constrains it (research, "What the code does today"):
+
+* only a viewable window has contents: on E1, 2 of 36 client windows at
+  the time of the research, one per monitor; the others are on hidden
+  workspaces and keep their snapshot;
+* the X server of E1 lets one GLX pixmap exist on a window's storage
+  (018): the snapshotter holds the window textures, and the presenter
+  cannot bind them a second time, in the same process or another;
+* on `glx` the frame at rest is the frame `cpu` draws, byte for byte
+  (007, `TestGLXPresenterMatchesCPU`, the digests of Σ) — a thumbnail that
+  moves can no longer be part of a frame the CPU draws once;
+* the GPU of E1 drops its clock to 210 MHz under a light load, where a
+  pass over a whole window costs about 1 ms, and work of another GL context
+  that comes in bursts delays the frames of the presenter (research, "The
+  cost of sampling", "Beside the frames").
+
+The change, on `glx`: while the switcher is shown, a viewable window that
+changes is averaged again on the GPU, at most once a
+`appearance.thumbnail.live_interval`, into a texture the presenter's GL
+context shares; every frame — in motion and at rest — draws the latest of
+these textures over the thumbnail of the window's card or tile. Nothing is
+read back and nothing is drawn by the CPU for a change. `cpu`, and `glx`
+where the presenter cannot share the textures, keep the snapshots of today.
+
+The specification is a delta to `develop` at `6fd664a` (1.3.1), written
+before 011 (pull request #35) was merged; the branch was then merged with
+`develop` at `759c6d3` (1.3.2), which has it, and at `9774075` (1.3.3),
+which has 021 — the extensions of xgb set up once a process, every
+connection made by `x11.NewConn` — and 022 — a window without a pixmap of
+its own taken from its frame's pixmap by RENDER; the change is now a delta
+to 1.3.3. Unchanged: the snapshots while the switcher is hidden (008, 018,
+022) and before the first frame of an activation; their pause for the
+switchers of other instances (011); every frame of `cpu`, and the digests
+of Σ; the frames of `glx` while no shown window has changed since its
+snapshot; the layers and the animations of 007 and 010; the existing
+configuration keys and their meaning, `behavior.snapshot_interval` among
+them. D5 says how it reads with and without 011.
+
+== Decisions
+
+Author, 2026-10-02: the options recommended below, D1–D7, as written, and
+the bounds of K7 and K9 as proposed, provisional until the first measurement
+on the screen. Each decision lists its options, the facts they rest on
+(research) and the option recommended, which is the one taken.
+
+=== D1. How live
+
+[cols="1,3,3,3"]
+|===
+| | Option | For | Against
+
+| a
+| *GPU-live.* The presenter samples each window's texture in every frame,
+  scaled into its card by a shader.
+| A frame of lag behind the window, once the presenter knows of the change.
+| A frame pays for every window shown, changed or not: by area average
+  0.85 ms for 12 windows and 2.7 ms for 36, at 1.3–2.6 GHz; by bilinear
+  filtering a tap reads 4 of the some 100 texels under a pixel of a tile of
+  E1, so text aliases, and 36 windows took 2.6–2.9 ms; mipmapped, 0.26 ms a
+  frame but 3.1 ms of GPU a change for the mipmaps, at 210 MHz (research,
+  "The cost of sampling"). Beside paced frames, 12–100 % of them took over
+  2 ms against 0.15–10 % for the clients alone ("Beside the frames"). The
+  presenter would draw textures the snapshotter holds (018) — possible only
+  shared with it. Another filter than the cards around it.
+
+| b
+| *Semi-live by read back.* The snapshots of today, taken while shown at a
+  bounded rate; the CPU draws again what shows the thumbnail.
+| Exact by construction: every frame is a frame of `cpu`.
+| Each change costs a card layer, or the tiles layer of the grid (52 ms,
+  019), and a frame at rest (32–45 ms, 019) on the CPU, and their uploads,
+  1.4–14 MB, which 013 found to cost frames; under `cpu` a whole frame,
+  70–100 ms with presenting (007, 019). At 5 changes a second, a fifth to
+  a half of a CPU.
+
+| c
+| *GPU semi-live into shared textures.* On change, at most once a
+  `live_interval`, the window is averaged on the GPU into a thumbnail
+  texture of at most 512×512 — the snapshot of 008 without its read back —
+  in a context that shares it with the presenter's; every frame draws the
+  latest of them over the thumbnail of the card or tile, with the kernel
+  `cpu` draws a thumbnail with.
+| A change costs one pass: about 1 ms of GPU at 210 MHz, and 0.1–0.2 ms
+  of the snapshotter's CPU with binding again. A frame costs 4–8 µs more a
+  live thumbnail. The picture is the snapshot's, drawn with the kernel of
+  `cpu`: a live card looks as a card of a fresh snapshot, within 1 per
+  channel.
+| Lags behind the window by up to a `live_interval` and a frame. Passes
+  that run together hold up the frames meanwhile, so they are spread
+  (below). Needs a GL context shared across two Xlib displays, which works
+  on NVIDIA (research, "Sharing") and is not known on Mesa.
+|===
+
+*Recommended: c*, taken. Option a pays per frame
+what c pays per change, and its one advantage, a frame of lag, c reaches
+with a `live_interval` of 0; b pays with the CPU and with uploads.
+
+Where the passes of c run, and when, was measured beside paced frames
+(research, "Beside the frames"): in the snapshotter's context all at once
+(`thumb` there); the same, one window at a time, spread over the interval
+(`spread`); and in the presenter's own context, in the pauses between its
+frames, as the uploads of 007 (`inline`). *Recommended: in the
+snapshotter's context, one window at a time, spread*, taken. With 4–36
+windows changing 30 times a second it left 0.07–2.0 % of the frames over
+2 ms, `inline` 0.8–3.5 %, `thumb` 4.7–12.3 %, the clients' drawing alone
+1.0–10.1 %; at 144 changes a second, 0.2 %. And the window textures stay
+inside the snapshotter: the presenter only draws thumbnails and tests their
+fences, and its loop gets no work of passes to schedule.
+
+=== D2. Which windows are live
+
+Options: every card and tile shown; only the selected and the hovered; a
+number at most.
+
+*Recommended: every card and tile the switcher draws whose window is
+viewable*, taken. A window not viewable — on a hidden workspace, a hidden
+tab — has no contents (008) and keeps its snapshot; one never viewable
+keeps its placeholder (016). On E1 that leaves a few windows live, one or
+two a monitor; the bound on the work is the rate of each window and the
+spreading of the passes (D1), not a number of windows: a frame costs 4–8 µs
+more a live thumbnail (research), a window that does not change costs
+nothing, and 36 windows changing 30 times a second kept the frames as well
+as 4 did.
+
+The cards and tiles the switcher draws are those in view: every tile of
+the grid, and the cards of the carousel with a live rectangle at the
+selection — eleven at most, fewer where the frame is narrower than the
+strip. A window whose card is off the strip takes no pass; when a step
+brings its card into view, it takes one as soon as the spreading lets it.
+Found in S5, 2026-10-02: every window of the list took passes, those off
+the strip as well, and their pictures were drawn seconds after their
+changes, when their cards came back.
+
+A window drawn into the pixmap of its frame — of depth 24 in a frame of
+depth 24, not redirected apart from the frame — has no pixmap of its own:
+Composite names none, and the snapshotter has no texture of it to average.
+022, in 1.3.3, takes its snapshots from the frame's pixmap by RENDER and
+never binds that pixmap on the GPU: it is the compositor's, which picom
+binds on ws1, and NVIDIA lets one GLX pixmap exist on a storage (018). On
+ws1, 2026-10-02: Dion, Telegram, KeePassXC and Yandex Music, 4 of 35
+windows, and the xterm the first runs of S5 changed; on 2026-10-03
+ilovlya, of depth 24 and visual 0x2b in a frame of 0x21, which changed all
+the time in the author's trial at rest. How such windows are live:
+
+[cols="1,3,3,3"]
+|===
+| | Option | For | Against
+
+| A
+| *By RENDER into a pixmap of qws's own.* A pass scales the window's
+  rectangle out of the frame's pixmap by RENDER, as its snapshot is
+  scaled, straight into a pixmap of the snapshotter's of the thumbnail's
+  size, bound on the GPU, and copies it into the live texture.
+| Reads only, as 022: nothing changes in how the X server and the
+  compositor draw the window. The pixmap bound is qws's own storage. The
+  picture is the snapshot's, the filter of RENDER. No read back.
+| A scale in the X server a pass, some 1 ms of its CPU for a window of
+  E1, and more of the snapshotter's than a pass from a pixmap of its own.
+
+| B
+| *Redirected by qws.* The snapshotter redirects each such window,
+  `CompositeRedirectWindow` automatic: a pixmap and a texture of its own.
+| The passes of every other window, unchanged.
+| Changes how the X server draws the author's windows while qws runs: a
+  pixmap more a window, 14 MB for one of E1, a copy into the frame at each
+  change, the window unmapped and mapped again in the X server (022, D1).
+
+| C
+| *Snapshots.* As 1.3.3.
+| Nothing to do.
+| The window that changes stands still; K11 fails on the author's desktop.
+|===
+
+*Author, 2026-10-03: A.* A window taken from its frame takes passes as
+any other — in view, one window a pass, at most once a `live_interval` —
+by RENDER into a pixmap of its own (Behavior, "From the frame").
+
+=== D3. What replaces the frame at rest byte for byte
+
+The frame of `glx` at rest can no longer be the frame `cpu` draws once,
+since its thumbnails move. *Recommended*, taken:
+
+. `cpu` keeps every byte: the digests of Σ in `testdata/scenes.json`
+  unchanged.
+. Outside the _live rectangles_ a frame of `glx` is what 007 presents: at
+  rest the `cpu` frame byte for byte, in motion its scene of layers. The
+  live rectangle of a window is the part of its thumbnail that is the
+  thumbnail alone in the `cpu` frame: the pixels whose centres fall inside
+  the thumbnail, less those its border touches — 1 px in from the edge on
+  a tile; on a card the border is 2 px wide at the full size of its
+  thumbnail and wider as the card is smaller, 2 divided by the scale the
+  thumbnail is drawn at, since `gg` strokes in pixels of the canvas — and
+  less what is drawn over it: the rectangle of the icon of a tile, and the
+  glyphs of its labels where a large font takes them over the thumbnail;
+  what the cards drawn after a card draw over it, its neighbour's title
+  where long (research, "Where a thumbnail lies"). A window has
+  a live rectangle only once it has changed since the snapshot its card was
+  drawn from. So with live thumbnails off, or until a shown window
+  changes, every frame at rest is the `cpu` frame byte for byte, as now.
+. Inside a live rectangle the frame is the live thumbnail drawn with the
+  kernel of `x/image/draw` `BiLinear` that `cpu` draws thumbnails with — a
+  tent widened to the scale when shrinking. At rest it is within 1 per
+  channel of the `cpu` frame drawn with that thumbnail, and equal to it in
+  at least 99.5 % of the pixels: a shader computing the kernel in single
+  precision gave 99.85–99.97 % at the places and scales of E1, never more
+  than 1 apart, in 4–8 µs a thumbnail (research, "The kernel on the GPU").
+  The thumbnail itself is the area average of 008, within 1 of the one
+  computed on the CPU (K4 of 008).
+
+Checked on a scene of fixed content: pictures written in a context like
+the snapshotter's, drawn over frames of windows of the test off the
+screen; the passes that make the pictures from pixmaps of known contents
+are checked on their own (K4). Rejected: a tolerance over the whole frame, which would let any
+pixel drift; a frame at rest drawn on the CPU at each change, which is
+option b.
+
+=== D4. The `cpu` renderer
+
+Options: semi-live (option b of D1), or snapshots as today.
+
+*Recommended: snapshots as today*, taken. `cpu` draws
+a whole frame for any change, 70–100 ms on E1 with presenting; it is the
+renderer of machines without GLX, where the snapshots themselves are taken
+on the CPU at some 100 ms a window (008). `live` and `live_interval` are
+read and have no effect under `cpu`.
+
+=== D5. The pause of snapshots, `snapshot_interval`
+
+Since 007 the snapshotter takes no snapshot on change while its switcher
+is shown: `cmd/qws/root.go` calls `Pause(true)` before `Show` and
+`Pause(false)` at the end of the fade-out. Specification 011 (pull request
+#35, released as the patch 1.3.2) pauses the snapshots for the switcher of
+any instance as well: its snapshotter is paused while `paused` is set or
+`x11.Switchers.Shown()` — any overlay listed in the root property
+`_QWS_SWITCHERS` is mapped — and each instance lists its own overlay there
+when it creates it (`ListSwitcher` in `pkg/ui/selector.go`), so that its
+own switcher makes `Shown()` true as well (read on the branch at
+`aff81ee`).
+
+*Recommended*, taken:
+
+* while its own overlay is mapped and live thumbnails are on, the
+  snapshotter takes live passes of the windows shown, and no snapshot with
+  a read back; with them off, or under `cpu`, it pauses as now;
+* the pause for the switcher of another instance stays as 011 makes it:
+  neither a live pass nor a snapshot while another overlay is mapped — its
+  reason, the frames of the other instance, holds for live passes too; two
+  switchers are not shown at once anyway, since each grabs the keyboard;
+* `behavior.snapshot_interval` keeps its meaning — at most once a period
+  while the switcher is hidden; `live_interval` is the period while it is
+  shown. A window changed while shown is captured with its read back by the
+  schedule of 008 once the switcher is hidden, and at the next activation
+  if not before.
+
+How it reads against each base:
+
+[cols="1,4"]
+|===
+| Base | The change
+
+| `develop`, without #35
+| `root.go` calls `Pause` around an activation as now; with `live: true`
+  on `glx` the selector calls `SetLive(overlay)` of the snapshotter once
+  its overlay is shown in full — at the end of the fade-in, or after the
+  first frame when there is none — and `SetLive(0)` as the fade-out
+  starts, or when it unmaps the overlay without one, and the snapshotter
+  takes live passes in between, paused or not. With `live: false`, under
+  `cpu`, or where live thumbnails are off (D7), `Pause` alone, as now.
+
+| after #35 is merged — `759c6d3`, 1.3.2, and `9774075`, 1.3.3, the
+  bases the branch is merged with
+| The same; and the live passes are paused by `Switchers.Shown` with the
+  overlay `SetLive` gives left out — it gets a window to leave out — so
+  that they stop for the other instances' overlays only; the snapshots on
+  change keep the pause of #35, `paused` or `Shown`. With `live: false`,
+  #35 as it is.
+|===
+
+Made in the implementation, 2026-10-02: `root.go` keeps calling `Pause`
+with live thumbnails on, rather than not at all, as the table first read.
+Live passes run whatever `paused` says, so the pause now stops only the
+snapshots on change, from before the window list of an activation is taken
+to the end of its fade-out, as before: the snapshots its cards are drawn
+from stay the snapshotter's newest during the activation, and a live
+picture is drawn exactly when it is newer than the newest snapshot of its
+window. Without the pause, a snapshot taken between the list and the
+mapping of the overlay would be newer than a card's.
+
+The overlay is made anew when the monitor changes; `SetLive` is called at
+each activation with the overlay of that activation.
+
+Changed after S5, 2026-10-02: `SetLive(overlay)` came when the overlay was
+mapped, before the first frame, and `SetLive(0)` at its unmapping. The
+first pass of an activation then ran right after its first frame, which
+uploads a whole frame and the layers, and held up the frames after it:
+the second frame of the carousel's fade-in presented in 10.0 ms on
+average against 5.4 with `live: false`, the fade-ins of the carousel and
+of the grid missing 10.4 and 15.2 % of their intervals against 6.3 and
+9.5. The fades now take no pass; their frames draw the pictures published
+before them. A switch released during the fade-in takes none at all.
+
+=== D6. Configuration
+
+Two keys under `appearance.thumbnail`, beside `width`, `height` and
+`scaling_algorithm` — the thumbnail is a part of the picture, as
+`appearance.header` is (014):
+
+[cols="2,1,5"]
+|===
+| Key | Default | Meaning
+
+| `appearance.thumbnail.live`
+| `true`
+| Thumbnails follow their windows while the switcher is shown, on `glx`.
+  `false`: snapshots, as in 1.3.3.
+
+| `appearance.thumbnail.live_interval`
+| `50ms`
+| A shown window that changed is averaged again at most this often; `0`:
+  at most once a refresh of the monitor the overlay is on.
+|===
+
+Environment variables and flags as in 002: `QWS_APPEARANCE_THUMBNAIL_LIVE`,
+`QWS_APPEARANCE_THUMBNAIL_LIVE_INTERVAL`, `--appearance-thumbnail-live`,
+`--appearance-thumbnail-live-interval`. A negative interval is reported and
+the default used, as 010 and 014 do with their durations.
+
+*Recommended: `live: true` and 33 ms*, taken. 33 ms,
+some 30 changes a second, is a video's rate and lags behind a window by at
+most 33 ms and a frame. At 0 — once a refresh, 144 a second on E1 — the
+frames hold as well (research, R = 144), but the snapshotter's CPU follows
+the rate: 0.1–0.2 ms a pass, so four windows changing all the time take
+some 2.6 % of a CPU at 30 a second and 6.6 % at 144.
+
+*Author, 2026-10-04: 50 ms, for K9.* In the rest variant of S5 one window
+changing all the time, passed every 33 ms, cost qws 4.70 points of a CPU
+above `live: false`: a pass costs, with the frame of cause `live` it
+brings, some 1.7 ms, of which 0.35 ms is the `glFinish` the timings of
+`-v` add (research, "The second runs"), and 023 lowers the passes from the
+frame to the cost of the others, not below. At 50 ms, 20 pictures a second
+at most a window, such a window costs some 2.3 % of a CPU without that
+`glFinish`, within K9; a window lags behind by at most 50 ms and a frame
+(K7).
+
+Rejected: one key whose 0 means off — 0 means "at once" for
+`animation.duration`; reusing `snapshot_interval` while shown, which would
+reinterpret an existing key.
+
+=== D7. Mesa and Intel, ws3
+
+Whether Mesa shares textures between contexts of two Xlib displays, and
+whether its texture of a pixmap reflects the pixmap's changes, is not known:
+ws3 was not tried, and `glx` itself is untested there (008).
+
+*Recommended*, taken: where the presenter's context
+cannot be created sharing the snapshotter's, or the snapshotter runs
+without the GPU, live thumbnails are off for the session, reported once at
+info level, and the thumbnails are the snapshots of today. Creating both
+contexts on one Xlib display, which Mesa may need, is an open decision.
+
+== Behavior
+
+All of it on `glx` with `appearance.thumbnail.live: true`; otherwise as in
+1.3.3.
+
+. *Sharing.* The presenter's GL context is created with the snapshotter's
+  as its share context, on the presenter's own Xlib display, as now. If
+  that fails, the presenter is created as now and live thumbnails are off,
+  "Live thumbnails off: …" at info level, once.
+. *Live textures.* The snapshotter keeps, for each window it has passed
+  live, a thumbnail texture of the size of its snapshot, two in turn, so
+  that it writes one while the presenter draws the other. A snapshot is
+  averaged and read back as now, in the one framebuffer of 008: a window
+  never passed live — on a hidden workspace — gets no live textures.
+. *While shown* — while the overlay is shown in full, from the end of the
+  fade-in, or the first frame without one, to the start of the fade-out —
+  the snapshotter takes no snapshot on change, and no live pass either
+  while the overlay of another instance is mapped (D5, 011); its own
+  overlay, listed among the switchers as well, does not pause them. From
+  before the first frame to the end of the fade-out no snapshot is taken
+  on change either (D5). A viewable window of a card or tile in view (D2)
+  that changes is bound again and averaged into its live texture without
+  a read back — no settle of 100 ms — at most
+  once a `live_interval`, the window that has waited longest first, one
+  window a pass: a pass no sooner than the `live_interval` divided by the
+  number of windows taking passes — waiting, or passed within the
+  interval — after the one before it. While the switcher presents frames
+  one after another — a step, a hover moving; the fades take none — no
+  pass is made: one due waits for the frames to stop, 30 ms after the
+  last — past the pause between the steps of two keys — and a frame in
+  motion draws the pictures published before it. Frames come one after
+  another when the last two ended less than 10 ms apart.
+  Changed after the rest variant of S5, 2026-10-03: passes made in the
+  pauses between such frames, 4 ms before the next at the latest, held
+  them off the screen but not on the desktop of E1, where the steps of the
+  grid missed 5.63 and 8.14 % of their frames against 0.68 and 0.91 %,
+  the X server's work for a pass delaying the overlay's frames (research,
+  "S5 at rest"). A fence and a flush follow each pass; once the fence has
+  signalled, tested by the snapshotter, the texture is published as the
+  window's picture.
+. *From the frame.* A window taken from its frame's pixmap (022) is
+  passed by RENDER: its rectangle in the frame's pixmap — where 022 finds
+  it, asked of the X server at each pass — scaled as its snapshot is, by
+  bilinear halvings and a last bilinear pass, straight into a pixmap of
+  qws's own, a8r8g8b8 of the thumbnail's size, made at the window's first
+  pass and anew at another size, freed with the window. That pixmap, and
+  never the frame's, is bound on the GPU; once the X server has answered
+  and `glXWaitX` returned, it is bound again and copied into the live
+  texture not published, under the fences of every pass. Nothing is read
+  back. The frame's pixmap is named anew when the frame is configured,
+  as 022 does: the window is then stale and keeps its picture until the
+  next activation, as a window whose size changed. A pass that fails
+  leaves the window so too; should a pixmap of qws's own not bind on the
+  GPU, no window is passed from its frame for the session, "Live
+  thumbnails of the windows taken from their frame off: …" at info
+  level, once. Without RENDER, no such pass: the snapshots of 022.
+. *Not live:* a window not viewable keeps its snapshot; a window whose size
+  changes while shown keeps its last live picture until the next
+  activation; a window the GPU will not bind (018) keeps its snapshot; a
+  window whose card is not in view takes no pass.
+. *Drawing.* A window whose live texture is newer than the snapshot its
+  card or tile was drawn from has a live rectangle (D3). Every frame the
+  presenter draws — the frame at rest, a scene of layers, a frame of a
+  fade — draws, after it, each live picture published — its fence
+  signalled — into its live rectangle with the kernel of `cpu` (D3),
+  through the fade of the frame. A pass not yet published is not drawn;
+  the presenter never waits for it. In a scene of the carousel the live
+  rectangle follows its card, at the card's place and scale in the frame,
+  drawn after the card and before the cards after it; in the grid it is
+  drawn over the tiles and under the selection and the hover frames.
+. *At rest.* A pass makes the selector present a frame — the frame shown,
+  with the live textures over it — no sooner than a refresh period after
+  the frame before it.
+. *Hidden.* At the end of the fade-out the snapshotter resumes the
+  snapshots of 008; a window changed since its last read back is captured
+  by their schedule.
+
+=== Existing configurations
+
+No key, variable or flag is renamed or removed; `snapshot_interval` keeps
+its meaning. A configuration without the two keys gets live thumbnails on
+`glx` — a change the user sees, with two new keys: a minor version
+(constitution, "Releases and versions"). `live: false` restores the
+thumbnails of 1.3.3. `README.md`, `doc/configuration.asciidoc` and
+`config.yaml.example` describe the keys in the same change.
+
+== Metrics
+
+L — lag:: For a live pass, the time from the snapshotter's reading of the
+DAMAGE event of the change it covers to the end of the presentation, P, of
+the first frame that draws it; the compositor shows the frame at its next
+vertical blank, which L does not count. Only a window whose card or tile
+is in view (D2) counts, and from when its card came into view — with the
+layers of the activation it is drawn from — when that is later than the
+change: a card that comes back into view with an older picture counts
+from its coming back. The frame records of 001 and 007
+get a field `live_ms`, the lag of the latest pass the frame draws for the
+first time, in the first record of the frame; a frame at rest presented
+again for a pass is a record "Frame" of cause `live`. The snapshotter logs
+each pass at debug level, "Live", with the window and the time it took.
+
+A1, A2, A3:: As in 007, session S2.
+
+C — CPU:: CPU time of the qws process over a session, from
+`/proc/<pid>/stat`, against the time the switcher was shown.
+
+Session S5:: S2 of 007 on E1 — the overlay on DP-0 at 144 Hz, the service
+stopped — with a window on DP-4 changing all the time: a terminal printing
+a line every 20 ms, the window viewable on the visible workspace of DP-4,
+of depth 32 with a pixmap of its own — a mate-terminal on E1 — and, for
+the windows taken from their frame, of depth 24 drawn into the pixmap of
+its frame — an xterm (D2). Run with the
+carousel and with the grid, with `live: true` and with `live: false` in
+turn, three times each. Its rest variant: after the steps of each
+activation the overlay is held still, `REST` seconds of `measure.sh`, a
+second after the frame at rest of the last step; R is the live passes a
+second over those spans, of every window, and the frames of cause `live`
+with them.
+
+== Acceptance criteria
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| `cpu` unchanged: `TestScenes` with `testdata/scenes.json` unchanged.
+
+| K2
+| `glx` without live content unchanged: `TestGLXPresenterMatchesCPU`,
+  `TestLayers` and `TestParallelDrawing` pass as they are — a presenter
+  with no live texture, and one whose windows have not changed, draws the
+  frames of 007 byte for byte.
+
+| K3
+| The live picture: `TestLiveThumbnails` in `pkg/carousel` — pictures of
+  fixed content written in a context the presenter's shares, as the
+  snapshotter's, drawn over windows of the test off the screen, over a
+  carousel at rest at offsets 0 to 5 and over a grid of 36 with icons over
+  thumbnails, as a frame and as a scene: outside the live rectangles the
+  frame equals
+  the `cpu` frame byte for byte; inside, it is within 1 per channel of the
+  `cpu` frame drawn with the live thumbnails read back, and equal to it in
+  at least 99.5 % of the pixels. A frame of a fade with zoom draws a live
+  rectangle where the zoom takes it, within a pixel. Skipped without an X
+  display, GLX and a compositor, as the test of K2.
+
+| K4
+| Sharing: `TestSharedLive` in `pkg/snapshot` — a context created sharing
+  the snapshotter's, on a display of its own, draws a window's live
+  texture; after the window is drawn anew and averaged again, the new
+  picture. Skipped as K3.
+
+| K5
+| The schedule: `TestLiveSchedule` — while shown, a change is averaged
+  without settle at most once a `live_interval`, the window that waited
+  longest first, no two passes closer than the `live_interval` divided by
+  the windows taking passes, and none while frames come one after another
+  but once they have stopped; a window not viewable, of a
+  changed size or not shown, is not; no snapshot with a read back while
+  shown; hidden, the schedule of 008 (`TestSchedule` unchanged). No live
+  pass while the switcher of another instance is shown, and none paused by
+  its own overlay (`TestLivePause`, `TestSwitchersOwnOverlay` of
+  `pkg/x11`); the tests of 011 unchanged but for `Shown` taking the overlay
+  to leave out.
+
+| K6
+| Fallback: with the shared context made to fail, live thumbnails are off,
+  the log says so once, and the frames are those of K2
+  (`TestLiveFallback`).
+
+| K7
+| Lag: in the rest variant of S5 with `live: true`, L p95 ≤
+  `live_interval` + one refresh period + 5 ms — provisional, confirmed by
+  the author on 2026-10-02 until the first measurement: 62 ms at the
+  default of 50 ms since 2026-10-04 and a refresh of 6.94 ms on E1 (45 ms
+  at 33 ms). With the key held the passes wait for the steps to stop
+  (Behavior, "While shown"), and L there is the time held.
+
+| K8
+| Frames: in S5, the step of the carousel, the fades and the grid with
+  `live: true` against `live: false` run in turn: A1 p95 no more than
+  0.1 ms longer, the share of intervals above 1.5 periods no more than 0.2
+  percentage points higher, three runs together; K2–K6 of 007 hold as they
+  do with `live: false`. Author, 2026-10-03: confirmed, with the hold
+  before a pass 30 ms after the frames stop, not 10, so that a pass does
+  not land in the pause between two keys.
+
+| K9
+| CPU: in S5 and its rest variant — one window changing all the time,
+  the terminal of S5, of its own pixmap or from its frame — C with `live:
+  true` no more than 3 % of a CPU above `live: false` over the time the
+  switcher is shown, the `glFinish` of `-v` left out of both: from the
+  pools, C of a setting is 100 × (the ms of CPU of `C shown` less the ms in
+  `glFinish` of `C profile`) / the ms shown of `C shown`, and K9 is C on
+  less C off. `glFinish` runs only while timings are logged, as S5 runs,
+  and NVIDIA busy-waits in it; a user's qws does not. Provisional,
+  confirmed by the author on 2026-10-02 until the first measurement. In
+  the rest variant, one window changing all the time, it was 4.70 and
+  5.38 points in the grid with `glFinish`, a window of its own pixmap and
+  one from its frame, at a `live_interval` of 33 ms. Author, 2026-10-03:
+  option c — the cost of a pass from the frame lowered, by specification
+  023 (#66), the bound kept; 2026-10-04: option a — the default
+  `live_interval` 50 ms (D6).
+
+| K10
+| Configuration: the two keys from a file, their `QWS_` variables and
+  flags, the defaults, a negative interval reported and replaced by the
+  default (`TestThumbnailKeys` in `internal/config`, the flags in
+  `cmd/qws`); `TestRoundTrip` and `TestTagNames` with them.
+
+| K11
+| The author's judgement on E1: a terminal scrolling and a video on DP-4
+  follow on their cards and tiles, the steps and the fades as smooth as
+  with `live: false`.
+
+| K12
+| `go vet ./...`, `go test ./...` and `make check-specs` pass.
+
+| K13
+| At rest: `TestLiveAtRest` in `pkg/snapshot` — the loop of the
+  snapshotter as qws runs it, a switcher presenting no frame but those its
+  passes ask for, a window drawn anew every 5 ms — draws a picture about
+  every `live_interval`, at least a third of those the time allows, each
+  by a frame of its own. In the rest variant of S5 with `live: true`, R at
+  least three quarters of what the default `live_interval` allows the
+  window of S5 — 15 passes a second at 50 ms, of the 20 at most — and no
+  activation under half, 10 — provisional, until the first measurement.
+  The author's trial at rest is K11.
+
+| K14
+| From the frame: `TestLiveFromFrame` in `pkg/snapshot` — a window of
+  depth 24 in a frame of its visual, and one of another visual of depth
+  24, off the screen, which the compositor redirects — passed live by
+  RENDER into a pixmap of qws's own, the only pixmap bound on the GPU,
+  never the frame's, nor the window bound; its picture within 1 of the
+  snapshot of the same picture, which RENDER scales alike — the tolerance
+  against `cpu` is RENDER's filter, as for the snapshots of 022, a mean
+  of 0.7–1.3 per channel from the area average for its pictures, 2 at
+  most; drawn anew, the new picture; a pixmap of qws's own that does not
+  bind: no pass, the snapshot kept, none tried again. `TestLiveAtRest`
+  with a window in a frame: as K13. `BenchmarkLivePassFrame`: the pass,
+  and the CPU of the X server and of qws a pass, reported in the results.
+|===
+
+== Results
+
+2026-10-02 to 2026-10-04, ws1 — E1, the author's desktop. Off the screen:
+windows of the tests off every monitor, in frames or pixmaps of their own
+(research, "The implementation off the screen", "Passes from the frame").
+On the desktop, the service stopped, three sessions of S5 and the
+author's trials:
+
+* S5 with the key held, 2026-10-02 14:27–16:07, the branch at `2abf3b5`
+  against `develop` at `759c6d3` (research, "S5 on the desktop, the first
+  runs"): its xterm took no pass — of depth 24, drawn into its frame's
+  pixmap — and the runs showed what the rework since changed.
+* The rest variant of S5 (tasks), 2026-10-03 from 11:24 at `fe9e85f` and
+  from 16:02 at `8a47cb3` (research, "S5 at rest", "The second runs").
+* The rest variant again, 2026-10-04 from 10:57, with the build of 023 —
+  this branch with the passes from the frame made cheaper — at `9f84a68`,
+  `live: true` against `live: false` of that build, at the default
+  `live_interval` of 50 ms, two runs each of the carousel and the grid
+  with a mate-terminal and with an xterm changing all the time
+  (`~/.cache/qws-runs/20261004-1057-020-rest3` on ws1). Of the 17 675
+  passes of the runs on, 17 595 were of the terminal, 80 of a window of
+  the desktop.
+* The author's trials on Alt+F11, at `e2c2fda` on 2026-10-02 and after D2
+  A on 2026-10-03 at 08:30 (K11).
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | Met. `TestScenes`: all the scenes of Σ, the host scenes with them;
+  `testdata/scenes.json` unchanged — the drawing of `cpu` is not.
+| K2 | Met. `TestGLXPresenterMatchesCPU`, `TestLayers` and
+  `TestParallelDrawing` unchanged and passing, a compositor running: a
+  presenter draws live pictures only those the selector gives it for a
+  frame.
+| K3 | Met. `TestLiveThumbnails`: the carousel of E1 at offsets 0 to ±3 —
+  ±4 and ±5 lie outside its frame — and the carousel at the sizes of the
+  defaults at 0 to ±5; the grid of 36 of E1, icons over 18 thumbnails, and
+  that grid in a font whose titles reach into them. Outside the live
+  rectangles no pixel differs from the `cpu` frame; inside, worst 1, equal
+  in 99.932–99.954 % of 222 266 to 1 529 364 pixels; the same in a scene.
+  Through the zoom of 0.92 the live rectangle lies where the zoom takes
+  it, within a pixel. `TestLiveCovers` checks the holes against the
+  drawing.
+| K4 | Met. `TestSharedLive`: a context of a display and a thread of its
+  own, created sharing the snapshotter's, reads a live picture equal to the
+  area average of its pixmap within 1; drawn anew and averaged again, the
+  new picture — since `de4083b` with `glXWaitX` before the pixmap is bound
+  again, without which 5 of 55 runs read it as it was with the desktop in
+  use; a pass into the texture a frame being drawn took is not made until
+  the frame ends; a frame gets the pictures of the windows it does not
+  show; a picture older than the window's snapshot is not given.
+  `TestShareError` of `pkg/glx`.
+| K5 | Met. `TestLiveSchedule`: the interval, the spreading, the windows
+  shown, no pass while frames come one after another — the last two less
+  than 10 ms apart — but 30 ms after they stop; a window taken from its
+  frame passed by RENDER, not without it. `TestLivePause` and
+  `TestSwitchersOwnOverlay` of `pkg/x11`: no live pass while another
+  instance's switcher is shown, none paused by the own overlay;
+  `TestSchedule`, and `TestWait` and `TestSwitchers` of 011, passing.
+| K6 | Met. `TestLiveFallback`: the presenter's context made unable to
+  share, no live pictures, one record "Live thumbnails off" at info level,
+  the frames byte for byte. `TestLiveOff`: off with the key off, under
+  `cpu`, and without the snapshotter, which says so once.
+| K7 | Met. 2026-10-04, at 50 ms: L in view at p95 52.65 and 52.85 ms with
+  the mate-terminal, carousel and grid, 52.82 and 52.98 ms with the xterm
+  — the bound 62 ms. Before, at 33 ms against 45 ms: 36.9 and 39.4 ms in
+  the carousel, 35.9 and 37.5 in the grid (2026-10-03, 16:02); the first
+  S5, 2 208 ms in the carousel, of cards off the strip taking passes, since
+  passed only in view and counted from when they came into view.
+| K8 | Not met in the grid, accepted by the author (2026-10-04, option C).
+  2026-10-04, at 50 ms, the share of intervals above 1.5 periods on
+  against off, and the p95: the carousel 1.31 against 1.48 % with the
+  mate-terminal, p95 7.70 against 7.59 ms (+0.11), 1.50 against 1.34 %
+  with the xterm (+0.16), p95 7.44 against 7.31 (+0.13); the grid 1.74
+  against 0.88 % (+0.86), p95 7.59 against 7.39 (+0.20), and 1.42 against
+  0.88 % (+0.54), p95 7.24 against 7.13 (+0.11); the fades within. The
+  off runs missed 0.9–1.5 % that day against 0.2–0.35 % the day before,
+  the desktop noisier. What is left: the steps right after a rest of live
+  frames one after another, where a pass already under way meets the
+  first frames of a step before two close frames tell the motion. Before:
+  +0.15 and +0.19 points in the grid, +0.19 and +0.29 in the carousel,
+  with a hold of 10 ms (2026-10-03, 16:02); 5.63 and 8.14 % against 0.68
+  and 0.91 % with passes in the pauses between the frames of a step
+  (11:24), none in motion since `ae12383`.
+| K9 | Met at the default of 50 ms. 2026-10-04, read as K9 says — C of a
+  pool without the `glFinish` of `-v`: 1.97 and 2.08 points with the
+  mate-terminal, carousel and grid; 2.31 and 2.27 with the xterm, passed
+  from its frame through the chain of 023 — the bound 3. Before, at 33 ms:
+  4.70 and 5.38 points with `glFinish`, 3.97 and 4.54 without, in the
+  grid (2026-10-03, 16:02); 7.40 and 8.67 with two windows changing all
+  the time (11:24). The author: option c on 2026-10-03, 023; option a on
+  2026-10-04, the default of 50 ms.
+| K10 | Met. `TestThumbnailKeys` — the default 50 ms since `535a432` — and
+  `TestThumbnailFlags`; `TestRoundTrip` and `TestTagNames` with the two
+  keys.
+| K11 | Met by the second trial. The first, at `e2c2fda`, at rest: no live
+  thumbnail seen; the window changing all the time on the desktop, ilovlya,
+  of depth 24 drawn into its frame's pixmap, took no pass then, and the
+  windows of depth 32 that changed, few, took theirs (research, "The
+  author's trial at rest"). The second, 2026-10-03 at 08:30, after D2 A:
+  7 activations, 608 passes of ilovlya and 557 of Yandex Music, both of
+  depth 24 passed from their frame, 1 141 frames of cause `live`
+  (`~/.cache/qws-trial-020/log-1003-0830.json` on ws1); the author went on
+  to the decisions on K8 and K9.
+| K12 | Met. `go vet ./...`, `go test ./...` and `make check-specs` on
+  every commit, in a worktree of its own, and `go test -race` of
+  `pkg/snapshot`, `pkg/ui` and `pkg/x11`; on the merges with `develop` at
+  `759c6d3`, `9774075` and `7c76a35` too. With the desktop in use
+  `TestGPUThumbnail` failed now and then, "drawn anew", as on `develop`
+  until 025 — `glXWaitX` for the snapshots, merged with 1.3.4 — and
+  `TestLiveAtRest` 3 times of some 60 runs of `go test ./...`, once each,
+  not again when run again or alone.
+| K13 | Met. `TestLiveAtRest`, the loop of the snapshotter, a window drawn
+  every 5 ms, its card out of view and back before the rest: 44–45
+  pictures in 1.5 s at an interval of 33 ms, each by a frame, for a window
+  of its own pixmap and one from its frame; 0 without the wake of
+  `c70c4e1`. 2026-10-04, at 50 ms: R at rest 19.7 passes a second, the
+  fewest 19.7, in every pool on — the bound 15 and 10.
+| K14 | Met. `TestLiveFromFrame`: windows of depth 24 in frames, of their
+  frame's visual and of another, each picture equal to the snapshot of the
+  same picture, worst 0, from the area average a mean of 0.67–1.31 —
+  RENDER's filter; the one pixmap bound qws's own; a pixmap that would not
+  bind: no pass, the snapshot kept, passes from frames off. `TestLiveAtRest`
+  with a window in a frame, as K13. On the desktop, the xterm of S5 and
+  the author's ilovlya and Yandex Music passed from their frames (K9, K11).
+  The cost of a pass from a frame, lowered by 023: 0.67–0.73 ms of qws's
+  CPU at 2556×1357, as from a window's own pixmap (023, research).
+|===
+
+Made in the implementation, in the plan and above:
+
+* `root.go` keeps `Pause` around an activation (D5): the snapshots of the
+  cards stay the newest during it, and a live picture is drawn exactly
+  when newer than its window's snapshot.
+* Snapshots keep the one framebuffer of 008; live textures are made at a
+  window's first pass.
+* The snapshotter publishes a pass once its fence has signalled; the
+  presenter tests no fence. A pass waits on the GPU for the presenter's
+  last fence, and is not made while a frame that may draw its texture is
+  drawn; before binding a pixmap again it waits for the X server's
+  drawing, `glXWaitX`.
+* The passes spread over the windows taking passes, waiting or passed
+  within the interval; only of the cards and tiles in view, from the end
+  of the fade-in to the start of the fade-out; none while frames come one
+  after another, but 30 ms after they stop. A slice of windows shown
+  other than the last wakes the snapshotter's loop.
+* The live rectangle leaves out what the cards drawn after a card, and
+  the labels of a tile, draw over the thumbnail; the border of a card is
+  `2 / scale` px wide; a face keeps the bounds of its glyphs.
+* A frame at rest presented again for a pass is a record "Frame" of cause
+  `live`; `measure.sh` does not count it as a frame of a key. L counts a
+  card in view, from when it came into view if later than the change.
+* With 011 merged, `Switchers.Shown` takes the overlay to leave out; the
+  snapshotter holds the switchers behind an interface of its own.
+* D2 A: a window drawn into its frame's pixmap is passed by RENDER into a
+  pixmap of qws's own, bound on the GPU; never the frame's.
+* `live_interval` 50 ms by default (D6, the author, 2026-10-04).
+* `measure.sh`: S5's window a mate-terminal or an xterm (`CHANGING_TERM`),
+  second in the order of the switcher; the rest variant (`REST`), and K9
+  read without `glFinish` from the pools (tasks).
+
+Not checked: Mesa and ws3 (D7); ws7.
+
+== Open decisions
+
+. The bounds of K7 and K9, provisional until the first measurement on
+  the screen.
+. Passes in motion: none since `ae12383`, the guard of 4 ms before a
+  frame having held the frames off the screen but not on the desktop.
+  Should the pictures follow during long motions — a key held — a pass
+  every few hundred milliseconds in motion might cost the frames little;
+  not measured on the desktop.
+. The pools of the font sets (007) and of the canvases of the heads (019)
+  are `sync.Pool`s, which the drawings of the frames at rest found empty a
+  third more often with live thumbnails on, and made their faces anew: a
+  third of a point of a CPU in S5 (research, "S5 on the desktop, the first
+  runs"). A list of free sets under a mutex would keep them on and off.
+. The passes made cheaper by the damaged rectangles: a terminal that prints
+  a line damages a band of a window, and a pass could average only the
+  thumbnail rows under it — DAMAGE reports the region through XFIXES at a
+  round trip a capture. Not measured.
+. Mesa: sharing across Xlib displays, the contexts on one display
+  otherwise, and whether a pixmap's texture there needs binding again (D7).
+. 019, "heads kept across frames": the thumbnails a frame of the CPU is
+  drawn from no longer change during an activation — live pictures are
+  drawn by the GPU over them — so a head drawn for a tile stays valid for
+  the activation but for the selection and the hover.
+. Under `cpu`, semi-live thumbnails at a low rate, should the author want
+  them there (D4).
+. A pass from a frame asks the X server, at each pass, where the window
+  lies in the frame, and makes and frees the pixmaps of its halvings:
+  kept between passes, with the rectangle asked again on a ConfigureNotify
+  of the window, a pass would send some 5 requests of RENDER instead of
+  some 25, and save the snapshotter's CPU (results). Not made.

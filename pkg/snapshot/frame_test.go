@@ -58,15 +58,19 @@ func frameSnapshotter(t testing.TB, conn *xgb.Conn) *Snapshotter {
 		t.Fatal(err)
 	}
 	return &Snapshotter{
-		conn:    conn,
-		root:    root,
-		thumbs:  map[xproto.Window]image.Image{},
-		windows: map[xproto.Window]*window{},
-		frames:  map[xproto.Window]xproto.Window{},
-		off:     off,
-		gpu:     g,
-		render:  x,
-		cpu:     cpu,
+		conn:     conn,
+		root:     root,
+		thumbs:   map[xproto.Window]image.Image{},
+		thumbGen: map[xproto.Window]uint64{},
+		pics:     map[xproto.Window]Picture{},
+		windows:  map[xproto.Window]*window{},
+		frames:   map[xproto.Window]xproto.Window{},
+		off:      off,
+		gpu:      g,
+		render:   x,
+		cpu:      cpu,
+		share:    off.Share(),
+		hold:     liveHold,
 	}
 }
 

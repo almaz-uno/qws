@@ -1,0 +1,408 @@
+= 023 — research
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-04
+
+Facts the specification rests on, 2026-10-03. Nothing was run for this
+draft: the code of 020 was read on its branch, `issue/qws#58-live-thumbnails`
+at `fe9e85f` (pull request #60), and xgb 1.3.1 in the module cache; the
+numbers are those 020 recorded and those of the runs of 020 kept on ws1,
+read from their pools and logs. E1 as in 020 and 022: ws1 — NVIDIA GeForce
+RTX 4080 SUPER, driver 580.105.08, Debian 12, Xorg 21.1.7, picom 9.1
+`--backend glx`, i3; the overlay on DP-0 at 144 Hz.
+
+== What a pass from the frame sends
+
+The code at `fe9e85f`. `livePass` (`pkg/snapshot/live.go:400`) subtracts
+the window's damage (`:434`), as for every pass, and for a window taken from
+its frame calls `scaleFromFrame` (`:497`): `scaledFor` (`:522`) gives the
+scaled pixmap of qws's own — made, with two checked requests and its
+binding, at the window's first pass only; `pixmapRect`
+(`pkg/snapshot/snapshot.go:800`) asks where the window lies,
+`TranslateCoordinates` of the window to the frame (`:805`) and `GetGeometry`
+of the frame for its border (`:809`); `xrender.scale`
+(`pkg/snapshot/xrender.go:151`) sends the scaling; each composite's cookie
+is checked. Then `WaitX` (`live.go:444`), `glXWaitX` on the GL context's
+Xlib display (`pkg/glx/pixmap_linux.go:215`), and `Rebind` (`live.go:446`),
+the release and the binding of the scaled pixmap on that display without a
+round trip (`pixmap_linux.go:209`).
+
+`scale` copies a rectangle not at the corner of its pixmap — a window in its
+frame, below the frame's title bar or border — into a pixmap of its own, so
+that the passes pad at the window's edges (022), then halves along each side
+more than twice the thumbnail's, k times, and makes one last bilinear pass
+into the picture it is given. What it makes is freed when it returns
+(`:163–170`). For k halvings, on the snapshotter's connection:
+
+[cols="3,5,1,1",options="header"]
+|===
+| Where | Requests | Count | Replies
+
+| `livePass`, every pass | `DamageSubtract` | 1 | —
+| `pixmapRect` | `TranslateCoordinates`, `GetGeometry` | 2 | 2
+| `scale`, the copy (`:184–197`) | `CreatePixmap`, `CreateGC`, `CopyArea`, `FreeGC` | 4 | —
+| `scale`, the source (`:178`) | `CreatePicture`, padded | 1 | —
+| `scale`, a halving (`:223–238`) | `CreatePixmap`, `CreatePicture`, `SetPictureTransform`, `SetPictureFilter`, `Composite` | 5k | —
+| `scale`, the last pass (`:235–238`) | `SetPictureTransform`, `SetPictureFilter`, `Composite` | 3 | —
+| `scale`, on return | `FreePicture`, `FreePixmap` | 2k + 2 | —
+| `scaleFromFrame`, the check | `GetInputFocus`, sent by xgb's `Check` | 1 | 1
+| *A pass* | | *14 + 7k* | *3*
+|===
+
+Besides: one NoExposure event a pass ("The event of each copy"); 3 + 2k new
+resource IDs — the copy, its graphics context, the source picture, a pixmap
+and a picture a halving; on the GL context's display, the two requests of
+`Rebind` and the round trip of `glXWaitX`. A pass from a window's own pixmap
+sends `DamageSubtract` alone on the snapshotter's connection, and `Rebind`.
+
+The halvings, the requests and what the chain of D1 b would hold, by the
+size of the window (`thumbSize` of `pkg/snapshot/gpu.go`, the loop of
+`scale`):
+
+[cols="2,2,1,2,2,2",options="header"]
+|===
+| Window | Thumbnail | k | Halvings | Requests, 020 / D1 b + D2 c | Chain
+
+| 2556×1357, the benchmark of 020 | 512×271 | 2 | 1278×679, 639×340 | 28 / 6 | 18.2 MB
+| 2556×1392, ilovlya on ws1 | 512×278 | 2 | 1278×696, 639×348 | 28 / 6 | 18.7 MB
+| 1500×900, `TestLiveFromFrame` | 512×307 | 1 | 750×450 | 21 / 5 | 6.8 MB
+| 1279×677, both sides odd | 512×271 | 1 | 640×339 | 21 / 5 | 4.3 MB
+| 604×394, the xterm of S5 | 512×333 | 0 | — | 14 / 4 | 1.0 MB
+|===
+
+The chain is the copy, 4 bytes a pixel at depth 24 as at 32, and the
+halvings, a8r8g8b8. With D1 b and D2 c a pass after the first of an
+activation sends `DamageSubtract`, `CopyArea`, k + 1 `Composite` and
+`TranslateCoordinates`: k + 4. The first pass of an activation adds the
+chain: `CreatePixmap`, `CreateGC`, the source's `CreatePicture`, a
+`CreatePixmap` and a `CreatePicture` a halving, a `SetPictureTransform` and
+a `SetPictureFilter` a picture — 5 + 4k, 13 at k = 2; its end frees it,
+3 + 2k.
+
+== How xgb sends a request
+
+xgb 1.3.1, `github.com/jezek/xgb@v1.3.1`:
+
+* `NewRequest` (`xgb.go:396`) puts the request on the connection's channel
+  of requests, buffered for 100, and waits until `sendRequests` (`:416`) has
+  numbered it (`:445`) and written it — `writeBuffer` (`:473`), one
+  `c.conn.Write` a request, no buffering. One `NewRequest` is one sequence
+  number: a buffer holding several requests would leave xgb's numbers behind
+  the X server's, and every reply after it matched to the wrong cookie.
+* `Check` of a checked request without a reply (`cookie.go:148`) returns at
+  once if a later reply has been read — the reader marks the void cookies
+  before a reply as done — and otherwise sends `GetInputFocus` (`Sync`,
+  `sync.go:8`; `cookie.go:168`) and waits for it: the `GetInputFocus` of a
+  pass from the frame, after which no reply comes.
+* `NewId` (`xgb.go:240`) takes the IDs from `generateXIds` (`:264`), which
+  hands out those of the client's mask in order and reuses none unless a
+  function is given with `SetIDRangeFunc` (`:177`).
+* The reader drops the bit of an event's code that marks it sent by
+  `SendEvent` (`xgb.go:556`); `xproto.ConfigureNotifyEvent` has no field
+  for it. The synthetic ConfigureNotify events i3 sends a client window, in
+  root coordinates (ICCCM, 4.1.5; 022), cannot be told from the X server's.
+* The snapshotter's loop runs on the thread its GL context is locked to
+  (`glx.NewOffscreen`, `pixmap_linux.go:248`, `runtime.LockOSThread`). A
+  goroutine so locked that waits — for xgb's writer at each request, for the
+  reader at each reply — stops its thread and hands its processor to
+  another, which wakes it again when the wait ends: two switches of threads
+  a request, where an unlocked goroutine would switch on its thread.
+
+== The event of each copy
+
+`scale` makes the copy's graphics context with no values
+(`xrender.go:194`), so with graphics exposures on, the protocol's default
+of `CreateGC`. With graphics exposures on, `CopyArea` sends GraphicsExposure
+events for the parts of the destination it could not take from the source,
+and NoExposure when there are none — always, for a pixmap's source. xgb
+reads the event; the snapshotter's `read` passes it to the loop through its
+channel of events; the loop, woken on its thread, finds no case for it in
+`handle` and computes its timer again. Every pass from the frame, and every
+snapshot of 022, sends one.
+
+== What 020 measured
+
+020, research, "Passes from the frame": 2026-10-03, 00:05–00:50, ws1, the
+author's desktop in use and the service running, the branch at `fd2b4a1`;
+`go test -run '^$' -bench 'LivePass' -benchtime 300x ./pkg/snapshot`, three
+runs, a window of 2556×1357 at 2,22 in a frame of its visual off the screen,
+passed 30 times a second, the fences polled every 0.5 ms; the CPU of the X
+server a pass less its own over as long a stretch before, that of the test's
+process, both from `/proc` in ticks of 10 ms:
+
+[cols="2,2,2,2,2",options="header"]
+|===
+| Pass | On the thread, p50 / p95 | Done, p50 / p95 | qws's CPU | The X server's CPU
+
+| from a pixmap of its own | 0.35–0.39 / 0.5–3.7 ms | 1.60–1.65 / 2.9–3.9 ms | 0.97–1.00 ms | 0.1–0.9 ms
+| from the frame | 1.48–1.57 / 3.5–6.0 ms | 2.60–2.70 / 6.1–8.1 ms | 2.40–2.47 ms | 0.8–1.3 ms
+|===
+
+And, in the same section:
+
+* without `glXWaitX`, the X server took 0.34–0.61 ms a pass, and qws as
+  much as with it;
+* with the rectangle in the frame asked once, not at each pass, qws took
+  2.17 ms a pass against 2.40;
+* with the composites checked but no `glXWaitX`, 10 of 200 passes read the
+  scaled pixmap as it was before (5 runs of 40); with `glXWaitX`, 0 of 200;
+  with an `XSync` of the GL display instead, 7 of 80;
+* `TestLiveFromFrame`: the live picture of a window in a frame equal to its
+  snapshot, worst 0;
+* at 30 passes a second a window of that size from its frame costs some 7 %
+  of a CPU of qws and 3 % of the X server's, against 3 % and 0.3–3 % from a
+  pixmap of its own.
+
+== At rest, 2026-10-03
+
+020's rest variant of S5, `~/.cache/qws-runs/20261003-1124-020-rest` on
+ws1, 11:24–12:02, the build of 020 at `fe9e85f` with changes not yet
+committed (`meta`: `fe9e85f (dirty)`): 10 activations of 5 steps, each held
+still 10 s, the service stopped; the window of S5 floating on DP-4, an
+xterm or a mate-terminal of 100×30, printing a line every 20 ms; two runs
+each, `pool-*` the two together. The Claude app (0x7000004, depth 32, its
+own pixmap) changed all the time in every run, and ilovlya (0x8c00003,
+2556×1392, depth 24, from its frame) some twice a second.
+
+`C shown` of the grid, a CPU of qws over the time the switcher was shown,
+some 126 s a run:
+
+[cols="2,2,2,2",options="header"]
+|===
+| Window of S5 | `live: false` | `live: true` | On less off
+
+| xterm, 604×394, depth 24, from its frame | 38.28, 38.18 — 38.23 % | 46.98, 46.82 — 46.90 % | 8.67
+| mate-terminal, 512×386 thumbnail, depth 32 | 38.68, 38.00 — 38.34 % | 45.90, 45.58 — 45.74 % | 7.40
+|===
+
+X, the frame's share: 8.67 − 7.40 = 1.27 points of a CPU. The xterm took
+6 756 passes in the two runs, 252.3 s shown, 26.8 a second: some 0.47 ms of
+qws's CPU more a pass than the mate-terminal's from its own pixmap.
+
+The passes of each window, from the records "Live" of `log.json` — `ms`,
+the pass on the snapshotter's thread — in the two runs of each pool:
+
+[cols="3,2,2,2",options="header"]
+|===
+| Window | Passes | On the thread, p50 | p95
+
+| xterm, from its frame, k = 0 | 3 377, 3 379 | 1.57, 1.63 ms | 13.3, 15.1 ms
+| mate-terminal, its own pixmap | 3 394, 3 399 | 0.58, 0.47 ms | 6.3, 6.3 ms
+| Claude app, its own pixmap, in the runs of the xterm | 3 373, 3 376 | 0.55, 0.42 ms | 6.2, 6.0 ms
+| Claude app, in the runs of the mate-terminal | 3 394, 3 403 | 0.79, 0.85 ms | 6.3, 6.7 ms
+| ilovlya, from its frame, k = 2, in the runs of the xterm | 174, 167 | 5.52, 3.43 ms | 31.1, 32.7 ms
+| ilovlya, in the runs of the mate-terminal | 190, 187 | 5.15, 5.31 ms | 32.1, 32.3 ms
+|===
+
+R at rest: 58.7 passes a second with the xterm, 59.2 with the
+mate-terminal; L in view at p95 40.6 and 38.9 ms. The steps of the grid,
+A1: 8.14 % of their intervals above 1.5 periods with the xterm and
+`live: true`, 0.91 % with `false`; 5.63 and 0.68 % with the mate-terminal;
+p95 12.36 ms against 10.62. In the carousel no window changing was in view
+at rest — R 0 — and `C shown` on and off within 0.23 points: the carousel
+does not measure the passes at rest.
+
+The xterm's passes at rest took 1.57–1.63 ms on the thread at p50, above
+the 1.48–1.57 ms of the benchmark's window at k = 2, for k = 0; ilovlya's,
+at k = 2 as the benchmark's, 3.4–5.5 ms. Some 58 frames of cause `live` a
+second were presented through the same X server meanwhile; what holds the
+passes up there is not measured.
+
+== S5, the second runs of 2026-10-02
+
+`~/.cache/qws-runs/20261002-2022-020c` on ws1, 20:22–21:58, the build of
+020 at `e2c2fda` with changes not yet committed, before the passes from the
+frame: S5 with the mate-terminal changing, 20 activations a run, three runs
+each. `C shown`, the three runs pooled:
+
+[cols="2,2,2,2",options="header"]
+|===
+| Layout | `develop`, 1.3.3 | `live: false` | `live: true`
+
+| grid | 399.90 % | 401.10 % (400.10, 401.70, 401.51) | 403.46 % (404.57, 404.28, 401.50)
+| carousel | 153.21 % | 152.88 % | 153.00 %
+|===
+
+K9 of 020 in the grid: 2.36 points of its 3. The mate-terminal took some
+7 400 passes a run in the grid, 289 s shown: 25.6 a second. The runs of one
+setting spread over 1.6 and 3.1 points.
+
+== What the change is expected to save
+
+Estimates, to be measured (K3, K5, K6):
+
+[cols="3,2,2,2,2",options="header"]
+|===
+| A pass after the first of an activation | 020, k = 2 | D1 b–D3, k = 2 | 020, k = 0 | D1 b–D3, k = 0
+
+| requests on the snapshotter's connection | 28 | 6 | 14 | 4
+| round trips | 3 | 1 | 3 | 1
+| events | 1 | 0 | 1 | 0
+| new resource IDs | 7 | 0 | 3 | 0
+| pixmaps made and freed in the X server | 18.2 MB | 0 | 1.0 MB | 0
+|===
+
+* qws's CPU, the benchmark at k = 2: the two round trips of the rectangle
+  are 0.23 ms (020); the 1.20 ms that remain above a pass from a window's
+  own pixmap go with the 24 requests of the scaling, the check, the event
+  and the wait. Should they go with the requests alike, D1 b leaves 4 of the
+  24 and some 1.0 ms less: some 1.2–1.4 ms a pass, against 2.40–2.47.
+* At rest, k = 0: the xterm's 0.47 ms a pass above the mate-terminal's went
+  with 13 requests and an event; 3 are left, and X would be some 0.3 points.
+* S5x: the mate-terminal's 2.36 points, plus the xterm's 25.6 passes a
+  second at 0.47 ms, give some 3.6 points before the change, past K9 of 020,
+  and some 2.6–2.8 after. The runs of one setting spread over 1.6–3.1
+  points: three runs each, and the bound read on the pools.
+* The X server: D1 b removes the making and freeing of the pixmaps and
+  pictures a pass; their share of its 0.8–1.3 ms is not known. `glXWaitX`,
+  some half of it, stays (D7 a).
+
+The benchmark sleeps 33 ms between passes, so each hand-over of a request
+wakes threads gone idle; at rest the threads of qws were busy with some 58
+frames a second. That may be why the xterm's excess at rest, 0.47 ms for 13
+requests, is below what the benchmark's 1.43 ms for 27 would give at its
+rate; not measured.
+
+== RENDER's filters
+
+`render.h` of the RENDER protocol on ws1
+(`/usr/include/X11/extensions/render.h`) names the filters `nearest`,
+`bilinear` and `convolution`, and the aliases `fast`, `good` and `best`. A
+convolution filter is a kernel of a fixed size and fixed weights in the
+pixels of the source, given with `SetPictureFilter`, applied around the
+point the transform takes each pixel of the destination to — so at a
+fractional scale not the area average. Which filters Xorg 21.1.7 and the
+driver of NVIDIA offer, and which of them the driver does on the GPU,
+`QueryFilters` and a measurement would tell; neither was asked here.
+
+== Fences of the X server
+
+`GL_EXT_x11_sync_object` imports a fence of the X server's SYNC extension
+into GL, for the GL context to wait on the GPU for what the X server drew
+before the fence was triggered. picom's `--xrender-sync-fence` uses it, "to
+make sure all draw calls are finished before picom starts drawing", needed
+"on nvidia-drivers with GLX backend for some users"
+(https://man.archlinux.org/man/picom.1[picom(1)]); NVIDIA is the only driver
+known to have the extension
+(https://forums.developer.nvidia.com/t/compositor-sync-fences-and-redraw-lag-problems/67099[NVIDIA
+forums]). xgb 1.3.1 has no package for SYNC — none in its module — and 021
+sets up Composite, DAMAGE, MIT-SHM, RANDR, RENDER and XFIXES.
+
+== Found on the way: resource IDs
+
+The Xorg of ws1 gives every client a mask of 0x1fffff (`Xorg.0.log`: "Max
+clients allowed: 256, resource mask: 0x1fffff"): 2 097 151 resource IDs a
+connection. xgb hands them out in order and reuses none without
+`SetIDRangeFunc` ("How xgb sends a request"); `grep` finds no
+`SetIDRangeFunc` and no `xcmisc` in qws. Once they are used up, `NewId`
+fails, and with it every request that makes a resource on that connection.
+
+The IDs the snapshotter's connection takes: one a naming of a pixmap
+(`namePixmap`), one a DAMAGE object of a window followed; a snapshot by
+RENDER of a window's own pixmap (018) 3 + 2k, of a window from its frame
+(022) 5 + 2k — 9 at E1's size; a live pass from the frame (020) 3 + 2k. A
+window of E1's size changing all the time, taken from its frame once a
+`snapshot_interval` of 1 s while the switcher is hidden, takes 9 a second:
+the 2 097 151 last some 2.7 days. ilovlya's 133 snapshots in some 4 minutes
+of 020's trial at rest, 0.55 a second, would last some 4.9 days. The
+passes add 7 a pass at k = 2 while the switcher is shown. Not seen; after
+it, no pixmap is named and no snapshot is taken by RENDER on that
+connection. xgb has `xcmisc` with `GetXIDRange` for `SetIDRangeFunc`; XC-MISC
+is not among the extensions of 021. Not a part of this change: D1 b takes the
+passes out of it, the snapshots stay.
+
+== Not known without measuring
+
+* How qws's CPU of a pass divides between its requests, the round trips,
+  the event and `glXWaitX`: the estimates above take the requests alike.
+* How the X server's CPU of a pass divides between the pixmaps made and
+  freed, the copy, the composites and the wait: D6 b and D7 b rest on it.
+* Whether the driver of NVIDIA does RENDER's copies and composites, and a
+  convolution filter, on the GPU.
+* Why ilovlya's passes at rest took two to three times the benchmark's at
+  the same k.
+* Whether S5x meets K9 of 020 before the change: S5 has not been run with a
+  window passed from its frame changing.
+
+== The change off the screen
+
+2026-10-03, ws1, the author's desktop in use; the branch at `be34624` of
+020 merged (`6145045`), then the change (`225d541`, `6c54b18`, `56abad5`).
+The windows of the tests off the screen, in frames of their own; no window
+of the author's bound or redirected.
+
+* *The requests of a pass* (`TestFramePassRequests`, the sequence numbers
+  of two `GetInputFocus` around a pass; the windows of the test without
+  DAMAGE, so without the `DamageSubtract` of a pass of qws): on 020's code,
+  written before the change and run there, 27 at 2556×1357 and 13 at
+  604×394 — 28 and 14 with the subtraction, as counted from the code — and
+  a NoExposure event a pass; with the change 5 and 3, so 6 and 4, none;
+  the first pass of an activation, which makes the chain, 18 and 8. A
+  window moved in its frame: 6 requests at 604×394, the pass made again
+  once (`TestFramePassMoved`).
+* *The pictures* (`TestFramePassPictures`): 200 passes of each of five
+  windows — 2556×1357, 1279×677, 604×394, one of another visual, one two
+  levels below the window the compositor redirects — drawn anew between
+  two passes by a copy in the X server: every picture equal to the
+  snapshot of the same picture, worst 0. `TestCaptureFromFrame` logs the
+  means it logged before (0.51–0.69), `TestRenderThumbnail` its own.
+* *The cost*, `LIVE_FRAME_SIZE=<size> go test -run '^$' -bench
+  'LivePassFrame' -benchtime 300x ./pkg/snapshot` and `-bench 'LivePass$'`,
+  three runs each in turn, before the change (020's code with the
+  benchmark's size, `7d5a4ee`) and after it (`56abad5`):
++
+[cols="2,2,2,2,2",options="header"]
+|===
+| Pass | On the thread, p50 | Done, p50 | qws's CPU | The X server's CPU
+
+| from the frame, 2556×1357, 020 | 1.06–1.15 ms | 2.16–2.26 ms | 1.70–1.77 ms | 0.74–0.94 ms
+| from the frame, 2556×1357, 023 | 0.51–0.54 ms | 1.62–1.65 ms | 0.67–0.73 ms | 0.57–0.64 ms
+| from the frame, 604×394, 020 | 0.76–0.80 ms | 1.87–1.91 ms | 1.13–1.20 ms | 0.37–0.54 ms
+| from the frame, 604×394, 023 | 0.45–0.48 ms | 1.56–1.59 ms | 0.67 ms | 0.27–0.47 ms
+| from a pixmap of its own | 0.26–0.28 ms | 1.44–1.47 ms | 0.70–0.73 ms | −0.3–0.5 ms
+|===
++
+The desktop was lighter than when 020 measured 2.40–2.47 ms for the same
+pass; the X server's idle CPU, 54–68 ms a second, gives its CPU a pass a
+spread of some ±0.4 ms. A pass from the frame now costs qws what a pass
+from a window's own pixmap does.
+* *K9 of 020 with one window changing all the time.* In the second runs of
+  the rest variant of 020 (020, research, "The second runs") a pass cost
+  qws, with the frame of cause `live` it brings, 1.71 ms for a window of
+  its own pixmap and 2.24 ms for the xterm from its frame: K9 +4.70 and
+  +5.38 points. The change takes off the frame's share, some 0.5 ms a pass
+  at 604×394 off the screen: the xterm is then to cost about what the
+  mate-terminal does, some +4.3–4.7 points under `-v`, some 3.4 without its
+  `glFinish`. What remains is the same for both: the frame of cause `live`
+  (0.52 ms a pass, 0.35 of it `glFinish` under `-v`), the snapshotter's
+  pass and its publication (0.34 ms), and the scheduler of Go with its
+  system calls and the driver's threads (some 0.8 ms). With one window
+  changing all the time and passed every 33 ms, K9's 3 % is not met by
+  either kind of window; at a `live_interval` of 50 ms, some 2.3 % without
+  `-v`. To be read in S5x and its rest variant (K6).
+
+== On the desktop
+
+2026-10-04 from 10:57, ws1, the author away, the service stopped: 020's
+rest variant of S5 with the build of the change at `9f84a68` and the
+default `live_interval` of 50 ms, `live: true` against `live: false` of
+that build, the carousel and the grid, a mate-terminal of depth 32 and an
+xterm of depth 24 changing every 20 ms, two runs each, 16 runs
+(`~/.cache/qws-runs/20261004-1057-020-rest3` on ws1; 020, research, "The
+third runs"). C of a pool without the `glFinish` of `-v`, as 020's K9 is
+read since 2026-10-04, on less off:
+
+[cols="2,2,2,2",options="header"]
+|===
+| Terminal | Carousel | Grid | The passes, on the thread p50 / p95
+
+| mate-terminal, its own pixmap | 1.97 | 2.08 | 0.82–0.83 / 1.18–1.62 ms
+| xterm, from its frame | 2.31 | 2.27 | 0.88–0.89 / 1.17–1.50 ms
+|===
+
+X, the frame's share of C at rest, 0.19 points in the grid and 0.34 in
+the carousel; at 33 ms before the change it was 1.27 with `glFinish`
+(2026-10-03, 11:24) and 0.57 without (16:02). R at rest 19.7 passes a
+second in every pool on, the fewest activation 19.7. No crash, and no
+BadIDChoice in the logs.

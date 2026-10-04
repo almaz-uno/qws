@@ -255,6 +255,13 @@ func NewOffscreen() (*Offscreen, error) {
 	return &Offscreen{dpy: s.dpy, ctx: s.ctx, pbuf: s.pbuf, bind: s.bind, release: s.release}, nil
 }
 
+// Share names the context, for a context of another display and thread to
+// share its objects: the presenter's draws the live thumbnails the snapshots
+// make (specs/020-live-thumbnails)
+func (o *Offscreen) Share() *Share {
+	return &Share{ctx: o.ctx}
+}
+
 // Destroy releases the context, closes its display and unlocks the thread
 func (o *Offscreen) Destroy() {
 	if o == nil || o.dpy == nil {

@@ -24,7 +24,7 @@ func TestGLXFallback(t *testing.T) {
 	defer func() { log.Logger = savedLogger }()
 	log.Logger = zerolog.New(&out)
 
-	renderer, presenter, err := NewBackend("glx")
+	renderer, presenter, err := NewBackend("glx", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
