@@ -71,10 +71,14 @@ Run with custom configuration:
 
 After launch:
 1. Press `Alt+Tab` to invoke the carousel switcher
-2. Use `←→` (arrow keys) or `Tab` to navigate through windows
-3. **Mouse support**: Hover over any window card to highlight it, click to select
-4. Press `Enter` to activate the selected window
-5. Press `ESC` to cancel
+2. Use `←→` (arrow keys) or `Tab` to navigate through windows; in the grid,
+   `↑↓` move a row within the column, from its bottom back to its top
+3. Press `q` to toggle the carousel and the grid (`keybindings.layout_toggle`;
+   `c` and `g` choose one); the top right of the header says what `q` does
+   now, and the next activation opens in `appearance.layout` again
+4. **Mouse support**: Hover over any window card to highlight it, click to select
+5. Press `Enter` to activate the selected window
+6. Press `ESC` to cancel
 
 The carousel displays window thumbnails in a 3D perspective view.
 
@@ -84,7 +88,7 @@ The carousel displays window thumbnails in a 3D perspective view.
 - **MRU Ordering**: Windows sorted by Most Recently Used order
 - **Thumbnail Previews**: snapshots of every visible window via XComposite, averaged on the GPU; on the `glx` renderer they follow their windows while the switcher is shown (`appearance.thumbnail.live`, `live_interval`)
 - **Smart Placeholders**: Fallback icons when thumbnails unavailable
-- **Keyboard Navigation**: Arrow keys, Tab, Enter, and Escape support
+- **Keyboard Navigation**: Arrow keys, Tab, Enter, and Escape support; a key to toggle the carousel and the grid, `q` by default
 - **Mouse Support**: Hover to highlight windows (orange glow), click to select
 - **Always On Top**: Overlay window with no WM decorations
 - **Header**: the hostname in large letters and the qws version at the top left of the overlay; `appearance.header.enabled: false` hides it
@@ -108,6 +112,7 @@ Example configuration file (`~/.config/qws/config.yaml`):
 keybindings:
   modifier: Alt
   key: Tab
+  layout_toggle: q                # toggles the carousel and the grid; "" for none
 
 appearance:
   thumbnail:

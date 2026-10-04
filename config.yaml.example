@@ -6,12 +6,19 @@ keybindings:
   backward: Shift
   workspace_modifier: Ctrl
   cancel: Escape
+  # Toggles the carousel and the grid while the switcher is shown, without the
+  # workspace modifier; the next activation opens in appearance.layout again.
+  # With the header shown, its top right says what the key does now:
+  # "Q — grid" in the carousel, "Q — carousel" in the grid. "" for none.
+  layout_toggle: q
 
 appearance:
   # Layout mode: "carousel" (default, 3D perspective) or "grid" (Windows-style tile view)
   # You can also switch on-the-fly when selector is open:
   #   - Press 'c' to switch to carousel
   #   - Press 'g' to switch to grid
+  #   - Press keybindings.layout_toggle ('q') to toggle them
+  # In the grid, Up and Down move the selection a row within its column.
   layout: carousel
 
   # Renderer backend: how frames reach the screen; both show the same picture

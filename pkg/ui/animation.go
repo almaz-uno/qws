@@ -132,9 +132,8 @@ func (s *Selector) grid() bool {
 }
 
 // stepTo moves the selection to target: animated when it can be, at once
-// otherwise
-func (s *Selector) stepTo(target int, thumbnails []image.Image) {
-	wrap := target-s.selectedIndex > 1 || s.selectedIndex-target > 1
+// otherwise — and for a wrap, a step around the list or a column
+func (s *Selector) stepTo(target int, wrap bool, thumbnails []image.Image) {
 	// The grid moves over its layers: without them, at once
 	if !s.animates() || wrap || s.grid() && !s.gridReady() {
 		s.cancelStep()

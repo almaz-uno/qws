@@ -1,0 +1,351 @@
+= 026 — layout keys
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-04
+:status: implemented
+:issue: 78
+
+== What and why
+
+While the switcher is shown, `c` shows the carousel and `g` the grid, both
+keys fixed in `pkg/ui/selector.go`; no key goes from one layout to the
+other, and the overlay says nothing of them. In the grid, Left and Right
+step through the tiles row after row, from the last to the first and back,
+and Up and Down do nothing. The author asks (issue #78) for a key that
+toggles the two layouts, a hint in the header saying what it does, and Up
+and Down in the grid.
+
+The specification is a delta to `develop` at `fd00d27` — 1.3.4 with the
+live thumbnails of 020 and 023 merged. Unchanged: `c`, `g`, Ctrl+C, the
+main key, Left, Right, Enter and the cancel key; the layout every
+activation opens in, `appearance.layout`; every frame without the hint —
+the scenes of Σ without a header, and a header without the hint — byte for
+byte; the band of the header and the geometry of both layouts; the
+animations of 007 and 010; the live thumbnails of 020; the existing
+configuration keys and their meaning.
+
+== Decisions
+
+=== Decided by the author, 2026-10-04
+
+D1. *The key.* A configuration key `keybindings.layout_toggle`, `q` by
+default, with the flag `--keybindings-layout-toggle` and the variable
+`QWS_KEYBINDINGS_LAYOUT_TOGGLE`, as the other keybindings have. While the
+switcher is shown it toggles the carousel and the grid. `c` and `g` stay as
+they are. It follows their rule of modifiers: not with the workspace
+modifier held. An empty value: no toggle, no hint. A name `keygrab` cannot
+resolve: a warning, as the other keys report a bad name, no toggle, no hint.
+
+D2. *Until the switcher closes.* The layout chosen with the key holds until
+the switcher closes; the next activation opens in `appearance.layout`
+again, as after `c` and `g` (`restoreInitialLayoutMode`).
+
+D3. *The hint.* At the top right of the band of the header, what the key
+does now: `Q — grid` in the carousel, `Q — carousel` in the grid — the
+key's name as configured, a single letter upper-cased, any other name as
+written, and an em dash. In the size and colour of the version of the
+header, on its baseline, ending at the header's margin from the right edge.
+None when the header is off (`appearance.header.enabled: false`) or the key
+is empty or unresolvable. A field of `carousel.Config` the selector sets
+from the layout and the key, drawn by `drawHeader`, so that `pkg/carousel`
+knows nothing of keys.
+
+D4. *Up and Down in the grid* move one row within the column, around it.
+With n tiles in `cols` columns as the grid lays them out — row after row,
+the last row from the left — Down from tile i goes to i + cols if it is
+less than n, else to the top of the column, i mod cols; Up from i goes to
+i − cols if it is not negative, else to the last tile of the column,
+c + cols·⌊(n − 1 − c) / cols⌋ with c = i mod cols. A column of one tile:
+no move. Left and Right unchanged. In the carousel Up and Down do nothing.
+The move goes through the step of the arrows (`stepTo`), so the selection
+frame slides; `cols` comes from the function the drawing uses.
+
+=== Made in the specification, 2026-10-04, for the author to confirm
+
+D5. *The layout key after the others.* The key is looked at after every
+other key of the switcher: Enter, the cancel key, the workspace modifier,
+`c`, `g`, Ctrl+C, the main key and the arrows. A name that is one of them —
+`Tab`, `Escape`, `c` — keeps that key's meaning: there is no layout key,
+no toggle and no hint, as for a name qws does not know, and one warning
+says so as the selector starts; a hint of a key that toggles nothing would
+say what it does not do (D3). Looked at before them, a layout key on the
+main key would take the switching itself.
+
+D6. *A narrow overlay.* The hint is not drawn where it would begin closer to
+the end of the version — of the hostname when there is no version — than
+the gap between the hostname and the version, 16 px. Rejected: cutting the
+hint, which would show a name in part; moving it below the band, which
+would change the band and the grid. With the font of the tests at the
+size of E1, `Q — carousel` beside `ws1` and `v0.1.0` needs an overlay of
+348 px (research): the rule is for overlays made narrow by a large font or
+a large padding, not for the monitors of today.
+
+D7. *What slides.* The selection frame slides to the tile above or below,
+as it slides to the next tile with Right; around a column of three tiles or
+more — from its last tile to its top, or back — it is there at once, as a
+step around the list is at once (007, "A wrap-around step … is not
+animated"). In a column of two tiles the tile around is the tile above or
+below, and the frame slides. `stepTo` took any step of more than one window
+for a wrap, which would put every row step at once (research); its callers
+now tell it: Left and Right by the rule of before, Up and Down by D7.
+
+D8. *The hint is a part of the header.* `drawHeader` draws it only when it
+draws the hostname or the version, and the band of the header —
+`headerBand`, below which the grid lays out its tiles — is computed without
+it. So the grid has the same geometry with and without the hint, and
+without a header no hint is drawn whatever the configuration says.
+
+D9. *The scenes of Σ.* The six scenes with a header (005) get the hint of
+the default key — the header as the selector now draws it — and their
+digests change. Two new scenes keep the frame of E1 with the header of 005
+alone, `carousel-e1-header-no-hint` and `grid-e1-header-no-hint`, with the
+digests `carousel-e1-header` and `grid-e1-header` had; two more,
+`carousel-header-narrow` and `grid-header-narrow`, 280 px wide, draw no hint
+(D6).
+
+== Behavior
+
+=== The key
+
+[cols="2,1,5"]
+|===
+| Key | Default | Meaning
+
+| `keybindings.layout_toggle`
+| `q`
+| While the switcher is shown, toggles the carousel and the grid. A key name
+  as for `keybindings.key` — `keysyms.yaml`, case-insensitive,
+  `--keysym-list`. Empty: none.
+|===
+
+The flag `--keybindings-layout-toggle` and the variable
+`QWS_KEYBINDINGS_LAYOUT_TOGGLE`, as in 002. An empty environment variable
+counts as unset, as for every key (Viper): the empty value is given in the
+file or with the flag. A name `keygrab` does not know is reported once, when
+the selector is created, at warning level — "Failed to parse layout toggle
+key, no layout toggle", with the name, as the cancel key reports its own —
+and there is no toggle and no hint. Where the other keys fall back to a
+default on a bad name, this one falls back to none (D1).
+
+=== The toggle
+
+. While the switcher is shown, the key pressed without the workspace
+  modifier — alone, or with Shift or the primary modifier — shows the other
+  layout: the grid from the carousel, the carousel from the grid. As `c`
+  and `g` do: the layers of 007 are dropped and the frame drawn anew, at
+  once; the selection, the hover and the workspace filter stay.
+. The key is looked at after the other keys of the switcher (D5).
+. The layout holds until the switcher closes — Enter, the release of the
+  modifier, a click, the cancel key — and the next activation opens in
+  `appearance.layout` (D2).
+
+=== The hint
+
+. *Text.* The key's name as configured, without the spaces around it — one
+  letter upper-cased, any other name as written — an em dash between
+  spaces, and the layout the key goes to: `Q — grid` in the carousel,
+  `Q — carousel` in the grid, `F2 — grid`, `space — carousel`. A layout of
+  `appearance.layout` other than `grid` is drawn as the carousel, and its
+  hint is that of the carousel.
+. *Place.* At the top right of the band of the header (005): in the face of
+  the version, `appearance.font.size`, in the text colour at 0.6 of its
+  alpha, on the baseline of the hostname and the version, ending 24 px — the
+  margin of the header — from the right edge of the overlay. Drawn with the
+  header, before the cards and the tiles.
+. It changes with the layout — `c`, `g`, the key — and back to that of
+  `appearance.layout` as the switcher closes.
+. *None* with the header off, with the key empty or unknown, where it would
+  come within 16 px of the version (D6), and in a frame without a header
+  (D8).
+. *Both renderers*: `drawHeader` draws it into the frame of `cpu`, and into
+  the base layer of 007, `CarouselBase`, which the scenes of `glx` draw first
+  in both layouts. A switch of layout drops the layers, so the base is drawn
+  again with the hint of the new layout.
+
+=== Up and Down
+
+. In the grid, Down and Up move the selection a row within its column,
+  around it, by the formula of D4, with the columns of `GridColumns` of
+  `pkg/carousel`, the function `layoutGrid` lays the tiles out with. The
+  selection frame slides to the tile above or below; around a column of
+  three tiles or more it is there at once (D7). A column of one tile: no
+  move, no frame.
+. In the carousel Up and Down do nothing: no step, no frame.
+. As Left and Right, with any modifier.
+
+=== Existing configurations
+
+No key, variable or flag is renamed or removed, and no default changes. A
+configuration without the key gets `q` and its hint: a change the user
+sees, with a new key — a minor version (constitution, "Releases and
+versions"). `layout_toggle: ""` takes the toggle and the hint away; Up and
+Down in the grid have no key. Before, `q` did nothing while the switcher was
+shown. A configuration whose cancel key is `q`, as an example of
+`doc/configuration.asciidoc` shows, keeps it: `q` cancels, with no hint and
+a warning, and the toggle needs another name (D5). `README.md`, `doc/configuration.asciidoc` and
+`config.yaml.example` describe the key, the hint and Up and Down in the same
+change.
+
+== Acceptance criteria
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| The toggle: `TestLayoutKeys` in `pkg/ui` — key presses handed to the
+  selector as its loop hands them over, on an X connection of the test with
+  the keyboard and modifier mappings set: `q` in the carousel shows the grid
+  with the hint `Q — carousel`, the layers dropped; Shift+`q` the carousel
+  with `Q — grid`; Ctrl+`q` nothing; `c` and `g` as before, the hint
+  following them; at the end of the activation `appearance.layout` and its
+  hint, for an `appearance.layout` of the carousel and of the grid (D2).
+  Without the key no toggle and no hint; without the header no hint.
+
+| K2
+| The name: `TestLayoutToggleKey` — `q` and ` Q ` give the keysym 0x71 and
+  the hints `Q — grid` and `Q — carousel`; `F2` and `space` theirs, as
+  written; an empty name no key and nothing logged; an unknown one no key
+  and one warning with the name; `q` when it is the cancel key no key, no
+  hint and one warning with the name (D5).
+
+| K3
+| Configuration: `TestLayoutToggle` in `internal/config` — `q` by default,
+  as `config init` writes it and `config show` prints it, and from a file
+  without the key; `F2` and `""` from a file; the variable over the file.
+  `TestLayoutToggleFlag` in `cmd/qws`: `F3` and `""` from the flag.
+  `TestRoundTrip`, `TestTagNames` and `TestJoinedKeys` with the key — the
+  round trip with an empty value. The key in `README.md`,
+  `doc/configuration.asciidoc` and `config.yaml.example`.
+
+| K4
+| The hint drawn: `TestLayoutHint` in `pkg/carousel`, both layouts, the frame
+  of E1 — a hint of the version's text differs from the frame without it
+  only where the version's picture lands moved to end at the margin, pixel
+  for pixel equal to it: the face, the colour and the baseline of the
+  version; within the band; the band and the grid as without it; drawn at
+  the width where it starts 16 px after the version, not a pixel narrower;
+  not drawn in the narrow scenes; none without the header.
+
+| K5
+| Σ: `TestScenes` — the scenes of 001 and the host scenes with
+  `testdata/scenes.json` unchanged; the six header scenes changed on
+  purpose (D9); the four new scenes recorded, the two `-e1-header-no-hint`
+  with the digests the `-e1-header` scenes had before.
+
+| K6
+| `glx` as `cpu`: `TestGLXPresenterMatchesCPU` over Σ with the scenes of
+  the hint — the frame at rest byte for byte, and for the carousel the base
+  layer with the hint drawn as a scene; `TestLayers` — the grid of layers
+  over the base with the hint is the frame of `cpu`; `TestParallelDrawing`.
+  Skipped without an X display, GLX and a compositor, as they are.
+
+| K7
+| Up and Down: `TestColumnStep` — for 1 to 40 tiles, with
+  `appearance.grid.columns` 0 and 1 to 6, Down from the top of each column
+  passes its tiles in order and comes back, Up in reverse: every tile
+  reached, Down then Up and Up then Down return, a column of one tile still;
+  the tile reached in the column as `GridTile` draws it, a row below.
+  `TestLayoutKeys`: the selection of a grid of 12, five columns, through
+  Down and Up, and nothing in the carousel. `TestRowSlide`: on a presenter
+  that composes, the frame slides to the tile above or below and to the
+  next with Right, and is there at once around a column of three and around
+  the list.
+
+| K8
+| The live thumbnails after a toggle: `TestLayoutKeys` with the snapshotter
+  and the presenter of `TestLiveFrames` — after `q` the snapshotter is told
+  every tile and the frame draws the live items of the grid, `GridLive`;
+  after `q` again the cards in view and `CarouselLive`. The tests of 020 —
+  `TestLiveFrames`, `TestLiveOff`, `TestLiveThumbnails`, `TestLiveCovers`,
+  `TestLiveFallback`, `TestSharedLive`, `TestLiveSchedule`, `TestLiveAtRest`,
+  `TestLiveFromFrame` — pass as they are.
+
+| K9
+| `go build ./...`, `gofmt -l` empty, `go vet ./...`, `make check-specs` and
+  `go test ./...` on every commit, in a worktree of its own; `go test -race`
+  of `pkg/ui`, `pkg/snapshot`, `pkg/x11` and `pkg/carousel`. The rule of
+  021: outside the tests `xgb.NewConn` only in `pkg/x11/extensions.go` and
+  the two console programs, no `Init(` of an extension but `gl.Init`.
+
+| K10
+| The author's trial on E1, `glx`, the service's build replaced by that of
+  the branch: Alt+Tab held, `q` shows the grid and the hint reads
+  `Q — carousel`, `q` again the carousel and `Q — grid`; Up and Down in the
+  grid move the selection frame within the column, sliding, around it; the
+  modifier released and Alt+Tab again, the carousel of `appearance.layout`;
+  a terminal changing on the visible workspace follows on its card and its
+  tile after a toggle.
+|===
+
+== Results
+
+2026-10-04, ws1 — E1, the author's desktop. Off the screen: the tests of
+the two commits of the change, `11d5f66` and `5834543`, each in a worktree
+of its own, a compositor running. On the desktop: the author's trial (K10).
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | Met. `TestLayoutKeys`: `q` in the carousel the grid and `Q — carousel`,
+  the layers dropped, Shift+`q` back with `Q — grid`, Ctrl+`q` nothing; `c`
+  and `g` as before, the hint following them; at the end of the activation
+  `appearance.layout` and its hint, for the carousel and for the grid; no
+  toggle and no hint without the key, no hint without the header.
+| K2 | Met. `TestLayoutToggleKey`: `q`, ` Q `, `F2`, `space` and their hints;
+  an empty name no key, nothing logged; an unknown one and `q` taken by the
+  cancel key no key, no hint and one warning naming it (D5).
+| K3 | Met. `TestLayoutToggle`, `TestLayoutToggleFlag`, `TestRoundTrip` with an
+  empty value, `TestTagNames`, `TestJoinedKeys`; `qws config show` of the
+  build prints `layout_toggle: q`. The key in `README.md`,
+  `doc/configuration.asciidoc` and `config.yaml.example`.
+| K4 | Met. `TestLayoutHint`: the hint of the version's text is the version's
+  picture moved to end at the margin, pixel for pixel, in both layouts at
+  2520×1400; the band and the grid unchanged; drawn at 348 px of width, not
+  at 347; none in the narrow scenes, none without the header.
+| K5 | Met. `TestScenes`: `carousel-e1-header`, `carousel-header-light`,
+  `carousel-header-no-hostname` and the three of the grid changed on purpose,
+  the hint `Q — grid` or `Q — carousel` drawn; `-e1-header-no-hint` of both
+  layouts with the digests the `-e1-header` scenes had; the two
+  `-header-narrow` scenes, 280 px wide, with no hint; every other digest
+  unchanged.
+| K6 | Met. `TestGLXPresenterMatchesCPU`, `TestLayers` and
+  `TestParallelDrawing`, run, not skipped.
+| K7 | Met. `TestColumnStep` for 1 to 40 tiles, columns 0 and 1 to 6;
+  `TestLayoutKeys` through Down and Up in a grid of 12, nothing in the
+  carousel; `TestRowSlide`.
+| K8 | Met. `TestLayoutKeys` with the snapshotter and presenter of
+  `TestLiveFrames`: the live items of the grid after `q`, of the carousel
+  after `q` again; the tests of 020 pass.
+| K9 | Met. `go build`, `gofmt -l`, `go vet`, `make check-specs` and
+  `go test ./...` on both commits, each in a worktree of its own;
+  `go test -race` of `pkg/ui`, `pkg/snapshot`, `pkg/x11`, `pkg/carousel`.
+  The rule of 021 holds.
+| K10 | Met. The author's trial, 2026-10-04 at 16:53, the build of `5834543`
+  on Alt+F11, the service stopped: one activation, `q` 11 times — 6 to the
+  grid, 5 back to the carousel —, the arrows in the grid, the switcher
+  closed from the grid onto a window and the layout of
+  `appearance.layout` restored; 78 frames, 32 of cause `key`, 27 of them in
+  the grid; a window changing on the visible workspace, of depth 32, passed
+  41 times, its frames of cause `live` 11 in the carousel and 30 in the
+  grid, across the toggles; no warning or error in the log
+  (`~/.cache/qws-trial-026/log.json` on ws1). The author: it works well.
+|===
+
+Made in the implementation, beside the plan: a layout key that is another
+key of the switcher gives no hint either, and a warning (D5) — the draft of
+the change drew the hint of a key that did nothing.
+
+Not checked: Mesa and ws3; ws7.
+
+== Open decisions
+
+. The mouse in the grid: `getWindowIndexAtPositionGrid` in
+  `pkg/ui/selector.go` repeats the column formula of `layoutGrid` and lays
+  the tiles out over the whole window, without the band of the header that
+  005 put above them, so with the header on the tile it finds under the
+  pointer is that of a grid laid out higher — by half the band where the
+  tiles are of their largest size (research). Seen while writing this
+  specification; not changed by it.
