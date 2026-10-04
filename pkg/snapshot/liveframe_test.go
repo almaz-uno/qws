@@ -3,6 +3,7 @@ package snapshot
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"image"
 	"os"
 	"sort"
@@ -259,9 +260,11 @@ func (m *cpuMeter) report(b *testing.B, n int) {
 // GPU into the live texture, 30 passes a second — on the snapshotter's thread
 // (pass), from its start to its publication (done), at p50 and p95; and the
 // CPU of the X server a pass, less its own over as long a stretch before, and
-// of the test's process. b.N is the number of passes:
+// of the test's process. b.N is the number of passes; LIVE_FRAME_SIZE the
+// window's size, 2556x1357 by default — 604x394 is the xterm of S5:
 //
 //	go test -run '^$' -bench LivePassFrame -benchtime 300x ./pkg/snapshot
+//	LIVE_FRAME_SIZE=604x394 go test -run '^$' -bench LivePassFrame -benchtime 300x ./pkg/snapshot
 func BenchmarkLivePassFrame(b *testing.B) {
 	conn, err := x11.NewConn()
 	if err != nil {
@@ -273,6 +276,11 @@ func BenchmarkLivePassFrame(b *testing.B) {
 	defer zerolog.SetGlobalLevel(level)
 	s := frameSnapshotter(b, conn)
 	size := image.Pt(2556, 1357)
+	if v := os.Getenv("LIVE_FRAME_SIZE"); v != "" {
+		if _, err := fmt.Sscanf(v, "%dx%d", &size.X, &size.Y); err != nil {
+			b.Fatalf("LIVE_FRAME_SIZE %q: %v", v, err)
+		}
+	}
 	w, _ := frameWindow(b, s, conn, image.Pt(-4000, -4000), size, 0)
 	defer s.forget(w.id)
 	if _, ok := livePicture(b, s, w); !ok {
@@ -308,5 +316,405 @@ func BenchmarkLivePassFrame(b *testing.B) {
 		sort.Float64s(v.v)
 		b.ReportMetric(v.v[(len(v.v)*50+99)/100-1], v.name+"-p50-ms")
 		b.ReportMetric(v.v[(len(v.v)*95+99)/100-1], v.name+"-p95-ms")
+	}
+}
+
+// TestFrameCopyQuiet checks D3 of specs/023-frame-pass-cost: the copy of a
+// window out of its frame's pixmap, for a snapshot and for a live pass,
+// sends no NoExposure event to the snapshotter's connection
+func TestFrameCopyQuiet(t *testing.T) {
+	conn, err := x11.NewConn()
+	if err != nil {
+		t.Skipf("no X display: %v", err)
+	}
+	defer conn.Close()
+	s := frameSnapshotter(t, conn)
+	w, _ := frameWindow(t, s, conn, image.Pt(-4000, -4000), image.Pt(604, 394), 0)
+	defer s.forget(w.id)
+	for k := range 4 {
+		if k%2 == 0 {
+			s.capture(w, "test")
+		} else if _, ok := livePicture(t, s, w); !ok {
+			t.Fatal("no pass")
+		}
+	}
+	xproto.GetInputFocus(conn).Reply()
+	for ev, _ := conn.PollForEvent(); ev != nil; ev, _ = conn.PollForEvent() {
+		if _, ok := ev.(xproto.NoExposureEvent); ok {
+			t.Fatal("a NoExposure event of the copy")
+		}
+	}
+}
+
+// framePictures are two pictures of a window's size in pixmaps of the test,
+// copied into the window's child in turn, so that it is drawn anew in the X
+// server, not uploaded at each pass
+type framePictures struct {
+	conn    *xgb.Conn
+	child   xproto.Window
+	gc      xproto.Gcontext
+	pixmaps [2]xproto.Pixmap
+	size    image.Point
+}
+
+func newFramePictures(t testing.TB, conn *xgb.Conn, child xproto.Window, size image.Point, seed int64) *framePictures {
+	t.Helper()
+	f := &framePictures{conn: conn, child: child, size: size}
+	screen := xproto.Setup(conn).DefaultScreen(conn)
+	for i := range f.pixmaps {
+		f.pixmaps[i] = newPixmap(t, conn, screen.Root, 24, size)
+		t.Cleanup(func() { xproto.FreePixmap(conn, f.pixmaps[i]) })
+		fillDrawable(t, conn, xproto.Drawable(f.pixmaps[i]), 24, windowImage(size.X, size.Y, seed+int64(i)))
+	}
+	f.gc, _ = xproto.NewGcontextId(conn)
+	xproto.CreateGC(conn, f.gc, xproto.Drawable(child), xproto.GcGraphicsExposures, []uint32{0})
+	t.Cleanup(func() { xproto.FreeGC(conn, f.gc) })
+	return f
+}
+
+// show draws picture i into the window
+func (f *framePictures) show(i int) {
+	xproto.CopyArea(f.conn, xproto.Drawable(f.pixmaps[i]), xproto.Drawable(f.child), f.gc,
+		0, 0, 0, 0, uint16(f.size.X), uint16(f.size.Y))
+	f.conn.Sync()
+}
+
+// snapshot is the snapshot of picture i, taken by RENDER as 022 takes it
+func (f *framePictures) snapshot(t testing.TB, s *Snapshotter, w *window, i int) *image.RGBA {
+	t.Helper()
+	f.show(i)
+	s.capture(w, "test")
+	img, _ := s.Thumbnail(w.id)
+	snap, ok := img.(*image.RGBA)
+	if !ok {
+		t.Fatalf("snapshot %T, not taken by RENDER", img)
+	}
+	return snap
+}
+
+// TestFramePassPictures checks K1 of specs/023-frame-pass-cost: the passes
+// from the frame, through the chain kept for the activation, give the
+// pictures of 020's, byte for byte — each live picture equal, worst 0, to
+// the snapshot of the same picture, which 020's passes equalled (K14 of 020)
+// — for windows of depth 24 in frames of their visual off the screen, of
+// 2556×1357 (two halvings), 1279×677 (one, both sides odd) and 604×394
+// (none), one of another visual of depth 24, and one two levels below the
+// window the compositor redirects; each passed 200 times, drawn anew from
+// two pictures in turn between two passes: no pass reads the scaled pixmap
+// as it was before
+func TestFramePassPictures(t *testing.T) {
+	conn, err := x11.NewConn()
+	if err != nil {
+		t.Skipf("no X display: %v", err)
+	}
+	defer conn.Close()
+	s := frameSnapshotter(t, conn)
+	screen := xproto.Setup(conn).DefaultScreen(conn)
+	passes := 200
+	if testing.Short() {
+		passes = 20
+	}
+	for _, c := range []struct {
+		name   string
+		size   image.Point
+		visual xproto.Visualid
+		nested bool
+	}{
+		{"2556×1357", image.Pt(2556, 1357), 0, false},
+		{"1279×677", image.Pt(1279, 677), 0, false},
+		{"604×394", image.Pt(604, 394), 0, false},
+		{"of another visual", image.Pt(800, 500), otherVisual(screen, 24), false},
+		{"two levels below", image.Pt(800, 500), 0, true},
+	} {
+		if c.name == "of another visual" && c.visual == 0 {
+			t.Logf("%s: skipped, no such visual", c.name)
+			continue
+		}
+		var w *window
+		var child xproto.Window
+		if c.nested {
+			w, child = nestedFrameWindow(t, s, conn, image.Pt(-4000, -4000), c.size)
+		} else {
+			w, child = frameWindow(t, s, conn, image.Pt(-4000, -4000), c.size, c.visual)
+		}
+		pics := newFramePictures(t, conn, child, c.size, 40)
+		snaps := [2]*image.RGBA{pics.snapshot(t, s, w, 0), pics.snapshot(t, s, w, 1)}
+		worst := 0
+		for k := range passes {
+			pics.show(k % 2)
+			got, ok := livePicture(t, s, w)
+			if !ok {
+				t.Fatalf("%s: pass %d not made", c.name, k)
+			}
+			if _, d := difference(got, snaps[k%2]); d > worst {
+				worst = d
+			}
+		}
+		t.Logf("%s: %d passes, worst %d from the snapshot of the same picture", c.name, passes, worst)
+		if worst != 0 {
+			t.Errorf("%s: worst %d from the snapshots, want 0", c.name, worst)
+		}
+		if w.chain == nil {
+			t.Errorf("%s: no chain kept", c.name)
+		}
+		s.forget(w.id)
+	}
+}
+
+// nestedFrameWindow is a client window of depth 24 at 2,22 in a window at
+// 0,0 of a frame off the screen, which the compositor redirects: two levels
+// below it, as 022's case
+func nestedFrameWindow(t testing.TB, s *Snapshotter, conn *xgb.Conn, at image.Point, size image.Point) (*window, xproto.Window) {
+	t.Helper()
+	screen := xproto.Setup(conn).DefaultScreen(conn)
+	r := image.Rectangle{Min: at, Max: at.Add(size).Add(image.Pt(4, 24))}
+	top := testWindow(t, conn, screen.Root, r, 0, 0)
+	frame := testWindow(t, conn, top, image.Rectangle{Max: r.Size()}, 0, 0)
+	client := testWindow(t, conn, frame, image.Rect(2, 22, 2+size.X, 22+size.Y), 0, 0)
+	child := testWindow(t, conn, client, image.Rectangle{Max: size}, 0, 0)
+	waitRedirected(t, conn, top)
+	w := &window{id: client, frame: frame, mapped: true, frameMapped: true, visual: screen.RootVisual, stale: true}
+	s.windows[client], s.frames[frame] = w, client
+	fillDrawable(t, conn, xproto.Drawable(child), 24, windowImage(size.X, size.Y, 98))
+	s.capture(w, "test")
+	if w.via != top || w.bound != nil {
+		t.Fatalf("via 0x%x, bound %v; want the pixmap of 0x%x by RENDER", w.via, w.bound != nil, top)
+	}
+	return w, child
+}
+
+// TestFramePassChain checks K4 of specs/023-frame-pass-cost: the chain of a
+// window's passes from the frame is freed at the end of the live passes and
+// with the window — GetGeometry of each of its pixmaps answers BadDrawable —
+// and at another size made of that size, the pictures of K1 at it
+func TestFramePassChain(t *testing.T) {
+	conn, err := x11.NewConn()
+	if err != nil {
+		t.Skipf("no X display: %v", err)
+	}
+	defer conn.Close()
+	s := frameSnapshotter(t, conn)
+	s.live = liveSession{overlay: 7, interval: 33 * time.Millisecond}
+	gone := func(what string, c *chain) {
+		t.Helper()
+		ids := append([]xproto.Pixmap{c.copy}, c.pixmaps...)
+		for _, p := range ids {
+			if _, err := xproto.GetGeometry(conn, xproto.Drawable(p)).Reply(); err == nil {
+				t.Errorf("%s: pixmap 0x%x of the chain still there", what, p)
+			}
+		}
+	}
+	w, child := frameWindow(t, s, conn, image.Pt(-4000, -4000), image.Pt(1279, 677), 0)
+	if _, ok := livePicture(t, s, w); !ok {
+		t.Fatal("no pass")
+	}
+	c := w.chain
+	if c == nil || c.copy == 0 || len(c.pixmaps) != 1 {
+		t.Fatalf("chain %+v, want a copy and one halving", c)
+	}
+	// The end of the live passes
+	s.liveWant = liveSession{}
+	s.setLive()
+	if w.chain != nil {
+		t.Error("a chain kept past the end of the live passes")
+	}
+	gone("live ended", c)
+
+	// Another size: the window resized in its frame, named anew
+	s.live = liveSession{overlay: 7, interval: 33 * time.Millisecond}
+	if _, ok := livePicture(t, s, w); !ok {
+		t.Fatal("no pass")
+	}
+	size := image.Pt(800, 500)
+	xproto.ConfigureWindow(conn, w.id, xproto.ConfigWindowWidth|xproto.ConfigWindowHeight,
+		[]uint32{uint32(size.X), uint32(size.Y)})
+	xproto.ConfigureWindow(conn, child, xproto.ConfigWindowWidth|xproto.ConfigWindowHeight,
+		[]uint32{uint32(size.X), uint32(size.Y)})
+	conn.Sync()
+	w.stale = true
+	pics := newFramePictures(t, conn, child, size, 60)
+	snap := pics.snapshot(t, s, w, 0)
+	old := w.chain
+	got, ok := livePicture(t, s, w)
+	if !ok {
+		t.Fatal("no pass at the new size")
+	}
+	if w.chain == nil || w.chain.size != size {
+		t.Errorf("chain of %v, want %v", w.chain.size, size)
+	}
+	if _, worst := difference(got, snap); worst != 0 {
+		t.Errorf("at the new size: worst %d from the snapshot, want 0", worst)
+	}
+	if old != nil {
+		gone("another size", old)
+	}
+
+	// The window forgotten
+	c = w.chain
+	s.forget(w.id)
+	if w.chain != nil {
+		t.Error("a chain kept with the window forgotten")
+	}
+	gone("forgotten", c)
+}
+
+// passRequests makes a pass of the window and counts what it sends on the
+// snapshotter's connection, which nothing else sends on — the difference of
+// the sequence numbers of two GetInputFocus around it, less one — and the
+// NoExposure events the connection receives meanwhile; false when no pass is
+// made
+func passRequests(t testing.TB, s *Snapshotter, conn *xgb.Conn, w *window) (requests, noExposures int, ok bool) {
+	t.Helper()
+	for ev, _ := conn.PollForEvent(); ev != nil; ev, _ = conn.PollForEvent() {
+	}
+	before := xproto.GetInputFocus(conn)
+	if _, err := before.Reply(); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok = livePicture(t, s, w); !ok {
+		return 0, 0, false
+	}
+	after := xproto.GetInputFocus(conn)
+	if _, err := after.Reply(); err != nil {
+		t.Fatal(err)
+	}
+	for ev, _ := conn.PollForEvent(); ev != nil; ev, _ = conn.PollForEvent() {
+		if _, isNoExposure := ev.(xproto.NoExposureEvent); isNoExposure {
+			noExposures++
+		}
+	}
+	return int(after.Sequence-before.Sequence) - 1, noExposures, true
+}
+
+// TestFramePassRequests checks K3 of specs/023-frame-pass-cost: a pass from
+// the frame after the first of an activation sends at most 6 requests on
+// the snapshotter's connection for a window of 2556×1357, two halvings, and
+// 4 for one of 604×394, none — 020's passes sent 28 and 14 — and brings no
+// NoExposure event; the first, which makes what the passes keep, no more
+// requests than a pass of 020. The windows of the test have no DAMAGE, so
+// their passes send no DamageSubtract, one request of qws's passes: 5 and
+// 3 at most here, 27 and 13 for 020's. The windows are off the screen.
+func TestFramePassRequests(t *testing.T) {
+	conn, err := x11.NewConn()
+	if err != nil {
+		t.Skipf("no X display: %v", err)
+	}
+	defer conn.Close()
+	s := frameSnapshotter(t, conn)
+	for _, c := range []struct {
+		size        image.Point
+		most, of020 int
+	}{
+		{image.Pt(2556, 1357), 6 - 1, 28 - 1},
+		{image.Pt(604, 394), 4 - 1, 14 - 1},
+	} {
+		w, _ := frameWindow(t, s, conn, image.Pt(-4000, -4000), c.size, 0)
+		// The scaled pixmap of 020 made, as at a window's first pass of all
+		if _, ok := livePicture(t, s, w); !ok {
+			t.Fatalf("%v: no pass", c.size)
+		}
+		s.dropChains()
+		first, firstEvents, ok := passRequests(t, s, conn, w)
+		if !ok {
+			t.Fatalf("%v: no first pass of the activation", c.size)
+		}
+		var counts []int
+		events := firstEvents
+		for range 3 {
+			n, e, ok := passRequests(t, s, conn, w)
+			if !ok {
+				t.Fatalf("%v: no pass", c.size)
+			}
+			counts, events = append(counts, n), events+e
+		}
+		t.Logf("%v: the first pass of an activation %d requests, the next %v; %d NoExposure events",
+			c.size, first, counts, events)
+		for _, n := range counts {
+			if n > c.most {
+				t.Errorf("%v: %d requests a pass, want %d at most (020: %d)", c.size, n, c.most, c.of020)
+			}
+		}
+		if first > c.of020 {
+			t.Errorf("%v: the first pass %d requests, more than 020's %d", c.size, first, c.of020)
+		}
+		if events != 0 {
+			t.Errorf("%v: %d NoExposure events", c.size, events)
+		}
+		s.forget(w.id)
+	}
+}
+
+// TestFramePassMoved checks K2 of specs/023-frame-pass-cost: a window moved
+// in its frame between two passes — as i3 moves one, showing or hiding a
+// title bar — and one two levels below the window the compositor redirects,
+// moved with its parent: the next live picture equal byte for byte to the
+// snapshot at the new place, the pass made again once — 2(k + 3) requests,
+// with no DamageSubtract, as TestFramePassRequests counts — and the offset
+// kept for the passes after it
+func TestFramePassMoved(t *testing.T) {
+	conn, err := x11.NewConn()
+	if err != nil {
+		t.Skipf("no X display: %v", err)
+	}
+	defer conn.Close()
+	s := frameSnapshotter(t, conn)
+	size := image.Pt(604, 394)
+	for _, nested := range []bool{false, true} {
+		var w *window
+		var child xproto.Window
+		if nested {
+			w, child = nestedFrameWindow(t, s, conn, image.Pt(-4000, -4000), size)
+		} else {
+			w, child = frameWindow(t, s, conn, image.Pt(-4000, -4000), size, 0)
+		}
+		pics := newFramePictures(t, conn, child, size, 80)
+		pics.show(0)
+		if _, ok := livePicture(t, s, w); !ok {
+			t.Fatal("no pass")
+		}
+		// Up by 20 pixels: the window itself, or the window it lies in
+		moved := w.id
+		if nested {
+			tree, err := xproto.QueryTree(conn, w.id).Reply()
+			if err != nil {
+				t.Fatal(err)
+			}
+			moved = tree.Parent
+		}
+		geom, err := xproto.GetGeometry(conn, xproto.Drawable(moved)).Reply()
+		if err != nil {
+			t.Fatal(err)
+		}
+		xproto.ConfigureWindow(conn, moved, xproto.ConfigWindowY, []uint32{uint32(int(geom.Y) - 20)})
+		conn.Sync()
+		before := w.at
+		n, _, ok := passRequests(t, s, conn, w)
+		if !ok {
+			t.Fatalf("nested %v: no pass after the move", nested)
+		}
+		got := s.pics[w.id]
+		img := image.NewRGBA(image.Rect(0, 0, got.Width, got.Height))
+		gl.BindTexture(gl.TEXTURE_2D, got.Texture)
+		gl.GetTexImage(gl.TEXTURE_2D, 0, gl.RGBA, gl.UNSIGNED_BYTE, unsafe.Pointer(&img.Pix[0]))
+		for i := 3; i < len(img.Pix); i += 4 {
+			img.Pix[i] = 255
+		}
+		snap := pics.snapshot(t, s, w, 0)
+		_, worst := difference(img, snap)
+		t.Logf("nested %v: at %v, then %v; %d requests; worst %d from the snapshot at the new place",
+			nested, before, w.at, n, worst)
+		if worst != 0 {
+			t.Errorf("nested %v: worst %d from the snapshot at the new place", nested, worst)
+		}
+		if w.at != before.Add(image.Pt(0, -20)) {
+			t.Errorf("nested %v: offset %v kept, want %v", nested, w.at, before.Add(image.Pt(0, -20)))
+		}
+		if n != 2*(0+3) {
+			t.Errorf("nested %v: %d requests, want 6, the pass made again once", nested, n)
+		}
+		if again, _, _ := passRequests(t, s, conn, w); again != 0+3 {
+			t.Errorf("nested %v: %d requests the pass after, want 3", nested, again)
+		}
+		s.forget(w.id)
 	}
 }

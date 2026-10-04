@@ -278,6 +278,7 @@ func (s *Snapshotter) setLive() {
 			}
 		}
 		s.emptyTrash()
+		s.dropChains()
 	}
 }
 
@@ -500,20 +501,13 @@ var bindScaled = func(off *glx.Offscreen, pixmap xproto.Pixmap) (*glx.TexturePix
 // done it: the GPU reads the pixmap next. False when it cannot: the window is
 // then stale and keeps its picture until a snapshot names its pixmap anew;
 // should a scaled pixmap not bind on the GPU, no window is passed from its
-// frame for the session.
+// frame for the session. False as well, the window still waiting a pass,
+// when it moved in its frame twice in a pass.
 func (s *Snapshotter) scaleFromFrame(w *window, tw, th int) bool {
 	sp, err := s.scaledFor(w, tw, th)
+	moved := false
 	if err == nil {
-		var r image.Rectangle
-		if r, err = s.pixmapRect(w); err == nil {
-			var passes []render.CompositeCookie
-			passes, err = s.render.scale(w.pixmap, w.pixVisual, w.pixDepth, r, sp.picture)
-			for _, p := range passes {
-				if err == nil {
-					err = p.Check()
-				}
-			}
-		}
+		moved, err = s.passFromFrame(w, sp)
 	}
 	if err != nil {
 		log.Debug().Err(err).Uint32("window", uint32(w.id)).Uint32("via", uint32(w.via)).
@@ -521,7 +515,79 @@ func (s *Snapshotter) scaleFromFrame(w *window, tw, th int) bool {
 		w.stale = true
 		return false
 	}
+	if moved {
+		log.Debug().Uint32("window", uint32(w.id)).Msg("Live pass from the frame: the window moved, again")
+		return false
+	}
 	return true
+}
+
+// passFromFrame runs the window's chain at the offset kept, then sends
+// TranslateCoordinates of the window to its frame, which xgb's check of the
+// composites would have sent a GetInputFocus for: its reply checks them as
+// well, and tells where the window lies now (specs/023-frame-pass-cost, D2
+// c). Should the window lie elsewhere — a title bar shown or hidden — the
+// chain is run again at once at the new place, once; true when it has moved
+// again by then.
+func (s *Snapshotter) passFromFrame(w *window, sp *scaledPixmap) (bool, error) {
+	for range 2 {
+		r := image.Rectangle{Max: image.Pt(w.width, w.height)}.Add(w.at)
+		c, err := s.chainFor(w, r, sp)
+		if err != nil {
+			return false, err
+		}
+		passes := c.run(w.pixmap, w.at)
+		pos, err := xproto.TranslateCoordinates(s.conn, w.id, w.via, 0, 0).Reply()
+		for _, p := range passes {
+			if err == nil {
+				// Answered by the reply after it: no round trip of its own
+				err = p.Check()
+			}
+		}
+		if err != nil {
+			return false, err
+		}
+		at := image.Pt(int(pos.DstX)+w.viaBorder, int(pos.DstY)+w.viaBorder)
+		if at == w.at {
+			return false, nil
+		}
+		w.at = at
+	}
+	return true, nil
+}
+
+// chainFor is the chain the window's passes from the frame run, into its
+// scaled pixmap sp, for the window at r in its frame's pixmap: kept for the
+// activation (specs/023-frame-pass-cost, D1 b), made at its first pass and
+// anew for another size, visual or depth, a copy or none
+func (s *Snapshotter) chainFor(w *window, r image.Rectangle, sp *scaledPixmap) (*chain, error) {
+	copies := r.Min != image.Point{}
+	if c := w.chain; c != nil && c.fits(w.pixmap, w.pixVisual, w.pixDepth, r.Size(), copies, sp.picture) {
+		return c, nil
+	}
+	s.dropChain(w)
+	c, err := s.render.newChain(w.pixmap, w.pixVisual, w.pixDepth, r.Size(), copies, sp.picture)
+	if err != nil {
+		return nil, err
+	}
+	w.chain = c
+	return c, nil
+}
+
+// dropChain frees the window's chain
+func (s *Snapshotter) dropChain(w *window) {
+	if w.chain != nil {
+		w.chain.free()
+		w.chain = nil
+	}
+}
+
+// dropChains frees the chains of every window, at the end of the live
+// passes: they are kept for an activation, not longer
+func (s *Snapshotter) dropChains() {
+	for _, w := range s.windows {
+		s.dropChain(w)
+	}
 }
 
 // scaledFor is the scaled pixmap of the window, of tw×th, made at its first
@@ -530,6 +596,7 @@ func (s *Snapshotter) scaledFor(w *window, tw, th int) (*scaledPixmap, error) {
 	if sp := w.scaled; sp != nil && sp.width == tw && sp.height == th {
 		return sp, nil
 	}
+	s.dropChain(w) // it scales into the picture of the scaled pixmap
 	s.dropScaled(w)
 	sp := &scaledPixmap{width: tw, height: th}
 	w.scaled = sp // for dropScaled to free what is made, should a step fail

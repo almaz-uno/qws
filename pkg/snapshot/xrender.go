@@ -117,10 +117,12 @@ func (x *xrender) thumbnail(pixmap xproto.Pixmap, visual xproto.Visualid, depth 
 	}
 	render.CreatePicture(x.conn, pic, xproto.Drawable(dst), x.argb32, 0, nil)
 	defer render.FreePicture(x.conn, pic)
-	passes, err := x.scale(pixmap, visual, depth, r, pic)
+	c, err := x.newChain(pixmap, visual, depth, r.Size(), r.Min != image.Point{}, pic)
 	if err != nil {
 		return nil, err
 	}
+	defer c.free()
+	passes := c.run(pixmap, r.Min)
 
 	if _, err := shm.GetImage(x.conn, xproto.Drawable(dst), 0, 0, uint16(tw), uint16(th), ^uint32(0),
 		xproto.ImageFormatZPixmap, x.seg, 0).Reply(); err != nil {
@@ -139,35 +141,51 @@ func (x *xrender) thumbnail(pixmap xproto.Pixmap, visual xproto.Visualid, depth 
 	return img, nil
 }
 
-// scale scales the rectangle r of a pixmap of the visual and the depth into
-// dst, a picture a8r8g8b8 of thumbSize(r) — the thumbnail, or the pixmap of
-// a live pass of specs/020-live-thumbnails — and returns the cookies of its
-// passes: a failed request leaves a pass it feeds failing too, so the passes
-// alone are checked, once the X server has answered a request after them,
-// without a round trip of their own. A rectangle not at the pixmap's corner
-// — a window in its frame's pixmap — is copied first into a pixmap of its
-// own, so that the passes pad at its edges, not with the frame around it
-// (specs/022-uncaptured-windows).
-func (x *xrender) scale(pixmap xproto.Pixmap, visual xproto.Visualid, depth int, r image.Rectangle, dst render.Picture) ([]render.CompositeCookie, error) {
+// chain is how RENDER scales a window into a picture a8r8g8b8 of its
+// thumbnail's size — the thumbnail, or the scaled pixmap of a live pass of
+// specs/020-live-thumbnails — made once and run for each picture: the copy
+// of the window out of the pixmap it is drawn in, when it lies off the
+// pixmap's corner, so that the passes pad at its edges, not with the frame
+// around it (specs/022-uncaptured-windows); bilinear halvings along each side
+// more than twice the thumbnail's; one bilinear pass into the picture. A
+// snapshot makes and frees one; the passes of a window from its frame keep
+// theirs for an activation (specs/023-frame-pass-cost, D1 b), so that a pass
+// sends the copy and the composites alone.
+type chain struct {
+	x      *xrender
+	size   image.Point     // the window's
+	visual xproto.Visualid // of the pixmap it is taken from
+	depth  int
+	copies bool            // the window lies off the pixmap's corner
+	pixmap xproto.Pixmap   // without a copy, the pixmap read
+	dst    render.Picture  // scaled into, the caller's
+	copy   xproto.Pixmap   // the copy of the window
+	gc     xproto.Gcontext // its graphics context
+	steps  []chainStep
+
+	pictures []render.Picture // made by the chain, freed by it
+	pixmaps  []xproto.Pixmap
+}
+
+// chainStep is a composite of the chain, from src into dst, of w×h
+type chainStep struct {
+	src, dst render.Picture
+	w, h     int
+}
+
+// newChain makes the chain of a window of size, taken from a pixmap of the
+// visual and the depth — pixmap, read without a copy, at the corner — into
+// dst: the pixmaps and the pictures, each with its transform and filter
+func (x *xrender) newChain(pixmap xproto.Pixmap, visual xproto.Visualid, depth int, size image.Point, copies bool, dst render.Picture) (*chain, error) {
 	format, ok := x.formats[visual]
 	if !ok {
 		return nil, fmt.Errorf("RENDER: no picture format for visual 0x%x", visual)
 	}
-	w, h := r.Dx(), r.Dy()
-	tw, th := thumbSize(w, h)
-
-	// What the passes use is freed once they are sent: the X server frees it
-	// after the requests before
-	var pictures []render.Picture
-	var pixmaps []xproto.Pixmap
-	defer func() {
-		for _, p := range pictures {
-			render.FreePicture(x.conn, p)
-		}
-		for _, p := range pixmaps {
-			xproto.FreePixmap(x.conn, p)
-		}
-	}()
+	c := &chain{x: x, size: size, visual: visual, depth: depth, copies: copies, dst: dst}
+	fail := func(err error) (*chain, error) {
+		c.free()
+		return nil, err
+	}
 	// picture makes a picture of the drawable; the filter reads past its
 	// edges the pixels at the edges
 	picture := func(d xproto.Drawable, f render.Pictformat) (render.Picture, error) {
@@ -176,35 +194,38 @@ func (x *xrender) scale(pixmap xproto.Pixmap, visual xproto.Visualid, depth int,
 			return 0, err
 		}
 		render.CreatePicture(x.conn, p, d, f, render.CpRepeat, []uint32{render.RepeatPad})
-		pictures = append(pictures, p)
+		c.pictures = append(c.pictures, p)
 		return p, nil
 	}
 
-	if r.Min != (image.Point{}) {
-		window, err := xproto.NewPixmapId(x.conn)
-		if err != nil {
-			return nil, err
+	w, h := size.X, size.Y
+	source := xproto.Drawable(pixmap)
+	if copies {
+		var err error
+		if c.copy, err = xproto.NewPixmapId(x.conn); err != nil {
+			return fail(err)
 		}
-		xproto.CreatePixmap(x.conn, byte(depth), window, xproto.Drawable(x.root), uint16(w), uint16(h))
-		pixmaps = append(pixmaps, window)
-		gc, err := xproto.NewGcontextId(x.conn)
-		if err != nil {
-			return nil, err
+		xproto.CreatePixmap(x.conn, byte(depth), c.copy, xproto.Drawable(x.root), uint16(w), uint16(h))
+		if c.gc, err = xproto.NewGcontextId(x.conn); err != nil {
+			c.gc = 0
+			return fail(err)
 		}
-		xproto.CreateGC(x.conn, gc, xproto.Drawable(window), 0, nil)
-		xproto.CopyArea(x.conn, xproto.Drawable(pixmap), xproto.Drawable(window), gc,
-			int16(r.Min.X), int16(r.Min.Y), 0, 0, uint16(w), uint16(h))
-		xproto.FreeGC(x.conn, gc)
-		pixmap = window
+		// Without graphics exposures, the protocol's default, each copy
+		// sends a NoExposure event, which woke the snapshotter's loop for
+		// nothing (specs/023-frame-pass-cost, D3)
+		xproto.CreateGC(x.conn, c.gc, xproto.Drawable(c.copy), xproto.GcGraphicsExposures, []uint32{0})
+		source = xproto.Drawable(c.copy)
+	} else {
+		c.pixmap = pixmap
 	}
-	src, err := picture(xproto.Drawable(pixmap), format)
+	src, err := picture(source, format)
 	if err != nil {
-		return nil, err
+		return fail(err)
 	}
-	var passes []render.CompositeCookie
 	// The sides of the window in the pixels of the last pass: a halving keeps
 	// every pixel where it was, at half the scale, and pads an odd side with
 	// its last pixel, so the thumbnail is scaled from the window's own extent
+	tw, th := thumbSize(w, h)
 	fw, fh := float64(w), float64(h)
 	for final := false; !final; {
 		final = fw <= float64(2*tw) && fh <= float64(2*th)
@@ -222,24 +243,69 @@ func (x *xrender) scale(pixmap xproto.Pixmap, visual xproto.Visualid, depth int,
 			nw, nh = int(math.Ceil(fw)), int(math.Ceil(fh))
 			half, err := xproto.NewPixmapId(x.conn)
 			if err != nil {
-				return nil, err
+				return fail(err)
 			}
 			xproto.CreatePixmap(x.conn, 32, half, xproto.Drawable(x.root), uint16(nw), uint16(nh))
-			pixmaps = append(pixmaps, half)
+			c.pixmaps = append(c.pixmaps, half)
 			if next, err = picture(xproto.Drawable(half), x.argb32); err != nil {
-				return nil, err
+				return fail(err)
 			}
 		}
 		// A pixel of the destination samples the source at its centre scaled:
-		// at ½ exactly, the corner of four pixels, averaged
+		// at ½ exactly, the corner of four pixels, averaged. Each picture is
+		// the source of one step: its transform and filter set once.
 		render.SetPictureTransform(x.conn, src, render.Transform{
 			Matrix11: fixed(sx), Matrix22: fixed(sy), Matrix33: fixed(1)})
 		render.SetPictureFilter(x.conn, src, uint16(len(filterBilinear)), filterBilinear, nil)
-		passes = append(passes, render.CompositeChecked(x.conn, render.PictOpSrc, src, 0, next,
-			0, 0, 0, 0, 0, 0, uint16(nw), uint16(nh)))
+		c.steps = append(c.steps, chainStep{src, next, nw, nh})
 		src = next
 	}
-	return passes, nil
+	return c, nil
+}
+
+// fits reports whether the chain scales a window of size, taken from the
+// pixmap, of the visual and the depth, copied out or not, into dst
+func (c *chain) fits(pixmap xproto.Pixmap, visual xproto.Visualid, depth int, size image.Point, copies bool, dst render.Picture) bool {
+	return c.size == size && c.visual == visual && c.depth == depth && c.copies == copies &&
+		c.dst == dst && (copies || c.pixmap == pixmap)
+}
+
+// run sends the copy of the window at at in the pixmap, when the chain
+// copies, and the composites, and returns their cookies: a failed request
+// leaves a pass it feeds failing too, so the passes alone are checked, once
+// the X server has answered a request after them, without a round trip of
+// their own
+func (c *chain) run(pixmap xproto.Pixmap, at image.Point) []render.CompositeCookie {
+	x := c.x
+	if c.copies {
+		xproto.CopyArea(x.conn, xproto.Drawable(pixmap), xproto.Drawable(c.copy), c.gc,
+			int16(at.X), int16(at.Y), 0, 0, uint16(c.size.X), uint16(c.size.Y))
+	}
+	passes := make([]render.CompositeCookie, len(c.steps))
+	for i, st := range c.steps {
+		passes[i] = render.CompositeChecked(x.conn, render.PictOpSrc, st.src, 0, st.dst,
+			0, 0, 0, 0, 0, 0, uint16(st.w), uint16(st.h))
+	}
+	return passes
+}
+
+// free frees what the chain made: the X server frees it after the requests
+// before
+func (c *chain) free() {
+	x := c.x
+	for _, p := range c.pictures {
+		render.FreePicture(x.conn, p)
+	}
+	for _, p := range c.pixmaps {
+		xproto.FreePixmap(x.conn, p)
+	}
+	if c.gc != 0 {
+		xproto.FreeGC(x.conn, c.gc)
+	}
+	if c.copy != 0 {
+		xproto.FreePixmap(x.conn, c.copy)
+	}
+	c.pictures, c.pixmaps, c.gc, c.copy = nil, nil, 0, 0
 }
 
 // fixed is the 16.16 fixed point number of RENDER nearest to f

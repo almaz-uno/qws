@@ -124,6 +124,13 @@ type window struct {
 	pixVisual xproto.Visualid
 	pixDepth  int
 
+	// Where the window lies in its ancestor's pixmap: the ancestor's border,
+	// from the naming of the pixmap, and the window's offset in the pixmap,
+	// border and all, as the X server last told it — at a snapshot, or a
+	// live pass, which checks it (specs/023-frame-pass-cost, D2 c)
+	viaBorder int
+	at        image.Point
+
 	// The live thumbnails (specs/020-live-thumbnails): the pictures so far,
 	// snapshots and passes, which number their generations; the textures of
 	// the passes, nil before the first; when it is due one; for a window
@@ -133,6 +140,7 @@ type window struct {
 	live     *liveTextures
 	liveDue  liveSchedule
 	scaled   *scaledPixmap
+	chain    *chain // the RENDER chain of the passes from the frame, for an activation
 }
 
 // errNotViewable: the X server would not name the window's pixmap — it is not
@@ -598,6 +606,7 @@ func (s *Snapshotter) forget(id xproto.Window) {
 	}
 	s.release(w)
 	s.dropLive(w)
+	s.dropChain(w)
 	s.dropScaled(w)
 	if w.texture != 0 {
 		gl.DeleteTextures(1, &w.texture)
@@ -746,7 +755,7 @@ func (s *Snapshotter) captureGPU(w *window) (*image.RGBA, error) {
 // (specs/022-uncaptured-windows). errNotViewable when the window is not
 // viewable, errNotRedirected when no ancestor's pixmap can be named.
 func (s *Snapshotter) namePixmap(w *window) error {
-	w.via, w.pixVisual, w.pixDepth = 0, w.visual, w.depth
+	w.via, w.pixVisual, w.pixDepth, w.viaBorder, w.at = 0, w.visual, w.depth, 0, image.Point{}
 	pixmap, err := xproto.NewPixmapId(s.conn)
 	if err != nil {
 		return err
@@ -784,6 +793,7 @@ func (s *Snapshotter) namePixmap(w *window) error {
 		}
 		w.pixmap, w.via = pixmap, id
 		w.pixVisual, w.pixDepth = attrs.Visual, int(geom.Depth)
+		w.viaBorder = int(geom.BorderWidth)
 		return nil
 	}
 }
@@ -807,7 +817,8 @@ func (s *Snapshotter) pixmapRect(w *window) (image.Rectangle, error) {
 		return image.Rectangle{}, err
 	}
 	b := int(geom.BorderWidth)
-	return r.Add(image.Pt(int(pos.DstX)+b, int(pos.DstY)+b)), nil
+	w.at = image.Pt(int(pos.DstX)+b, int(pos.DstY)+b)
+	return r.Add(w.at), nil
 }
 
 // store keeps the thumbnail of the window, a picture of a new generation
