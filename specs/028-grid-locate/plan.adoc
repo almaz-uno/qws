@@ -1,0 +1,127 @@
+= 028 — plan
+:toc: left
+:toc-title: Contents
+:revdate: 2026-10-05
+
+== Approach
+
+*The layers of both layouts* (D3, D7). The layer cache holds the layers of
+the carousel and of the grid side by side, as it can: their keys differ
+already. The base — the canvas with the header — differs by the hint of the
+layout key, so each layout gets one, `carouselBase` and `gridBase` among the
+keys of the cache in place of the fixed layer 1: the base of the layout
+shown drawn on the spot when it is missing, as now (`ensureBase`), the
+other's in the background. `prefetch` asks, after the layers of the layout
+shown, for the other layout's at rest: in the carousel, the grid's base and
+`gridLayers`; in the grid, the carousel's base and its cards at rest at the
+selection (`motionLayers(sel, sel)`), anew after each step of the grid.
+`carouselReady` and `gridReady` say whether a layout's layers are held,
+whichever is shown.
+
+`switchLayout` no longer drops the layers. With the layers of the layout
+switched to held, it ends what moves (`cancelStep`), presents a scene of
+them at once — of the grid, at the start of the animation when it runs —
+and draws the frame at rest of that layout in the background, presented
+when it comes or at the end of the animation; during the fade-in, the
+fade's frames present the scene. Without them, as now: the frame drawn on
+the CPU, the layers asked for. `dropLayers` stays where it is — a new
+activation, for the window list, the thumbnails and the geometry, and the
+workspace filter — and drops both layouts' layers. A frame at rest drawn in
+the background carries its layout, so that one of the carousel is not taken
+for the grid's after a switch.
+
+*The animation* (D1, D2, D5, D6). `locateAnimation`, `pkg/ui/locate.go`: a
+level from 0 to 1 in `locate_duration` along ease-out cubic (`motion`),
+begun by a switch to the grid with its layers held — or, without them, when
+they come, if within `locate_duration` of the key. `gridItems` places the
+shadow of the selected tile and the selection frame through
+`effects{fade, zoom}.look(v, locate_zoom)` about the tile's centre with
+`zoomRect`, as the hover frames; every other item as at rest. The loop
+presents its frames as those of a step or a hover: the scene while it
+moves, then the frame at rest, or the scene at rest until that comes. A
+step (`stepTo`, `cancelStep`) and a switch end it, a hover does not;
+`liveDue` is false while it runs, and `handleEventsSync` makes frames while
+anything moves (`moving`). Under `cpu`, with the animations off or at
+`locate_duration: 0s`, none.
+
+*The keys* (D4). `appearance.animation.locate_duration` and `locate_zoom`
+as `hover_duration` and `hover_zoom` (014): `Default()`, `setDefaults`,
+flags, variables. `parseAnimation` reports a negative duration and takes it
+as 0, and a factor not above 1, taking the default.
+
+*The records.* The first frame of a switch presented from the layers is a
+record "Frame" of cause `key` — `total_ms`, the time from the key, is L —
+and, with the animation, also its first "Animation frame" of kind
+`locate`, whose `response_ms` is the time from the key to the first frame
+of the animation; when the animation waits for the layers, that record
+alone. Each frame of the animation is a record "Animation frame" of kind
+`locate` with its `interval_ms`, for F. "Switching layout" says whether the
+layers of the layout switched to were held (`layers`).
+
+*The end of an activation.* `appearance.layout` is restored when the overlay
+is unmapped (`hide`), not when the event that ends the activation is read:
+the fade-out then shows the layout shown — with D3, the frame the presenter
+holds may be the other layout's until the frame at rest of the layout
+switched to comes. The next activation opens in `appearance.layout` as
+before (026, D2).
+
+== Files
+
+[cols="2,5"]
+|===
+| File | What changes
+
+| `internal/config/config.go`
+| `LocateDuration`, `LocateZoom` at the end of `Animation`,
+  `locate_duration` and `locate_zoom`; 400 ms and 1.6 in `Default()` and
+  `setDefaults`, which makes the variables read.
+
+| `cmd/qws/root.go`
+| The flags `--appearance-animation-locate-duration` and
+  `--appearance-animation-locate-zoom`, and `applyFlags`.
+
+| `pkg/ui/effects.go`
+| `animationOptions.locate` and `locateZoom`; their warnings; none with the
+  animations off.
+
+| `pkg/ui/locate.go`
+| New: the animation, its start, its end and the look of the frame.
+
+| `pkg/ui/animation.go`
+| The bases among the keys of the cache; `prefetch` of the other layout;
+  `carouselReady` and `gridReady` of either layout; `gridItems` with the
+  animation; `frame` with its frames and records; the frame at rest with
+  its layout; the animation started when the grid's layers come.
+
+| `pkg/ui/selector.go`
+| `switchLayout` from the layers; `moving` in the loop; the restore of the
+  layout out of `handleEventsSync`; the keys in the record "Animations".
+
+| `pkg/ui/fade.go`, `pkg/ui/hover.go`, `pkg/ui/live.go`
+| The layout restored in `hide`; the hover's scene of the grid not
+  presented while the animation runs; no live frame at rest while it runs.
+
+| `pkg/ui/locate_test.go`
+| New: K1–K4 on the presenter of the tests of 026.
+
+| `pkg/ui/keys_test.go`
+| `TestLayoutKeys`: a switch keeps the layers; `TestRowSlide` with the
+  base of the grid.
+
+| `pkg/ui/switch_bench_test.go`
+| T1; after the change, L off the screen (K4); the loop's `moving`.
+
+| `pkg/ui/effects_test.go`, `internal/config/config_test.go`,
+  `cmd/qws/root_test.go`
+| K5.
+
+| `README.md`, `doc/configuration.asciidoc`, `config.yaml.example`
+| The keys and the animation.
+|===
+
+What must stay: `pkg/carousel` as it is — the frames at rest of both
+layouts and renderers byte for byte, `TestGLXPresenterMatchesCPU`,
+`TestLayers`, `TestScenes` with `testdata/scenes.json` unchanged; the
+carousel; the steps, the hover and the mouse of the grid; `cpu`, which has
+no layers; the live thumbnails at rest; the layers dropped where they were
+but at a switch; the next activation in `appearance.layout` (026, D2).

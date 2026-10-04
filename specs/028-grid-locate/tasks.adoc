@@ -1,0 +1,17 @@
+= 028 — tasks
+:toc: left
+:toc-title: Contents
+:revdate: 2026-10-05
+
+. [x] T1. Before any change of the code, on the code of `develop`:
+  `BenchmarkE1Switch`, the time from a switch to the grid until its layers
+  are held, off the screen (research, "The time to the grid's layers"); the
+  open decision it answers dropped, D7 made in the plan.
+. [ ] T2. The layers of both layouts kept and the switch from them — D3,
+  D7; the frame at rest with its layout; the layout restored in `hide`; K4,
+  and `BenchmarkE1Switch` after it.
+. [ ] T3. The animation — D1, D2, D5, D6 — with its keys, their documents
+  and the records of L and F; K1–K3, K5.
+. [ ] T4. K8 on every commit, in a worktree of its own.
+. [ ] T5. The author's trial on E1: K6, K7, K9, D7.
+. [ ] T6. The results.

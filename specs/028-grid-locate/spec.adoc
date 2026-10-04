@@ -2,7 +2,7 @@
 :toc: left
 :toc-title: Contents
 :sectnums:
-:revdate: 2026-10-04
+:revdate: 2026-10-05
 :status: draft
 :issue: 83
 
@@ -30,7 +30,8 @@ hover and mouse; the live thumbnails of 020 at rest.
 == Decisions
 
 D1–D4 decided by the author on 2026-10-04, each the option recommended;
-D5 and D6 made in the specification and taken with them.
+D5 and D6 made in the specification and taken with them; D7 made in the
+plan, for the author to confirm.
 
 D1. *The selection frame converges onto the tile.* After the switch the
 selection frame of the grid and the shadow of the selected tile appear
@@ -63,12 +64,14 @@ from its layers in the next frame, without the frame of the CPU, and the
 frame converges from that frame. A switch to the carousel the same way,
 its layers kept. The cost: the layers of the grid drawn once an
 activation, a tiles layer of at most the window's size — up to some 14 MB
-of GPU memory on E1 (2520×1400×4 bytes) — while they were drawn only after a switch;
+of GPU memory on E1 (2520×1400×4 bytes), and as much for a base of the
+grid's own, whose header has the hint of the grid (research) — while they
+were drawn only after a switch;
 whatever drops the layers now (the window list, the thumbnails, the
 workspace filter) drops both.
 Alternative: as now, the grid drawn on the CPU and its layers after it, the
-frame converging from when they are there — some 140 ms after the key on
-E1, an estimate to be measured (research, T1).
+frame converging from when they are there — 103–120 ms after the key at
+p50 off the screen on E1, 120–160 ms at p95 (research, T1).
 
 D4. *Two keys,* as the hover has (`hover_duration`, `hover_zoom`, 010 and
 014): `appearance.animation.locate_duration`, 400 ms by default — longer
@@ -86,6 +89,15 @@ animation at once, and the step moves the selection frame from the tile, as
 now; a switch back to the carousel ends it; the hover of another tile does
 not. The live thumbnails make no pass while it runs, frames coming one
 after another (020), and start 30 ms after it ends.
+
+D7. *Without the animation too.* On `glx` with `locate_duration: 0s` or the
+animations off, a switch still shows the layout switched to from its layers
+when they are held, at rest, and the frame at rest drawn in the background
+replaces it when it comes: the picture as now, in the next frame — as a
+step at a duration of 0 keeps its path through the layers (010). The layers
+of the other layout are drawn in the background whatever the animations.
+Alternative: without the animation, the layout drawn on the CPU at a switch
+as before this change, and the layers of the other layout not drawn ahead.
 
 == Behavior
 
@@ -166,6 +178,4 @@ kind `locate`, against those of the fade-ins of the same runs.
 
 == Open decisions
 
-. The time from the key to the grid's layers without D3, measured before
-  the change (T1): the estimate of D3 rests on the drawing of the tiles
-  layer, some 60 ms after the frame of the CPU.
+. D7, for the author to confirm in the trial (K9).
