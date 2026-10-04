@@ -2,8 +2,8 @@
 :toc: left
 :toc-title: Contents
 :sectnums:
-:revdate: 2026-10-03
-:status: draft
+:revdate: 2026-10-04
+:status: implemented
 :issue: 66
 
 == What and why
@@ -464,6 +464,64 @@ same for the mate-terminal — 1.27 points on 2026-10-03.
 
 | K8
 | `go vet ./...`, `go test ./...` and `make check-specs` pass.
+|===
+
+== Results
+
+2026-10-03, ws1, off the screen (research, "The change off the screen");
+2026-10-04 from 10:57, on the desktop of E1, the rest variant of S5 with
+the build of the change at `9f84a68`, `live: true` against `live: false`
+of that build, at the default `live_interval` of 50 ms — the carousel and
+the grid, a mate-terminal and an xterm changing all the time, two runs
+each (research, "On the desktop"; 020, research, "The third runs").
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | `TestFramePassPictures`: 200 passes of each of five windows —
+  2556×1357, 1279×677, 604×394, one of another visual of depth 24, one two
+  levels below the window the compositor redirects — drawn anew between two
+  passes: every live picture equal to the snapshot of the same picture,
+  worst 0.
+| K2 | `TestFramePassMoved`: a window moved in its frame, and one two
+  levels below moved with its parent: the pass made again once, 6 requests
+  at 604×394, the picture equal to the snapshot at the new place, worst 0,
+  the offset kept.
+| K3 | `TestFramePassRequests`: 6 requests a pass at 2556×1357 and 4 at
+  604×394 — counted 5 and 3 on windows of the test without DAMAGE — against
+  28 and 14 (27 and 13 so counted on 020's code); no NoExposure, 1 a pass
+  before (`TestFrameCopyQuiet` for snapshots and passes); the first pass of
+  an activation 18 and 8.
+| K4 | `TestFramePassChain`: the chain freed at the end of the live passes
+  and with the window, `GetGeometry` of each of its pixmaps answering an
+  error; at another size, a chain of that size, the picture equal to the
+  snapshot.
+| K5 | `BenchmarkLivePassFrame`, three runs of 300: at 2556×1357 qws's CPU
+  0.67–0.73 ms a pass (1.70–1.77 before), the X server's 0.57–0.64 ms
+  (0.74–0.94); at 604×394 0.67 ms (1.13–1.20) and 0.27–0.47 ms
+  (0.37–0.54); a window's own pixmap 0.70–0.73 ms.
+| K6 | Met in the rest variant. K9 of 020, without the `glFinish` of
+  `-v`: 2.31 points in the carousel and 2.27 in the grid with the xterm
+  passed from its frame, 1.97 and 2.08 with the mate-terminal — the bound
+  3; X, the frame's share, 2.27 − 2.08 = 0.19 points in the grid (0.34 in
+  the carousel) — the bound 0.6, against 1.27 at 33 ms before the change
+  and with `glFinish`; R at rest with the xterm 19.7 passes a second, the
+  fewest 19.7 — the bound 15. The passes of the xterm took the
+  snapshotter's thread 0.88–0.89 ms at p50, the mate-terminal's
+  0.82–0.83 ms. S5x with the key held was not run: no pass is made in
+  motion since 020's `ae12383`, and the rest variant measures the passes.
+| K7 | `TestLiveFromFrame`, `TestLiveAtRest` with a window in a frame,
+  `TestCaptureFromFrame` with the means it logged before,
+  `TestRenderThumbnail`, `TestSharedLive`, `TestLiveSchedule` pass;
+  `TestGPUThumbnail` failed now and then with the desktop in use, "drawn
+  anew", as on `develop` until 025, merged with 1.3.4, which waits for the
+  X server in the snapshots too.
+  `BenchmarkFrameRender`, two runs of 200: 1.15–1.20 ms at p50, 2.5–4.9
+  ms at p95 (1.17 ms at p50 before, K4 of 022: p95 at most 10 ms).
+| K8 | `go vet ./...`, `go test ./...` and `make check-specs` on every
+  commit, in a worktree of its own; `go test -race` of `pkg/snapshot`,
+  `pkg/ui` and `pkg/x11`.
 |===
 
 == Open decisions
