@@ -87,11 +87,19 @@ M1:: the heap in use, the heap taken from the system (`HeapSys`) at its
 peak, and the resident set, after a scenario off the screen: E1's size,
 33 windows with thumbnails of 512×288, 50 activations of steps through the
 carousel and the grid, switches of the layout and live thumbnails, on the
-presenter of the tests of `pkg/ui` — before and after.
+GLX presenter of `BenchmarkE1Switch` — before and after
+(`BenchmarkE1Memory`, research, T1). The peak sampled during the run; the
+heap in use (`HeapInuse`) and the resident set (`VmRSS`) 5 s after its
+last activation; and what the process holds for good, _kept_: the heap
+after two collections, the resident set once its idle heap is given back.
 M2:: the bytes allocated per activation in that scenario, by kind (images,
-glyph masks).
+glyph masks), from the heap profile: over the activations 1–10 and 11–50.
 M3:: the drawing times of 019 and 028 — `BenchmarkE1Grid`, the frames of the
-carousel, `BenchmarkE1Switch` — before and after.
+carousel (`BenchmarkE1Frame`), `BenchmarkE1Switch` — before and after: the
+p50 of ten runs of 20 frames and of five runs of 40 switches; of
+`BenchmarkE1Switch` the time of a switch there and back, which waits for the
+drawing, as its first frame and the grid's layers no longer do since 028
+(research, M3).
 
 == Acceptance criteria
 
@@ -104,17 +112,21 @@ carousel, `BenchmarkE1Switch` — before and after.
   is, `TestGLXPresenterMatchesCPU`, `TestLayers`, `TestParallelDrawing`.
 
 | K2
-| M1 after the change: the peak `HeapSys` at most half of before, the heap
-  in use and the resident set lower — the bounds provisional until T1
-  measures before.
+| M1 after the change, against the medians of three runs before (research,
+  T1): the peak `HeapSys` at most half of before, 814 MB; 5 s after the
+  last activation the heap in use and the resident set at most half of
+  before, 475 and 618 MB. What the process keeps is recorded, not bounded:
+  D1 holds the faces of its sets for good — some 8 MB a set at 128 entries,
+  13 sets on ws1 — and the kept heap grows by them (research, "A set's
+  faces").
 
 | K3
 | M3 within 5 % of before at p50 (D2 kept only so).
 
 | K4
-| M2: the glyph masks allocated per activation near zero once the sets are
-  made (D1); the images allocated per activation at most a quarter of before
-  (D3).
+| M2 over the activations 11–50: the glyph masks allocated at most 1 MB an
+  activation once the sets are made (D1), against 240 MB before; the images
+  at most a quarter of before, 98 MB an activation, against 391 MB (D3).
 
 | K5
 | On ws2, the service of the release a day after its start: the resident
@@ -128,4 +140,7 @@ carousel, `BenchmarkE1Switch` — before and after.
 
 == Open decisions
 
-. The bounds of K2 and K4, provisional until T1.
+. The faces D1 keeps for good: a set for each drawing that ran at once — on
+  ws1 13, half its 24 CPUs and the frame at rest — of some 8 MB at 128
+  entries (research). Fewer sets, the drawings with text bounded below
+  `layerSlots`, would keep fewer and draw the layers later; not measured.
