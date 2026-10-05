@@ -1,0 +1,312 @@
+= 016 — thumbnails of windows hidden and never viewable
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-05
+:status: implemented
+:issue: 44
+
+== What and why
+
+Specification 008 leaves open: "A window never viewable in a session has no
+snapshot but its placeholder, as now." i3 unmaps the frames of hidden
+workspaces and hidden tabs, and an unviewable window has no contents in the
+X server; so after qws starts, every window on a hidden workspace shows its
+placeholder until it is shown once — after every restart of the service and
+after a login. Asked on 2026-10-01 what could be done about it without
+breaking anything, the draft of this specification researched it (research,
+the sections up to "What qws does now") and found on the way a second case,
+of windows once viewable: a window that changed after its last snapshot —
+within the settle of 100 ms or within `behavior.snapshot_interval` — and is
+then hidden, its workspace left or its tab switched, keeps an older
+thumbnail than it could. The snapshotter frees the pixmap it holds of the
+window at the unmap, and the change, never captured, is dropped.
+
+The author decided both on 2026-10-05 (D1, D2): windows never viewable keep
+their placeholder; a window hidden with a change not yet captured gets one
+last snapshot, if the X server still gives its contents through what the
+snapshotter holds. It does (T1, research, "The pixmap held after the
+unmap"): a pixmap named before the unmap keeps the window's last drawing
+after it, read on the GPU and by RENDER — the window's own pixmap however
+the window becomes unviewable, its frame's when the frame is unmapped.
+
+The specification is a delta to `develop` at `1de774d` (1.5.0). Unchanged:
+which windows are captured and when, but for the one snapshot of a window
+hidden, and for a window taken from its frame, which a restack of the frame
+no longer makes stale and changed (M3); the settle and `snapshot_interval`
+for windows viewable; the paths —
+the GPU (008, 025), RENDER (018, 022), the CPU — and the choice among them;
+live thumbnails (020); thumbnails of at most 512×512; nothing kept between
+runs; the configuration — no key, variable or flag changes.
+
+== Decisions
+
+=== The author's, 2026-10-05
+
+D1. *Windows never viewable keep their placeholder* — option A of the
+draft. A window on a workspace i3 has not shown since qws started has no
+contents in the X server (research, "Which windows have no contents"), and
+nothing is kept between runs: the constitution is not amended. The options
+researched and not taken are below, in "Options for windows never
+viewable".
+
+D2. *A window hidden with a change not yet captured gets one last
+snapshot.* A window that changed after its last snapshot, within
+`behavior.snapshot_interval`, and is then hidden — its workspace left, a tab
+switched: i3 unmaps its frame — is captured once more as it becomes
+unviewable, if the X server still gives its contents through what the
+snapshotter holds: the named pixmap of the window or of its frame, the GLX
+pixmap bound to it (008, 018, 022, 025).
+
+=== Made on the way, 2026-10-05, taken by the author with the trial
+
+M1. *At once, or when the pause ends.* The last snapshot is taken at the
+next turn of the snapshotter's loop, without the settle or the interval:
+nothing is drawn into the pixmap held after the unmap (research), so
+waiting would only keep the pixmap longer. While snapshots on change are
+paused — the switcher of any qws instance shown (007, 011), live thumbnails
+included (020) — the pixmap is held and the snapshot taken when the pause
+ends, as the snapshots due meanwhile are (011), or at an activation before
+its first frame, as any window changed since its snapshot (008). The case
+is common: a window chosen in the switcher on another workspace makes i3
+hide the workspace shown during the fade-out, which runs paused.
+
+M2. *Only from a pixmap that holds the window's last drawing.* The pixmap
+named for the window and current at the unmap — not stale: named since the
+window and its frame were last mapped and since their size last changed.
+For a window drawn into its frame's pixmap (022), only when the frame
+itself is unmapped: a window unmapped inside its frame still mapped is
+painted over in the frame's pixmap by the frame's background (research). No
+snapshot on the CPU: `GetImage` of a window not viewable gives nothing of
+it.
+
+M3. *A frame configured at its size keeps its pixmap.* A window taken from
+its frame is made stale, its frame's pixmap named anew, only when the frame
+is configured to another size or border, not at every `ConfigureNotify` of
+the frame as 022 made it: Composite gives a window a new pixmap only for a
+new size or border (research, "A frame configured"), and i3 restacks the
+frames of the workspace it leaves right before it unmaps them (research,
+"What i3 does when it hides a window") — by the rule of 022 every such
+window would be stale at its unmap and get no last snapshot. The window's
+offset in the frame is asked at each capture as before (022, D3).
+
+M4. *No key.* The last snapshot is not configurable; its record "Snapshot"
+says cause `hidden`.
+
+== Behavior
+
+. *The last snapshot.* A window of `_NET_CLIENT_LIST` that becomes
+  unviewable — its frame unmapped by the window manager, or the window
+  itself unmapped — with a change not yet captured, gets one snapshot from
+  the pixmap the snapshotter holds of it, when that pixmap holds its last
+  drawing (M2):
+  * a window with a pixmap of its own (008), on either unmap: on the GPU,
+    the GLX pixmap bound to it, after `glXWaitX` (025), or by RENDER from
+    its own pixmap, when the GPU did not bind it (018);
+  * a window drawn into its frame's pixmap (022), on the unmap of that
+    frame: by RENDER from the frame's pixmap, at the window's offset in it.
++
+A change not yet captured is drawing that DAMAGE reported since the last
+snapshot, whether the window was waiting for the settle or for the
+interval. The snapshot is of a new generation, as any; the record
+"Snapshot" says cause `hidden`. The pixmap is freed after it, as it is at
+an unmap now.
+. *When* (M1). At the next turn of the loop. While snapshots on change are
+  paused, the pixmap is held, and the snapshot taken when the pause ends or
+  at an activation (`Refresh`), whichever comes first.
+. *Superseded.* A window shown again before its last snapshot — its frame
+  mapped — is captured as any window that becomes viewable, from a pixmap
+  named anew; the pixmap held is freed then. A window resized or reparented
+  meanwhile gets no last snapshot, as one stale at the unmap. A window
+  destroyed or gone from the client list meanwhile is forgotten with what
+  it holds, as now.
+. *None* — the pixmap freed at the unmap, as now — for a window unchanged
+  since its last snapshot; a window stale at the unmap, its pixmap not named
+  since its map or its last change of size; a window drawn into its frame
+  and unmapped itself, its frame still mapped; a window taken on the CPU,
+  which holds no pixmap.
+  A last snapshot that fails leaves the window its thumbnail, with a record
+  at debug level.
+. *A frame configured* (M3). A `ConfigureNotify` of the frame a window is
+  taken from makes the window stale, and changed, only when the frame's
+  width, height or border width differs from those it had when its pixmap
+  was named. A frame moved still makes the window changed through DAMAGE,
+  which the X server reports of the whole window at a move (research); the
+  window is then captured from the pixmap it holds.
+. *Windows never viewable* (D1) show their placeholder until they are
+  shown once, as now.
+
+== Options for windows never viewable
+
+Researched by the draft, 2026-10-01 (research, the sections up to "What qws
+does now"); the author took A (D1).
+
+[cols="1,4,4,4"]
+|===
+| | What it gives | What it needs | What it risks
+
+| A. As now — taken
+| The placeholder until the window is shown once.
+| Nothing.
+| Nothing.
+
+| B. Thumbnails kept in the X server
+| On start, the thumbnails the previous qws kept of the windows still in
+  `_NET_CLIENT_LIST`, matched by window ID: after a restart of the service,
+  not after a login. Nothing is written to disk.
+| The constitution amended: "qws keeps no state of its own between runs".
+  An answer to "Window contents" for thumbnails kept in the X server after
+  qws exits.
+| Up to 1 MiB of the X server's memory per window — some 16 MiB on ws1 —
+  left while no qws runs, until the next frees them or the session ends;
+  more if a crash loses the property that names them. A thumbnail as old as
+  the window's last view; the picture of a window destroyed meanwhile shown
+  for a new one given its ID, until its first snapshot. Each instance keeps
+  its own. A pixmap is readable by any X client that knows its ID, as the
+  windows themselves are.
+
+| C. Thumbnails on disk
+| Thumbnails after a login too.
+| The rule on "Window contents": contents written to disk, by file mode and
+  place. A way to match a window of a new session to a picture of an old
+  one — window IDs do not outlive the X server — by class and title.
+| Pictures of closed and private windows on disk; a picture shown for
+  another window of the same title; a picture of another day.
+
+| D. Show the window to capture it
+| A current thumbnail.
+| Showing each hidden workspace at start, through i3, or mapping i3's frames.
+| Seen by the user; the focus and the workspaces move; i3's frames mapped by
+  another client. Breaks the desktop.
+
+| E. `backing-store` `Always`
+| Nothing on Xorg: `Always` is `WhenMapped`.
+| Setting an attribute of every client window.
+| Changes other clients' windows for no effect.
+|===
+
+Not taken: B keeps state between runs, which the constitution does not
+allow, and the author did not amend it; C writes window contents to disk,
+on which the constitution has no rule, and matches windows across sessions
+by guess; D breaks the desktop; E has no effect on Xorg.
+
+== Acceptance criteria
+
+The tests are in `pkg/snapshot`, on windows of their own off the screen,
+under the compositor running; each skips without an X display, a
+compositing manager, RENDER or offscreen GLX. The window's snapshot is
+checked against the area average of the picture drawn last: within 1 per
+channel on the GPU, as K4 of 008; within a mean of 1.2 per channel by
+RENDER, as K3 of 018. The two pictures of a test are a picture and its
+negative, far apart.
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| The last snapshot, on the GPU: `TestHiddenSnapshot` — a window with a
+  pixmap of its own, of depth 32 in a frame of depth 24, captured on the
+  GPU, drawn anew, then hidden at once: its frame unmapped, as i3 hides it,
+  and in a case of its own the window unmapped by its client. The events as
+  the snapshotter's connection reads them, handled as the loop handles
+  them, then the loop's turn: a snapshot of a new generation within 1 of
+  the last picture, its pixmap freed after. Fails without the change: no
+  new snapshot.
+
+| K2
+| The last snapshot by RENDER, in the same test: a window drawn into its
+  frame (depth 24), the frame unmapped — from the frame's pixmap, also when
+  the frame was restacked at its size just before, as i3 does (M3); and a
+  window with a pixmap of its own that the GPU did not bind, as 018 leaves
+  it — from its own pixmap. Each within a mean of 1.2 of the last picture.
+
+| K3
+| None when nothing is to be had: `TestHiddenNoSnapshot` — a window
+  captured and not drawn since, hidden: no new snapshot, its pixmap freed
+  at the unmap; a window drawn into its frame and unmapped itself, its
+  frame still mapped: no new snapshot; a window drawn anew and hidden before
+  its first capture, and one after a change of its size not yet captured:
+  no snapshot.
+
+| K4
+| Nothing more for windows not hidden, in the same test: a viewable window
+  drawn anew within the interval is due as its schedule says — an interval
+  after its last snapshot — and not captured sooner, while another window
+  is hidden and given its last snapshot; a frame restacked at its size
+  leaves its window neither stale nor changed, moved at its size not stale
+  — changed by the damage the X server reports of a move, as now — and
+  resized, stale and changed, as before (M3). `TestSchedule`, `TestWait`,
+  `TestCaptureFromFrame`, `TestLiveFromFrame` and `TestFramePassMoved`
+  pass.
+
+| K5
+| The pause: `TestHiddenPaused` — a window hidden with a change while the
+  snapshots are paused gets no snapshot while paused, its pixmap held, and
+  its last snapshot, within 1 of the last picture, at the first turn of
+  the loop once the pause ends; another, hidden alike while paused, gets it
+  at an activation's capture of the changed windows.
+
+| K6
+| `go build ./...`, `gofmt -l .` empty, `go vet ./...`, `make check-specs`,
+  `go test ./...` and `go test -race ./pkg/snapshot ./pkg/ui ./pkg/x11` pass
+  on each commit of the change in a clean worktree; outside tests
+  `xgb.NewConn` stays in `pkg/x11/extensions.go` and the two console
+  programs, and `Init(` of an extension of xgb is not called but `gl.Init`
+  (021).
+
+| K7
+| The author's trial on E1, open: the build of the change in place of the
+  service, or beside it with its own keys; a terminal on a visible workspace
+  printing a line every 50 ms (`while :; do date +%T.%N; sleep 0.05; done`),
+  its workspace left at once by i3's key, then Alt+Tab: the card of the
+  terminal shows the last lines it printed before the switch, not those of
+  up to `snapshot_interval` earlier.
+|===
+
+== Results
+
+Off the screen: the tests on ws1 under picom, the commits `47040d8` and
+`0acf2ff`, each in a worktree of its own. On the desktop: the author's trial
+on 2026-10-05, 15:31–15:54 — on ws2 at the author's request, not on E1:
+2560×1440 at 165 Hz, an RTX 5060 Ti with the driver 580, i3 4.22; the build
+of `0acf2ff` on Alt+F11, the service stopped
+(`~/.cache/qws-trial-016/log.txt` on ws2).
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | Met. `TestHiddenSnapshot` on the GPU: the frame unmapped and the
+  window unmapped by its client, a snapshot of a new generation within 1 of
+  the last picture; no new snapshot on the code before.
+| K2 | Met. `TestHiddenSnapshot` by RENDER: from the frame's pixmap, also
+  after a restack at its size (M3), and from a window's own pixmap the GPU
+  did not bind; within a mean of 1.2.
+| K3 | Met. `TestHiddenNoSnapshot`: nothing for a window not drawn since its
+  snapshot, for one unmapped inside its frame left mapped, for one hidden
+  before its first capture or after a new size.
+| K4 | Met. In the same test, a viewable window as its schedule says while
+  another gets its last snapshot; a frame restacked or moved at its size
+  keeps its pixmap, resized makes a new one; `TestSchedule`, `TestWait`,
+  `TestCaptureFromFrame`, `TestLiveFromFrame`, `TestFramePassMoved` pass.
+  The tests of the change 300 of 300 times.
+| K5 | Met. `TestHiddenPaused`: no snapshot while paused, the pixmap held;
+  the last snapshot at the first turn after the pause, and at an
+  activation's capture.
+| K6 | Met. On both commits, each in a worktree of its own; `-race` of
+  `pkg/snapshot`, `pkg/ui`, `pkg/x11`; the rule of 021.
+| K7 | Met, on ws2. Ten activations, seven of them ending on a window; 32
+  last snapshots of cause `hidden` — 30 on the GPU, of a mate-terminal, of
+  Chrome, of Claude and others, 2 by RENDER from the frame of a window of
+  depth 24 (virt-viewer) — in 0.3–69 ms, 16.5 ms at p50, on the
+  snapshotter's thread; no warning or error in the log. The author: the
+  card of the terminal showed the time at which its workspace was left.
+|===
+
+Not checked: E1 on the desktop, Mesa (ws3), ws7.
+
+== Open decisions
+
+. Mesa: the last snapshot was tried on E1 alone, NVIDIA; not on Mesa, as
+  025 was not.

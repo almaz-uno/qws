@@ -1,0 +1,77 @@
+= 016 — plan
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-05
+
+== Approach
+
+*Held at the unmap.* `handle` of an `UnmapNotify` of the window or of its
+frame asks `hidden`, with whether the window was viewable before the event
+and which window was unmapped. A window that was viewable, changed
+(`schedule.dirty`), not stale, with a pixmap named — its own, or its frame's
+when the frame is the window unmapped — keeps the pixmap, and its binding on
+the GPU, marked `last`; any other is released and made stale, as now.
+
+*Due at once.* `window.due` is the time a window is to be captured: a
+`last` window at once, any other as its schedule says. `nextDue` and
+`captureChanged` ask it instead of the schedule, so a `last` window is
+captured at the next turn of the loop, or, while paused, when the loop
+captures again: at the end of the pause, or at an activation, whose
+`captureChanged` takes every window due. Nothing else of the loop changes.
+
+*The snapshot from what is held.* `capture` of a window not viewable takes,
+when it is `last`, the snapshot from the pixmap held — `captureHeld`: the
+pixmap bound on the GPU, after `WaitX`, bound again and averaged, as
+`captureGPU` does with a pixmap bound; else by RENDER, at `pixmapRect`, as
+`capture` does for a pixmap the GPU did not bind — stores it, records the
+shot in the schedule, logs "Snapshot" with cause `hidden`; then, `last` or
+not, releases the pixmap and makes the window stale, as now. A window shown
+again before it is captured is viewable again and captured as any, which
+clears `last`.
+
+*The frame kept at its size.* `namePixmap` keeps the size of the ancestor
+whose pixmap it names (`viaSize`) beside its border, which it keeps
+already. `handle` of a `ConfigureNotify` of that ancestor makes the window
+stale, and changed, only when the width, the height or the border width
+differs from them.
+
+== Files
+
+[cols="2,5"]
+|===
+| File | What changes
+
+| `pkg/snapshot/snapshot.go`
+| `window.last`, `window.viaSize`, `window.due`; `hidden`; `capture` and
+  `captureHeld`, the record of a snapshot shared by both (`logSnapshot`);
+  `causeHidden`; `handle` of `UnmapNotify` and of the `ConfigureNotify` of
+  the frame; `nextDue`, `captureChanged`; the comment of the package.
+
+| `pkg/snapshot/hidden_test.go`
+| New: `TestHiddenSnapshot`, `TestHiddenNoSnapshot`, `TestHiddenPaused`,
+  with the helpers they share. They follow the windows through `follow` and
+  `handle`, on the events the X server sends, and drive the loop's turn
+  through `tick` and `captureChanged`, on the test's thread, where the GL
+  context is current: the loop itself, with its goroutine, is not run.
+
+| `doc/configuration.asciidoc`, `README.md`
+| `behavior.snapshot_interval`: a window hidden with a change not yet
+  captured is captured once more as it is hidden. The feature line of the
+  thumbnails: a window hidden right after it changed keeps its last
+  contents.
+|===
+
+== Kept
+
+* The schedule (`schedule.go`) and its tests: `due` of the window wraps it.
+* The live passes: `livePassable` passes viewable windows only; a `last`
+  window is not one.
+* `forget` and `release` as they are: a `last` window destroyed, or gone
+  from the client list, frees its pixmap with the rest.
+
+== Order
+
+The research of T1, the specification; the tests, run first on the code of
+`develop` to see them fail where the change is wanted; the change; the
+checks of K6; the trial of K7 by the author; the results.

@@ -103,7 +103,9 @@ The modifier, the key, `q` and the rest are configurable
 - **Thumbnails of every visible window,** averaged on the GPU, kept
   current as windows change. Windows the window manager draws into their
   frame — xterm, Telegram, KeePassXC, Flutter apps on i3 — are taken from
-  the frame by RENDER ([022](specs/022-uncaptured-windows/spec.adoc)).
+  the frame by RENDER ([022](specs/022-uncaptured-windows/spec.adoc)). A
+  window hidden right after it changed keeps what it showed last
+  ([016](specs/016-unviewable-thumbnails/spec.adoc)).
 - **Live thumbnails** with the `glx` renderer, only for what is in view and
   only while nothing moves (`appearance.thumbnail.live`, `live_interval`).
 - **Animation** of every change — the step, the selection frame of the
