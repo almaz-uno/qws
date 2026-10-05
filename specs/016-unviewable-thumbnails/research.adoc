@@ -1,0 +1,326 @@
+= 016 — research
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-05
+
+Facts the specification rests on. The first part, on windows never
+viewable, is of 2026-10-01, `develop` at `f90abc7` (1.2.0), from the
+protocols, the source of the X server and the research of specification
+008; nothing was run on the author's desktop then. The second, on windows
+hidden after a change (T1 of the tasks), is of 2026-10-05, `develop` at
+`1de774d` (1.5.0 and the README of 029), run on E1: ws1 — NVIDIA GeForce RTX
+4080 SUPER, driver 580.105.08, Debian 12 with `xserver-xorg-core`
+2:21.1.7-3+deb12u13, i3 4.22, picom 9.1 `--backend glx --vsync`
+(`dpkg-query`, `ps`) — the author's desktop in use and the service of 1.5.0
+running, the load average of a minute 3.2–4.6.
+
+The X server's source was read on its branch `server-21.1-branch`, that of
+Debian 12's 21.1.7, and on `master`, at
+`gitlab.freedesktop.org/xorg/xserver`; the parts named below are the same in
+both. i3's source was read at its tag `4.22`, `github.com/i3/i3`.
+
+The probe of T1 and the observer of i3's frames are outside the repository,
+in `~/.cache/qws-trial-016/probe` on ws1: `probe016_test.go` and
+`probe016sep_test.go`, copied into `pkg/snapshot` of a worktree of the
+branch at `211b6b0` and run there with `go test -run '^TestProbe016' -v
+-count=1 ./pkg/snapshot`, and `observe016.go`; their output in
+`~/.cache/qws-trial-016`, `probe-*.txt` and `observe016.log`.
+
+== Which windows have no contents
+
+The core protocol calls a window _unviewable_ "if it is mapped but some
+ancestor is unmapped" (`GetWindowAttributes`). i3 hides a window on a hidden
+workspace or in a hidden tab by unmapping its frame, the window's parent;
+the window stays mapped and becomes unviewable (008, research, "Found on the
+way"; i3, `x_push_node_unmaps` of `src/x.c`, `xcb_unmap_window` of
+`con->frame.id`). Of the 30 client windows of ws1 when 008 counted them, one
+was viewable.
+
+Composite gives a redirected window a pixmap of its own only while it is
+realized — mapped, with every ancestor mapped. `compCheckRedirect`
+(`composite/compwindow.c`), which `compUnrealizeWindow` calls, allocates the
+pixmap when the window becomes realized and, when it stops being so, hands
+the window back to its parent's pixmap and destroys its own,
+`DestroyPixmap`; a client that named it holds a reference, which
+`ProcCompositeNameWindowPixmap` counts, so the pixmap lives on with what the
+window showed. When the frame is mapped again, the window gets a new pixmap,
+and the application an `Expose` to draw it anew. The Composite protocol says
+so from the client's side (`compositeproto.txt`, `NameWindowPixmap`): a
+named pixmap "will remain allocated until freed, even if 'window' is
+unmapped, reconfigured or destroyed", "'window' will get a new pixmap
+allocated each time it is mapped or resized", and the request "generates a
+'Match' error if 'window' is not redirected or is not visible" —
+`ProcCompositeNameWindowPixmap` (`composite/compext.c`) returns `BadMatch`
+when the window is not viewable.
+
+So the X server holds nothing of a window hidden before qws started: what
+it showed then went with its pixmap. No client gets more — a compositor
+neither: the server names no pixmap of an unviewable window to anyone.
+
+== Backing store
+
+The core protocol has a window attribute for contents kept while a window is
+unmapped: `backing-store` `Always` "advises the server that maintaining
+contents even when the window is unmapped would be beneficial" — advice the
+server may not follow.
+
+Xorg implements backing store by the automatic redirection of Composite and
+offers `WhenMapped` only: `compScreenInit` (`composite/compinit.c`) sets
+`backingStoreSupport` to `WhenMapped`, and `compChangeWindowAttributes`
+redirects a window whose `backing-store` is anything but `NotUseful` — the
+redirection that keeps a pixmap while the window is realized, as above.
+`Always` is served as `WhenMapped`.
+
+An implementation of `Always` exists only as a patch of Red Hat's,
+`0001-composite-Implement-backing-store-Always.patch` of `xorg-x11-server`
+1.17.4 in RHEL 6.8 and 6.9, whose first builds broke the ABI of the video
+drivers (Red Hat bug 1484125). It is not in the X server: neither branch has
+state for a window painted while unmapped, and `WindowRec` keeps
+`backingStore` as the protocol's value alone.
+
+Besides, `backing-store` is an attribute of the application's window;
+setting it from qws would change another client's window.
+
+== Making a window viewable
+
+Only the window manager shows a window: i3 maps the frame when its
+workspace is shown. qws could ask i3 to show each workspace in turn at its
+start, or map the frames itself. Either is seen by the user — picom paints
+every mapped window — moves the focus and the visible workspaces, and the
+second maps windows of i3's that i3 did not map.
+
+== Resources kept after a client exits
+
+The core protocol lets a client keep its resources when its connection
+closes: after `SetCloseDownMode` `RetainPermanent` or `RetainTemporary`, "all
+resources ... allocated by the client are marked as permanent or temporary
+... (but this does not prevent other clients from explicitly destroying
+them)". `KillClient` with one of them destroys every resource of the client
+that made it; they all go when the server resets, as when the session ends.
+
+Root pixmaps rest on it: feh (`src/wallpaper.c`) sets `RetainPermanent`,
+names the pixmap of the background in the properties `_XROOTPMAP_ID` and
+`ESETROOT_PMAP_ID` of the root window, and frees the previous one by
+`KillClient`.
+
+qws could keep its thumbnails so — pixmaps in the X server, named in a
+property of the root window by the window they belong to — for the next qws
+to read and free. They would outlive a restart of qws, not the session. A
+thumbnail is at most 512×512 pixels of 4 bytes, 1 MiB; one of a window of
+2560×1381 is 512×276, 552 KiB; the 30 windows of ws1, some 16 MiB of the X
+server's memory, or of the GPU's where the driver keeps pixmaps there. A
+window keeps its ID for its life, so the ID names the same window across
+restarts of qws within the session; a window destroyed meanwhile is gone
+from `_NET_CLIENT_LIST`, though its client may give its ID to a new window,
+which would show the old picture until its first snapshot.
+
+== What qws does now
+
+`pkg/snapshot/snapshot.go` at `1de774d`:
+
+* `follow` selects the structure events of a client window of
+  `_NET_CLIENT_LIST` and of its frame, and makes a DAMAGE object of the
+  window, `ReportLevelNonEmpty`, which reports drawing into its children as
+  well (022). `viewable` is the window mapped and its frame mapped, as the
+  events tell.
+* A `DamageNotify` marks the window changed (`schedule.change`); it is
+  captured a settle of 100 ms after its first change, and no sooner than
+  `snapshot_interval` — 1 s by default — after its last snapshot; `capture`
+  subtracts the damage first, so that the next drawing reports again.
+* `captureGPU` of a stale window names its pixmap, `NameWindowPixmap` — its
+  own (008), or, when the X server does not redirect it, its frame's (022,
+  `via`) — and binds its own on the GPU after `glXWaitX` (025); a pixmap the
+  GPU will not bind, and the frame's always, is scaled by RENDER (018, 022).
+  The pixmap stays named, and bound, while the window is not stale. It is
+  made stale when it or its frame is mapped or unmapped, when it changes
+  size or is reparented, and — a window taken from its frame — when the
+  frame is configured; its pixmap is then freed at its next capture, at once
+  at an unmap.
+* `handle` of an `UnmapNotify` of the window or of its frame marks it
+  unmapped and frees its pixmap at once (`release`); a window that comes due
+  while unviewable is not captured: `capture` frees its pixmap and clears
+  its change.
+* Paused — the switcher of any instance shown (007, 011), live thumbnails
+  included (020) — the loop takes no snapshot on change; those due meanwhile
+  are taken when the pause ends; an activation, `Refresh`, captures every
+  changed window before its first frame.
+
+At its start the snapshotter captures every viewable window, within 15 ms on
+ws1 (008, results, K3). A window never viewable since qws started shows its
+placeholder until it is shown once: every window on a hidden workspace after
+a restart of the service — an upgrade, `systemctl --user restart` — and
+after a login, for the windows a session places on workspaces it does not
+show. The constitution keeps both cases as they are: "qws keeps no state of
+its own between runs", and its open question "Window contents" has no rule
+on whether qws may write window contents to disk.
+
+A window that changed after its last snapshot — within the settle or the
+interval — and is hidden before it comes due keeps the older thumbnail: its
+pixmap is freed at the unmap, and the change is dropped when it comes due.
+The draft of this specification found it (its "Found on the way",
+2026-10-01); the Composite protocol gives the named pixmap for exactly this
+use, to "hold onto window contents after the window is unmapped (and hence
+animate it's disappearance)".
+
+== The pixmap held after the unmap (T1)
+
+`TestProbe016`: windows of the probe's own off every monitor, at
+−6000,−6000, under picom. A frame — an override-redirect child of the root,
+which picom redirects as it redirects the frames of i3 — made by one
+connection, the _window manager_; in it a client window made by another, the
+_client_, at 2,22, with a child of the client's covering it; the pictures
+`windowImage` of the tests, of two seeds a round, whose thumbnails are 2.65
+to 3.16 apart at a mean per channel (`TestProbe016Separation`, the least of
+40 rounds a case). The snapshotter of the tests, `frameSnapshotter` on a
+third connection, follows the window as `follow` does: the structure events
+of the window and of the frame, a DAMAGE object of the window. Each round:
+
+. the first picture drawn into the child, answered (`fillDrawable`), and
+  captured by `capture` of the snapshotter — its pixmap named, and bound on
+  the GPU when its own;
+. the events read;
+. the last picture drawn, answered, and at once the frame unmapped by the
+  window manager — or, in the cases so named, the client window unmapped by
+  its client;
+. the events of the window and of its frame read on the snapshotter's
+  connection, in order;
+. the pixmap held read: on the GPU — `glXWaitX`, `Rebind`, the average, as
+  `captureGPU` does — and by RENDER, at the window's offset in the pixmap
+  (`pixmapRect`); a read is _last_ within a mean of 1.2 per channel of the
+  area average of the last picture — and then at least 1.45 from the first;
+. the window, or the frame, mapped again, and the first picture drawn anew:
+  the pixmap held read again by RENDER.
+
+Two sizes, 1500×900 and 2556×1357; 20 rounds a case at 12:58, 40 at 12:59,
+6 at 13:00 with 2 s between the unmap and the reads (`PROBE_DELAY=2000`), 6
+at 13:01 with a drawing while hidden: 72 rounds a case.
+
+[cols="4,2,2,2",options="header"]
+|===
+| Window, unmapped | GPU, last | RENDER, last | After a map, still last
+
+| own pixmap — depth 32 in a frame of depth 24 —, 1500×900, frame unmapped
+| 72 of 72 | 72 of 72 | 72 of 72
+| the same, the window unmapped by its client
+| 72 of 72 | 72 of 72 | 72 of 72
+| own pixmap, 2556×1357, frame unmapped
+| 72 of 72 | 72 of 72 | 72 of 72
+| drawn into its frame — depth 24, the frame's visual —, 1500×900, frame unmapped
+| — | 72 of 72 | 72 of 72
+| the same, the window unmapped by its client
+| — | 0 of 72 | 0 of 72
+| drawn into its frame, 2556×1357, frame unmapped
+| — | 72 of 72 | 72 of 72
+|===
+
+The GPU reads came within a mean of 0.002–0.004 per channel of the last
+picture, RENDER's within 0.63–1.08 — the filter of 018. Read on the GPU
+without `glXWaitX`, at once after the unmap, in the odd rounds of 12:59 and
+13:01: last in 23 of 23 a case of a pixmap of its own; the drawing was
+answered strip by strip, and nothing here caught the GPU behind it, as 025
+did. The wait is kept, as `captureGPU` keeps it.
+
+* *A pixmap of the window's own* keeps its last drawing after the window
+  becomes unviewable, whether its frame or the window is unmapped: read on
+  the GPU through the GLX pixmap qws bound to it before the unmap, and by
+  RENDER; 2 s later as well; and after the window is mapped again and drawn
+  anew — it got a new pixmap, and the one held is no longer drawn into.
+* *The frame's pixmap* keeps the window's last drawing when the frame is
+  unmapped. When the client window is unmapped inside the frame still
+  mapped, the frame's pixmap shows the frame's background where the window
+  was — a mean of 143.7–143.8 from either picture, the background of the
+  probe's frame, `0x404040`: the X server exposes the frame and paints it.
+  The window's contents are gone from the frame's pixmap then.
+* *Nothing can be named after the unmap*: `NameWindowPixmap` of the window
+  was refused in every round, and of the frame in each of the 24 rounds of
+  13:01 that unmapped it. What is read after the unmap is what was named
+  before it.
+* *Drawn while hidden* — the first picture drawn into the child after the
+  unmap, in the 36 rounds of 13:01 — the window reported no damage within
+  300 ms, and the pixmap held still read last in each of the 30 rounds
+  where it had.
+
+== The events of the unmap
+
+On the snapshotter's connection, after the last drawing and the unmap:
+`DamageNotify` of the window, then `UnmapNotify` of the frame — or of the
+window, when it was unmapped — in every round of every case, 432 of 432. The
+X server queues a client's events in the order it generates them, and it
+executed the drawing before the unmap; so the snapshotter reads the change
+before the unmap, and handles the unmap while the pixmap it holds has the
+drawing. A drawing the X server executes after the unmap reaches neither the
+pixmap nor the damage: the window is unviewable then, as above.
+
+== A frame configured
+
+`TestProbe016Restack`: a window drawn into its frame, its frame's pixmap
+named by a capture, then the frame restacked above another window of the
+probe, moved by 10 pixels, or made 10 pixels wider; the events of the
+frame read, and, in the run of 13:16, the damage of the window; a new
+picture drawn and the pixmap held read by RENDER. The run of 13:05 gave the
+same pictures.
+
+[cols="2,3,2,3",options="header"]
+|===
+| Frame | Its ConfigureNotify | Damage of the window | The new picture in the pixmap held
+
+| restacked | 804×524, above the other window | none | yes, a mean of 0.647
+| moved | 804×524 | all of it, 800×500 | yes, 0.647
+| resized | 810×524 | all of it | no, 4.099 from it
+|===
+
+`compConfigNotify` (`composite/compwindow.c`) calls `compReallocPixmap`
+(`composite/compalloc.c`), which makes a new pixmap only when the width or
+the height of the window with its border, `w + 2·bw` and `h + 2·bw`, differs
+from the pixmap's: a frame restacked or moved keeps its pixmap, one of a new
+size or border gets a new one. A move, of the same pixmap, still reports
+damage of the whole window inside; a restack none. The snapshotter makes a
+window taken from its frame stale at every `ConfigureNotify` of the frame
+(022, D3: "the frame's pixmap is named anew when the frame is configured — a
+new size is a new pixmap"), and so drops the knowledge that the pixmap it
+holds is the frame's.
+
+== What i3 does when it hides a window
+
+`x_push_changes` (`src/x.c`), the end of every change i3 makes to the
+screen, first restacks the frames, then maps, then unmaps:
+
+. walking its stack of frames from the bottom, once one frame has another
+  above it than at the last push, every frame from there up is configured,
+  `XCB_CONFIG_WINDOW_SIBLING | XCB_CONFIG_WINDOW_STACK_MODE`, above the one
+  below it;
+. `x_push_node` maps the frames to be shown;
+. `x_push_node_unmaps` unmaps the frames to be hidden — the workspace left,
+  the tabs not shown — setting `WM_STATE` withdrawn on their windows first.
+
+`render_con` (`src/render.c`) raises each child it renders and, in a tabbed
+or stacked container, the children in focus order, the focused last; a
+workspace not shown is not rendered. On a switch of workspace, the frames of
+the workspace shown come up to the top of i3's stack, above those of the
+workspace left, which they were below: the order changes below the frames
+left, and these are restacked — a `ConfigureNotify` each, at their size —
+in the same push, before they are unmapped. On a switch of tab, the tab
+shown is raised above the tab hidden alike.
+
+So a window drawn into its frame and hidden by i3 is, by the rule of 022,
+stale when its unmap arrives, though the frame's pixmap it holds is still
+the one its last drawing went into.
+
+This is i3's code, read, not i3 watched: `observe016` logged the structure
+events of the children of the root of E1 from 12:56 — selecting
+`SubstructureNotify` on the root, as any client may, and changing nothing —
+and by 13:18, when this was written, no frame of i3 (IDs `0x80….`) had been
+configured, mapped or unmapped: the desktop was not used meanwhile, and
+qws's tests do not drive it. Criterion K2 of the specification has a test
+make the same sequence with a frame of its own: restacked at its size, then
+unmapped.
+
+== Found on the way
+
+By the code at `1de774d`, not measured: a window taken from its frame whose
+frame is restacked while the switcher is shown gets no live pass for the
+rest of the activation — the restack makes it stale (022), `livePassable`
+passes no stale window (020), and no snapshot names its pixmap anew until
+the live passes end. A frame kept across a restack, as the change makes it,
+removes that as well.

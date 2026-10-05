@@ -6,9 +6,11 @@
 // back. A pixmap the GPU will not bind — another client holds a GLX pixmap of
 // the window — is scaled in the X server by RENDER instead
 // (specs/018-snapshot-bind-conflicts). Windows the window manager unmaps keep
-// their last thumbnail. While the switcher is shown, the windows that change
-// are averaged again into textures the presenter draws: the live thumbnails of
-// live.go (specs/020-live-thumbnails).
+// their last thumbnail: one hidden with a change not yet captured is taken
+// once more, from the pixmap still held (specs/016-unviewable-thumbnails).
+// While the switcher is shown, the windows that change are averaged again
+// into textures the presenter draws: the live thumbnails of live.go
+// (specs/020-live-thumbnails).
 package snapshot
 
 import (
@@ -35,6 +37,7 @@ import (
 const (
 	causeChange     = "change"     // the contents changed, or the window became viewable
 	causeActivation = "activation" // the switcher asked for it
+	causeHidden     = "hidden"     // hidden with a change not yet captured: its last snapshot
 )
 
 // Snapshotter keeps the thumbnails. It has an X connection of its own, so
@@ -124,12 +127,19 @@ type window struct {
 	pixVisual xproto.Visualid
 	pixDepth  int
 
-	// Where the window lies in its ancestor's pixmap: the ancestor's border,
-	// from the naming of the pixmap, and the window's offset in the pixmap,
-	// border and all, as the X server last told it — at a snapshot, or a
-	// live pass, which checks it (specs/023-frame-pass-cost, D2 c)
+	// Where the window lies in its ancestor's pixmap: the ancestor's size and
+	// border, from the naming of the pixmap — the pixmap is the ancestor's
+	// until either changes (specs/016-unviewable-thumbnails) — and the
+	// window's offset in the pixmap, border and all, as the X server last
+	// told it — at a snapshot, or a live pass, which checks it
+	// (specs/023-frame-pass-cost, D2 c)
+	viaSize   image.Point
 	viaBorder int
 	at        image.Point
+
+	// Hidden with a change not yet captured, the pixmap it was drawn in held
+	// for its last snapshot, due at once (specs/016-unviewable-thumbnails)
+	last bool
 
 	// The live thumbnails (specs/020-live-thumbnails): the pictures so far,
 	// snapshots and passes, which number their generations; the textures of
@@ -436,18 +446,28 @@ func (s *Snapshotter) nextDue() (time.Time, bool) {
 	var next time.Time
 	found := false
 	for _, w := range s.windows {
-		if due, ok := w.schedule.due(s.interval); ok && (!found || due.Before(next)) {
+		if due, ok := w.due(s.interval); ok && (!found || due.Before(next)) {
 			next, found = due, true
 		}
 	}
 	return next, found
 }
 
+// due is when the window is to be captured: a window hidden with a change not
+// yet captured at once, for its last snapshot (specs/016-unviewable-thumbnails);
+// any other as its schedule says
+func (w *window) due(interval time.Duration) (time.Time, bool) {
+	if w.last {
+		return time.Time{}, true
+	}
+	return w.schedule.due(interval)
+}
+
 // captureChanged captures the changed windows that are due at now — all of
 // them when now is an activation's
 func (s *Snapshotter) captureChanged(now time.Time, cause string, all bool) {
 	for _, w := range s.windows {
-		due, ok := w.schedule.due(s.interval)
+		due, ok := w.due(s.interval)
 		if ok && (all || !due.After(now)) {
 			s.capture(w, cause)
 		}
@@ -475,16 +495,21 @@ func (s *Snapshotter) handle(ev xgb.Event) {
 		s.setMapped(e.Window, true)
 		s.restructured(e.Window, now)
 	case xproto.UnmapNotifyEvent:
+		w := s.client(e.Window)
+		wasViewable := w != nil && w.viewable()
 		s.setMapped(e.Window, false)
-		if w := s.client(e.Window); w != nil {
-			s.release(w)
-			w.stale = true
+		if w != nil {
+			s.hidden(w, e.Window, wasViewable)
 		}
 	case xproto.ConfigureNotifyEvent:
 		if w, ok := s.windows[e.Window]; ok && (int(e.Width) != w.width || int(e.Height) != w.height) {
 			s.restructured(e.Window, now)
-		} else if w := s.client(e.Window); w != nil && w.via != 0 && w.via == e.Window {
-			// The frame the window is taken from: of a new size, a new pixmap
+		} else if w := s.client(e.Window); w != nil && w.via != 0 && w.via == e.Window &&
+			(int(e.Width) != w.viaSize.X || int(e.Height) != w.viaSize.Y || int(e.BorderWidth) != w.viaBorder) {
+			// The frame the window is taken from: of a new size or border, a
+			// new pixmap. Restacked or moved, it keeps its pixmap, as i3
+			// restacks the frames of a workspace it leaves before it unmaps
+			// them (specs/016-unviewable-thumbnails, M3)
 			s.restructured(e.Window, now)
 		}
 	case xproto.ReparentNotifyEvent:
@@ -501,12 +526,34 @@ func (s *Snapshotter) handle(ev xgb.Event) {
 }
 
 // restructured marks the window of a client or a frame for a new pixmap and a
-// capture: it was mapped or changed size
+// capture: it was mapped or changed size. A window hidden and waiting for its
+// last snapshot is captured as any then: the pixmap held is not to be read
+// any more (specs/016-unviewable-thumbnails).
 func (s *Snapshotter) restructured(id xproto.Window, now time.Time) {
 	if w := s.client(id); w != nil {
-		w.stale = true
+		w.stale, w.last = true, false
 		w.schedule.change(now)
 	}
+}
+
+// hidden follows the unmap of unmapped, the window or its frame. A window
+// that was viewable, with a change not yet captured, keeps the pixmap it was
+// drawn in for its last snapshot, when that pixmap holds its last drawing
+// (specs/016-unviewable-thumbnails): named and not stale since — its own,
+// which keeps its contents however the window becomes unviewable, or the
+// frame's when the frame is the window unmapped: a window unmapped inside its
+// frame still mapped is painted over by the frame's background. Any other
+// releases its pixmap, as one already kept goes on keeping it.
+func (s *Snapshotter) hidden(w *window, unmapped xproto.Window, wasViewable bool) {
+	if w.last {
+		return
+	}
+	if wasViewable && w.schedule.dirty && !w.stale && w.pixmap != 0 && (w.via == 0 || w.via == unmapped) {
+		w.last = true
+		return
+	}
+	s.release(w)
+	w.stale = true
 }
 
 // setMapped records the map state of a client window or a frame
@@ -634,7 +681,8 @@ func (s *Snapshotter) release(w *window) {
 	}
 }
 
-// capture takes a thumbnail of the window, if it is viewable
+// capture takes a thumbnail of the window, if it is viewable, or its last
+// one from the pixmap held, if it was hidden with a change not yet captured
 func (s *Snapshotter) capture(w *window, cause string) {
 	start := time.Now()
 	// Changes from here on report again, viewable or not: DAMAGE reports
@@ -643,12 +691,17 @@ func (s *Snapshotter) capture(w *window, cause string) {
 		damage.Subtract(s.conn, w.damage, 0, 0)
 	}
 	if !w.viewable() {
-		// Not viewable: no contents; it is captured when it changes again
+		if w.last {
+			s.captureHeld(w, start)
+		}
+		// Not viewable: nothing more to take; it is captured when it changes
+		// again
 		s.release(w)
-		w.stale = true
+		w.stale, w.last = true, false
 		w.schedule.dirty = false
 		return
 	}
+	w.last = false
 
 	path := "gpu"
 	img, err := s.captureGPU(w)
@@ -683,6 +736,48 @@ func (s *Snapshotter) capture(w *window, cause string) {
 	if err != nil {
 		return
 	}
+	logSnapshot(w, path, cause, start)
+}
+
+// captureHeld takes the last snapshot of a window hidden with a change not
+// yet captured, from the pixmap it still holds, which keeps the window's last
+// drawing after the unmap (specs/016-unviewable-thumbnails): bound on the
+// GPU, bound again once the X server's drawing is done, as captureGPU binds
+// it (specs/025-snapshot-wait-x); not bound — the GPU would not bind it, or it
+// is the frame's — by RENDER. Nothing on the CPU: GetImage of a window not
+// viewable gives nothing of it. A failure leaves the window its thumbnail.
+func (s *Snapshotter) captureHeld(w *window, start time.Time) {
+	path := "gpu"
+	var img *image.RGBA
+	var err error
+	switch {
+	case w.bound != nil:
+		gl.ActiveTexture(gl.TEXTURE0)
+		gl.BindTexture(gl.TEXTURE_2D, w.texture)
+		s.off.WaitX()
+		w.bound.Rebind()
+		img = s.gpu.thumbnail(w.width, w.height, w.bound.YInverted)
+	case s.render != nil:
+		path = "render"
+		var r image.Rectangle
+		if r, err = s.pixmapRect(w); err == nil {
+			img, err = s.render.thumbnail(w.pixmap, w.pixVisual, w.pixDepth, r)
+		}
+	default:
+		err = errNotBound
+	}
+	if err != nil {
+		log.Debug().Err(err).Uint32("window", uint32(w.id)).Str("path", path).
+			Msg("Last snapshot of a window hidden failed: it keeps its thumbnail")
+		return
+	}
+	s.store(w, img)
+	w.schedule.shot(time.Now())
+	logSnapshot(w, path, causeHidden, start)
+}
+
+// logSnapshot records a snapshot of the window taken by the path since start
+func logSnapshot(w *window, path, cause string, start time.Time) {
 	e := log.Debug()
 	if w.via != 0 {
 		e = e.Uint32("via", uint32(w.via))
@@ -755,7 +850,7 @@ func (s *Snapshotter) captureGPU(w *window) (*image.RGBA, error) {
 // (specs/022-uncaptured-windows). errNotViewable when the window is not
 // viewable, errNotRedirected when no ancestor's pixmap can be named.
 func (s *Snapshotter) namePixmap(w *window) error {
-	w.via, w.pixVisual, w.pixDepth, w.viaBorder, w.at = 0, w.visual, w.depth, 0, image.Point{}
+	w.via, w.pixVisual, w.pixDepth, w.viaSize, w.viaBorder, w.at = 0, w.visual, w.depth, image.Point{}, 0, image.Point{}
 	pixmap, err := xproto.NewPixmapId(s.conn)
 	if err != nil {
 		return err
@@ -793,7 +888,7 @@ func (s *Snapshotter) namePixmap(w *window) error {
 		}
 		w.pixmap, w.via = pixmap, id
 		w.pixVisual, w.pixDepth = attrs.Visual, int(geom.Depth)
-		w.viaBorder = int(geom.BorderWidth)
+		w.viaSize, w.viaBorder = image.Pt(int(geom.Width), int(geom.Height)), int(geom.BorderWidth)
 		return nil
 	}
 }

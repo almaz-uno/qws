@@ -27,6 +27,20 @@ renderer:
 * The first switch of an activation may still take some tens of
   milliseconds on NVIDIA: the first use of the grid's textures on the GPU.
 
+=== 1.5.1 — 2026-10-05
+
+*The last picture of a window hidden*
+(link:specs/016-unviewable-thumbnails/spec.adoc[specification 016]):
+
+* A window that changed less than `behavior.snapshot_interval` before it
+  was hidden — its workspace left, a tab switched — kept a thumbnail up to
+  that interval old. qws now takes its last snapshot as it is hidden, from
+  the picture it still holds: a terminal left at once shows the lines it
+  printed last.
+* Windows not shown since qws started keep their placeholders until they
+  are: their contents do not exist in the X server, and qws keeps nothing
+  between runs.
+
 == 1.4.0 — 2026-10-04
 
 *Live thumbnails* (link:specs/020-live-thumbnails/spec.adoc[specification

@@ -655,7 +655,7 @@ log:
 | `QWS_BEHAVIOR_SNAPSHOT_INTERVAL`
 | `duration`
 | `1s`
-| How often, at most, a visible window that changed is captured again for its thumbnail. No window is captured on change while the switcher of any qws instance on the display is shown
+| How often, at most, a visible window that changed is captured again for its thumbnail. A window hidden — its workspace left, its tab switched — with a change not yet captured is captured once more as it is hidden, from what the X server still holds of it. No window is captured on change while the switcher of any qws instance on the display is shown: a window hidden meanwhile is captured when the switcher goes
 
 | `behavior.show_delay`
 | `--behavior-show-delay`
