@@ -3,7 +3,7 @@
 :toc-title: Contents
 :sectnums:
 :revdate: 2026-10-05
-:status: draft
+:status: implemented
 :issue: 44
 
 == What and why
@@ -58,7 +58,7 @@ unviewable, if the X server still gives its contents through what the
 snapshotter holds: the named pixmap of the window or of its frame, the GLX
 pixmap bound to it (008, 018, 022, 025).
 
-=== Made on the way, 2026-10-05, for the author to confirm
+=== Made on the way, 2026-10-05, taken by the author with the trial
 
 M1. *At once, or when the pause ends.* The last snapshot is taken at the
 next turn of the snapshotter's loop, without the settle or the interval:
@@ -264,9 +264,49 @@ negative, far apart.
   up to `snapshot_interval` earlier.
 |===
 
+== Results
+
+Off the screen: the tests on ws1 under picom, the commits `47040d8` and
+`0acf2ff`, each in a worktree of its own. On the desktop: the author's trial
+on 2026-10-05, 15:31–15:54 — on ws2 at the author's request, not on E1:
+2560×1440 at 165 Hz, an RTX 5060 Ti with the driver 580, i3 4.22; the build
+of `0acf2ff` on Alt+F11, the service stopped
+(`~/.cache/qws-trial-016/log.txt` on ws2).
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | Met. `TestHiddenSnapshot` on the GPU: the frame unmapped and the
+  window unmapped by its client, a snapshot of a new generation within 1 of
+  the last picture; no new snapshot on the code before.
+| K2 | Met. `TestHiddenSnapshot` by RENDER: from the frame's pixmap, also
+  after a restack at its size (M3), and from a window's own pixmap the GPU
+  did not bind; within a mean of 1.2.
+| K3 | Met. `TestHiddenNoSnapshot`: nothing for a window not drawn since its
+  snapshot, for one unmapped inside its frame left mapped, for one hidden
+  before its first capture or after a new size.
+| K4 | Met. In the same test, a viewable window as its schedule says while
+  another gets its last snapshot; a frame restacked or moved at its size
+  keeps its pixmap, resized makes a new one; `TestSchedule`, `TestWait`,
+  `TestCaptureFromFrame`, `TestLiveFromFrame`, `TestFramePassMoved` pass.
+  The tests of the change 300 of 300 times.
+| K5 | Met. `TestHiddenPaused`: no snapshot while paused, the pixmap held;
+  the last snapshot at the first turn after the pause, and at an
+  activation's capture.
+| K6 | Met. On both commits, each in a worktree of its own; `-race` of
+  `pkg/snapshot`, `pkg/ui`, `pkg/x11`; the rule of 021.
+| K7 | Met, on ws2. Ten activations, seven of them ending on a window; 32
+  last snapshots of cause `hidden` — 30 on the GPU, of a mate-terminal, of
+  Chrome, of Claude and others, 2 by RENDER from the frame of a window of
+  depth 24 (virt-viewer) — in 0.3–69 ms, 16.5 ms at p50, on the
+  snapshotter's thread; no warning or error in the log. The author: the
+  card of the terminal showed the time at which its workspace was left.
+|===
+
+Not checked: E1 on the desktop, Mesa (ws3), ws7.
+
 == Open decisions
 
-. M1–M4, for the author to confirm.
-. K7, the trial on the desktop, by the author.
 . Mesa: the last snapshot was tried on E1 alone, NVIDIA; not on Mesa, as
   025 was not.
