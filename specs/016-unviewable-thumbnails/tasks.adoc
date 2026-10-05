@@ -1,0 +1,15 @@
+= 016 — tasks
+:toc: left
+:toc-title: Contents
+:revdate: 2026-10-05
+
+. [x] T1. Research: whether a pixmap named and held keeps the window's last
+  contents after the window or its frame is unmapped, on the GPU and by
+  RENDER; the order of the damage and of the unmap; a frame configured;
+  what i3 does when it hides a window (research).
+. [x] T2. The specification rewritten for D1 and D2; the plan.
+. [ ] T3. The tests of K1–K5, run first on the code of `develop`.
+. [ ] T4. The change; K1–K5 pass.
+. [ ] T5. K6, each commit in a clean worktree.
+. [ ] T6. K7, the trial on E1, by the author.
+. [ ] T7. The results.
