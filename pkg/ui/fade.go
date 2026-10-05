@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"runtime/debug"
+	"sync/atomic"
 	"time"
 
 	"github.com/almaz-uno/qws/pkg/carousel"
@@ -119,11 +121,33 @@ func (s *Selector) ChosenAt() time.Time {
 	return s.chosenAt
 }
 
-// hide unmaps the overlay, ends its live thumbnails and restores the layout
-// of appearance.layout for the next activation
+// hide unmaps the overlay, ends its live thumbnails, restores the layout of
+// appearance.layout for the next activation and gives the memory of the
+// drawing back in the background
 func (s *Selector) hide() {
 	s.window.Hide()
 	s.mapped = false
 	s.setLive(false)
 	s.restoreInitialLayoutMode()
+	freeMemory()
+}
+
+// freeing is set while freeMemory gives the memory back
+var freeing atomic.Bool
+
+// freeMemory gives the memory of the drawing back to the system once the
+// overlay is unmapped, in the background, off the path of every frame
+// (specs/030-drawing-memory, D4): the free canvases dropped — kept, they
+// would stay resident and unused until the overlay is shown again, and on
+// a machine short of memory go to swap and come back from it then — and a
+// collection, the idle heap returned
+func freeMemory() {
+	if !freeing.CompareAndSwap(false, true) {
+		return
+	}
+	go func() {
+		defer freeing.Store(false)
+		carousel.DropCanvases()
+		debug.FreeOSMemory()
+	}()
 }

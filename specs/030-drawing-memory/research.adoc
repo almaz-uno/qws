@@ -340,3 +340,47 @@ The canvases taken from the free list, the new ones in the first
 activation; after it 0.01–0.07 MB an activation. A collection every 10 s in
 place of every 2.6 s. The free list keeps the canvases of the last
 activation, 85 MB, in the heap kept and resident, until D4 drops them.
+
+== After D4
+
+2026-10-05, 20:55 to 21:06, the test binaries of D4 on `07c1661`: three
+runs of the scenario; then M3 in turn with the binaries of T1, twice, load
+average 7–10. D4 changes no benchmark of M3 — they unmap no overlay — and
+they stand here for the change against before.
+
+[cols="3,1,2",options="header"]
+|===
+| MB | before | D1–D4
+| peak `HeapSys` | 1628 | 338 (330–338)
+| peak `HeapInuse` | 1556 | 309 (308–309)
+| 5 s after: `HeapInuse` | 950 | 182 (181–182)
+| 5 s after: `VmRSS` | 1237 | 264 (262–318)
+| `VmHWM` | 1663 | 379 (377–433)
+| kept: the heap | 82 | 167
+| kept: `VmRSS` | 179 | 252 (250–307)
+| collections | 70 | 61
+| glyph masks an activation, 1–10; 11–50 | 277; 240 | 11.4; 0
+| images an activation, 1–10; 11–50 | 390; 391 | 82.6; 80.1 (79.8–81.6)
+| in all an activation, 11–50 | 677 | 123 (123–124)
+|===
+
+The canvases dropped at the unmap are taken anew by the next activation:
+80 MB of images an activation, `newCanvas` 27.2, `drawCard` 21.3–21.7,
+`GridTiles` 13.5, `headCanvas` 12.4–13.2, `crop` 4.8–5.3 — the
+prototype's figures. Five seconds after the last activation the heap in
+use is what is kept and the resident set near what is kept: the memory has
+been given back. What is kept exceeds before's by the sets' faces, 85 MB of
+heap and 73 MB of resident set at the medians.
+
+[cols="3,2,2,1",options="header"]
+|===
+| ms, p50; p95 | before | D1–D4 | p50
+| `E1Frame/carousel-e1-24-second` | 32.9; 36.8 | 33.1; 35.7 | +0.8 %
+| `E1Frame/carousel-e1-header` | 33.5; 34.5 | 34.0; 35.1 | +1.4 %
+| `E1Grid/grid-e1-24-second` | 45.3; 46.8 | 46.2; 48.1 | +1.9 %
+| `E1Grid/grid-e1-header` | 43.9; 45.1 | 44.8; 46.3 | +2.1 %
+| `E1Grid/grid-e1-header-tiles` | 54.2; 56.7 | 54.7; 59.9 | +0.9 %
+| `E1Switch`, ms/op | 86.6; 88.5 | 80.3; 80.9 | −7.3 %
+| `E1Switch`, `frame_p50_ms` | 0.174; 0.182 | 0.173; 0.175 |
+| `E1Switch`, `ready_p50_ms` | 0.193; 0.200 | 0.190; 0.196 |
+|===

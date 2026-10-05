@@ -72,6 +72,14 @@ func (l *pixelList) give(b []byte) {
 	l.held += cap(b)
 }
 
+// drop forgets the free buffers, for the collector to take
+func (l *pixelList) drop() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	clear(l.free)
+	l.free, l.held = l.free[:0], 0
+}
+
 // byCapacity orders a buffer by its capacity against n
 func byCapacity(b []byte, n int) int {
 	return cmp.Compare(cap(b), n)
@@ -111,4 +119,11 @@ func Recycle(img *image.RGBA) {
 	if img != nil {
 		canvases.give(img.Pix)
 	}
+}
+
+// DropCanvases forgets the free canvases, for the collector to take, as the
+// overlay is unmapped (specs/030-drawing-memory, D4): kept, they would stay
+// resident and unused until it is shown again
+func DropCanvases() {
+	canvases.drop()
 }
