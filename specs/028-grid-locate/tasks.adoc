@@ -12,6 +12,6 @@
   and `BenchmarkE1Switch` after it.
 . [x] T3. The animation — D1, D2, D5, D6 — with its keys, their documents
   and the records of L and F; K1–K3, K5.
-. [ ] T4. K8 on every commit, in a worktree of its own.
-. [ ] T5. The author's trial on E1: K6, K7, K9, D7.
-. [ ] T6. The results.
+. [x] T4. K8 on every commit, in a worktree of its own.
+. [x] T5. The author's trial — on ws2 at the author's request: K6, K7, K9, D7.
+. [x] T6. The results.

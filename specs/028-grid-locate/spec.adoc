@@ -3,7 +3,7 @@
 :toc-title: Contents
 :sectnums:
 :revdate: 2026-10-05
-:status: draft
+:status: implemented
 :issue: 83
 
 == What and why
@@ -31,7 +31,7 @@ hover and mouse; the live thumbnails of 020 at rest.
 
 D1–D4 decided by the author on 2026-10-04, each the option recommended;
 D5 and D6 made in the specification and taken with them; D7 made in the
-plan, for the author to confirm.
+plan and taken by the author with the trial, 2026-10-05.
 
 D1. *The selection frame converges onto the tile.* After the switch the
 selection frame of the grid and the shadow of the selected tile appear
@@ -176,6 +176,66 @@ kind `locate`, against those of the fade-ins of the same runs.
   at their defaults and, if the author wants, others.
 |===
 
+== Results
+
+Off the screen: the tests and `BenchmarkE1Switch` on ws1, the commits
+`fdd7f81` to `98594a8`, each in a worktree of its own. On the desktop: the
+author's trial on 2026-10-05 at 12:13 — on ws2 at the author's request, not
+on E1: 2560×1440 at 165 Hz (a period of 6.07 ms), an RTX 5060 Ti with the
+driver 580, 39 windows; the build of `98594a8` on Alt+F11, the service
+stopped, the author's configuration of ws2 with the defaults of the keys of
+D4 (`~/.cache/qws-trial-028/log.txt` on ws2).
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | Met. `TestLocateScene`: the first frame at alpha 0 and the scale 1.6
+  about the tile's centre, both monotone and on the curve of the hover's
+  level, the scene of the grid at rest item for item at `locate_duration`,
+  nothing else scaled or faded.
+| K2 | Met. `TestLocateWhen`: after `q` and after `g`; not at an opening in
+  the grid, a switch to the carousel, under `cpu`, with animations off, a
+  `duration` of 0 or a `locate_duration` of 0 s; without the layers the
+  frame of the CPU as before and the animation from when they come within
+  `locate_duration`, none after.
+| K3 | Met. `TestLocateKeys`: Right, Left, Tab and Down end it and the step
+  moves from the tile; a switch back ends it, a hover does not; no live
+  pass while it runs.
+| K4 | Met. `TestSwitchFromLayers`: the grid's layers drawn while the
+  carousel is shown, a base for each layout; the switch shown from them, no
+  frame of the CPU, its frame at rest after; back the same. L off the
+  screen, `BenchmarkE1Switch` at 2520×1400 with 33 windows: 0.17–0.23 ms at
+  p50, 0.5–1.6 ms at p95 — before, the frame of the CPU at 48–54 ms at p50
+  and the layers 103–120 ms after the key (research). `pkg/carousel` and
+  `testdata/scenes.json` unchanged.
+| K5 | Met. `TestLocateKeys` of `internal/config`, `TestLocateFlags`,
+  `TestLocateOptions`, `TestAnimationDefaults`, `TestParseAnimation`;
+  `TestRoundTrip`, `TestTagNames`, `TestJoinedKeys` with the keys; the
+  documents.
+| K6 | Not met at the first switch of the activation. Five switches, the
+  layers held at each: to the grid 37.79, 0.86 and 2.43 ms, to the carousel
+  0.46 and 0.37 ms from the key to the first frame. The first drew its scene
+  in 8.2 ms and presented it in 29.3 ms with nothing uploaded — the GPU's
+  first use of the grid's textures, it seems; the next frame came 0.53 ms
+  after. Before, on E1, 76–97 ms at every switch (research).
+| K7 | Met. The frames of the animation, three of them in full: 193
+  intervals, 6.07 ms at p50, 6.23 ms at p95, at most 7.30 ms, none above 1.5
+  periods; the fade-in of the same activation 25 intervals, p95 7.59 ms, one
+  missed at 15.74 ms. The steps of the grid, 100 intervals, and of the
+  carousel, 290, none missed.
+| K8 | Met. `go build`, `gofmt -l`, `go vet`, `make check-specs`, `go test
+  ./...` on every commit, each in a worktree of its own; `go test -race` of
+  `pkg/ui`, `pkg/carousel`, `pkg/snapshot`, `pkg/x11`; the rule of 021.
+| K9 | Met. The author, 2026-10-05: "проверил, всё шикарно" — the defaults of
+  400 ms and 1.6 kept, D7 as made.
+|===
+
+Not checked: E1 on the desktop, Mesa (ws3), ws7.
+
 == Open decisions
 
-. D7, for the author to confirm in the trial (K9).
+. The first switch of an activation, 37.8 ms on ws2, most of it presenting:
+  the grid's textures could be used once off the frame after their upload —
+  a draw into a scratch target — so that the first switch is as quick as the
+  others. Not measured; for a change of its own should the author want it.
