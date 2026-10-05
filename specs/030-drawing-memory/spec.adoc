@@ -109,7 +109,10 @@ drawing, as its first frame and the grid's layers no longer do since 028
 
 | K1
 | The pictures unchanged: `TestScenes` with `testdata/scenes.json` as it
-  is, `TestGLXPresenterMatchesCPU`, `TestLayers`, `TestParallelDrawing`.
+  is, `TestGLXPresenterMatchesCPU`, `TestLayers`, `TestParallelDrawing`. And
+  on canvases reused: `TestScenesOnGarbage` and `TestLayersOnGarbage`, every
+  canvas taken of bytes no drawing wrote — the digests of Σ and the layers
+  composing to the frames of `cpu` as on canvases made anew.
 
 | K2
 | M1 after the change, against the medians of three runs before (research,
@@ -140,7 +143,8 @@ drawing, as its first frame and the grid's layers no longer do since 028
 
 == Open decisions
 
-. The faces D1 keeps for good: a set for each drawing that ran at once — on
-  ws1 13, half its 24 CPUs and the frame at rest — of some 8 MB at 128
-  entries (research). Fewer sets, the drawings with text bounded below
-  `layerSlots`, would keep fewer and draw the layers later; not measured.
+. Fewer font sets: the drawings with text bounded below `layerSlots` would
+  keep fewer faces and draw the layers later; not measured. The author, on
+  2026-10-06, took D1 as it is — the faces a set for each drawing that ran
+  at once, on ws1 13 of some 8 MB at 128 entries (research), the memory kept
+  between the activations higher and the peak a fifth.
