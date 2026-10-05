@@ -1,4 +1,4 @@
-.PHONY: build run clean test vet check-specs install deps lint help release
+.PHONY: build run clean test vet check-specs install deps lint help release readme-images
 
 # Binary name
 BINARY_NAME=qws
@@ -36,6 +36,12 @@ vet:
 check-specs:
 	scripts/check-specs.sh
 
+# The pictures of README.md, drawn by the drawing code of qws over synthetic
+# windows (specs/029-readme): doc/images/qws.webp, carousel.png and grid.png.
+# Needs img2webp (Debian: webp) and the fonts of console/readme-demo.
+readme-images:
+	go run ./console/readme-demo -out doc/images
+
 # GitHub release on a pushed version tag: make release TAG=vX.Y.Z
 release:
 	scripts/release.sh $(TAG)
@@ -71,6 +77,7 @@ help:
 	@echo "  make test    - Run tests"
 	@echo "  make vet     - Run go vet"
 	@echo "  make check-specs - Check the form of specs/"
+	@echo "  make readme-images - Draw the pictures of README.md into doc/images/"
 	@echo "  make release TAG=vX.Y.Z - GitHub release on a pushed tag"
 	@echo "  make clean   - Remove binary"
 	@echo "  make install - Install to /usr/local/bin"
