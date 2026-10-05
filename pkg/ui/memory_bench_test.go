@@ -73,7 +73,8 @@ var memoryScenarioRan bool
 // images (image.NewRGBA), the pictures prepared for the frames
 // (carousel.scratchImage) and the glyph masks (truetype.NewFace) — over the
 // first ten activations and over the rest, a collection after the tenth for
-// the profile. The images by the function of qws that made them are logged.
+// the profile; with the free list of canvases of D3, the images are its new
+// buffers. The images by the function of qws that made them are logged.
 // MEMORY_PROFILE names a file for the heap profile at the end. The scenario
 // is run once a process, its peaks its own:
 //
@@ -445,9 +446,12 @@ func allocationKind(stack []uintptr) (kind, fn string) {
 			return "masks", ""
 		case f.Function == module+"pkg/carousel.scratchImage":
 			return "prepared", ""
-		case f.Function == "image.NewRGBA":
+		case f.Function == "image.NewRGBA" || f.Function == module+"pkg/carousel.(*pixelList).take":
+			// An image made, or the pixels of a canvas of the free list
+			// (specs/030-drawing-memory, D3)
 			kind = "images"
-		case kind == "images" && strings.HasPrefix(f.Function, module):
+		case kind == "images" && strings.HasPrefix(f.Function, module) &&
+			f.Function != module+"pkg/carousel.takeImage" && f.Function != module+"pkg/carousel.clearImage":
 			return kind, strings.TrimPrefix(f.Function, module)
 		}
 		if !more {

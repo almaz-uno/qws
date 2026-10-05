@@ -301,3 +301,42 @@ The sets' faces a quarter as large: 116 MB of glyph masks in the first ten
 activations, the heap kept 85 MB over before's — the 13 sets at 8.1 MB. A
 smaller heap alive, a lower goal for the collector: more collections, and
 a lower peak.
+
+== After D3
+
+2026-10-05, 20:42 to 20:54, the test binaries of D3 on `a9555c2`, M3 in
+turn with those of D2 as above, load average 8–13; three runs of the
+scenario.
+
+[cols="3,2,2,1",options="header"]
+|===
+| ms, p50; p95 | D2 | D3 | p50
+| `E1Frame/carousel-e1-24-second` | 32.9; 34.1 | 33.1; 34.7 | +0.7 %
+| `E1Frame/carousel-e1-header` | 33.7; 35.3 | 33.8; 34.8 | +0.5 %
+| `E1Grid/grid-e1-24-second` | 45.8; 48.5 | 46.1; 48.2 | +0.6 %
+| `E1Grid/grid-e1-header` | 44.3; 45.8 | 45.1; 46.7 | +1.7 %
+| `E1Grid/grid-e1-header-tiles` | 54.2; 55.5 | 54.8; 56.7 | +1.1 %
+| `E1Switch`, ms/op | 81.6; 82.5 | 78.7; 80.5 | −3.7 %
+|===
+
+The benchmarks of `pkg/carousel` give no frame back; their temporary
+canvases go back — the tiles layer allocates 18.5 MB a drawing against 34.0.
+
+[cols="3,1,1,2",options="header"]
+|===
+| MB | before | D2 | D3
+| peak `HeapSys` | 1628 | 581 | 532 (532–541)
+| 5 s after: `HeapInuse` | 950 | 291 | 417 (415–449)
+| 5 s after: `VmRSS` | 1237 | 596 | 625 (620–632)
+| `VmHWM` | 1663 | 647 | 626 (623–633)
+| kept: the heap | 82 | 167 | 252 (252–254)
+| kept: `VmRSS` | 179 | 272 | 350 (348–357)
+| collections | 70 | 108 | 18
+| images an activation, 1–10; 11–50 | 390; 391 | 399; 396 | 11.8; 0.04
+| in all an activation, 11–50 | 677 | 445 | 41
+|===
+
+The canvases taken from the free list, the new ones in the first
+activation; after it 0.01–0.07 MB an activation. A collection every 10 s in
+place of every 2.6 s. The free list keeps the canvases of the last
+activation, 85 MB, in the heap kept and resident, until D4 drops them.

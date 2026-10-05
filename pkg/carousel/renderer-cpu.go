@@ -296,10 +296,12 @@ var background struct {
 	img *image.RGBA
 }
 
-// newCanvas is a canvas of the window size with the window background on it
+// newCanvas is a canvas of the window size with the window background on it,
+// its pixels from the free list of canvases: every one of them written
 func newCanvas(cfg Config) *gg.Context {
 	if !cfg.WindowBackgroundEnabled || cfg.WindowBackgroundRadius <= 0 {
-		dc := gg.NewContext(cfg.Width, cfg.Height)
+		img, _ := takeImage(image.Rect(0, 0, cfg.Width, cfg.Height))
+		dc := gg.NewContextForRGBA(img)
 		if cfg.WindowBackgroundEnabled {
 			// Draw regular rectangle
 			setColor(dc, cfg.BackgroundColor, cfg.WindowBackgroundOpacity)
@@ -321,7 +323,7 @@ func newCanvas(cfg Config) *gg.Context {
 		dc.Fill()
 		background.key, background.img = key, getImageRGBA(dc)
 	}
-	img := image.NewRGBA(background.img.Rect)
+	img, _ := takeImage(background.img.Rect)
 	for y := 0; y < len(img.Pix); y += img.Stride {
 		copyRow(img.Pix[y:y+img.Stride], background.img.Pix[y:])
 	}

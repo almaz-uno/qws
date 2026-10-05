@@ -61,6 +61,57 @@ type restDrawing struct {
 	results chan restFrame
 }
 
+// heldFrames are the frames of the selector — drawn on the CPU, at rest — the
+// presenter may still read: the last it presented, from which the GLX
+// presenter uploads only the rows of the next frame that differ, and the last
+// it staged, until that is presented. A frame goes back to the free list of
+// canvases once it is neither of them nor the frame at rest drawn and not yet
+// presented (specs/030-drawing-memory, D3).
+type heldFrames struct {
+	shown, staged *image.RGBA
+}
+
+// recycleFrame gives img back unless the presenter or the frame at rest may
+// still read it
+func (s *Selector) recycleFrame(img *image.RGBA) {
+	if img == nil || img == s.held.shown || img == s.held.staged || s.rest.ready != nil && s.rest.ready.img == img {
+		return
+	}
+	carousel.Recycle(img)
+}
+
+// framePresented records img presented: the presenter's last frame from now
+func (s *Selector) framePresented(img *image.RGBA) {
+	old := s.held.shown
+	s.held.shown = img
+	s.recycleFrame(old)
+}
+
+// frameStaged records img staged
+func (s *Selector) frameStaged(img *image.RGBA) {
+	old := s.held.staged
+	s.held.staged = img
+	s.recycleFrame(old)
+}
+
+// framesUnbound records that the presenter holds no frame: bound to a window
+// anew
+func (s *Selector) framesUnbound() {
+	old := s.held
+	s.held = heldFrames{}
+	s.recycleFrame(old.shown)
+	s.recycleFrame(old.staged)
+}
+
+// dropRest forgets the frame at rest drawn for the current target, not
+// presented
+func (s *Selector) dropRest() {
+	if r := s.rest.ready; r != nil {
+		s.rest.ready = nil
+		s.recycleFrame(r.img)
+	}
+}
+
 // restFrame is the frame at rest drawn in the background
 type restFrame struct {
 	img      *image.RGBA
@@ -237,7 +288,8 @@ func (s *Selector) stepTo(target int, wrap bool, thumbnails []image.Image) {
 // the background, for an event of the cause read last: at once, or after
 // the drawing that runs
 func (s *Selector) requestRest(cause string) {
-	s.rest.ready, s.rest.staged = nil, false
+	s.dropRest()
+	s.rest.staged = false
 	s.rest.cause, s.rest.causeAt = cause, s.timing.start
 	if s.rest.busy {
 		s.rest.want = true
@@ -308,7 +360,7 @@ func (s *Selector) cancelStep() {
 	s.endLocate()
 	s.stopHover()
 	s.rest.want = false
-	s.rest.ready = nil
+	s.dropRest()
 	s.rest.awaited = false
 }
 
@@ -363,9 +415,14 @@ func (s *Selector) startRest() {
 func (s *Selector) collectRest(r restFrame) {
 	s.rest.busy = false
 	if r.gen == s.layers.gen && r.layout == s.config.LayoutMode && r.selected == s.selectedIndex && r.hover == s.hoverIndex {
+		s.dropRest()
 		s.rest.ready, s.rest.want = &r, false
 		s.rest.staged, s.rest.failed = false, false
-	} else if s.rest.want {
+		return
+	}
+	// Drawn for a target since left: never presented
+	s.recycleFrame(r.img)
+	if s.rest.want {
 		s.startRest()
 	}
 }
@@ -523,6 +580,9 @@ func (s *Selector) drainLayers() {
 // setLayer uploads a layer drawn in the background; it returns the bytes it
 // uploaded
 func (s *Selector) setLayer(r layerResult) int {
+	// The presenter keeps a copy of a layer it is given: its pixels go back
+	// to the free list of canvases (specs/030-drawing-memory, D3)
+	defer carousel.Recycle(r.img)
 	if r.gen != s.layers.gen {
 		return 0
 	}
@@ -624,6 +684,8 @@ func (s *Selector) waitFrame(t time.Time) time.Time {
 			if err != nil {
 				log.Error().Err(err).Msg("Failed to stage the frame at rest")
 				s.rest.failed = true
+			} else {
+				s.frameStaged(r.img)
 			}
 			uploaded += n
 			s.rest.staged = done
@@ -869,6 +931,8 @@ func (s *Selector) presentRest(f carousel.Fade) (time.Time, time.Time) {
 		_, done, err := s.animator.StageFrame(s.rest.ready.img, math.MaxInt)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to stage the frame at rest")
+		} else {
+			s.frameStaged(s.rest.ready.img)
 		}
 		s.rest.staged = done
 	}
@@ -885,6 +949,9 @@ func (s *Selector) presentRest(f carousel.Fade) (time.Time, time.Time) {
 	}
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to present frame")
+		s.recycleFrame(rest.img)
+	} else {
+		s.framePresented(rest.img)
 	}
 	end := time.Now()
 	s.liveEnd(end)

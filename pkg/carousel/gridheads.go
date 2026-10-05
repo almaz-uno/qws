@@ -54,9 +54,6 @@ type tileHead struct {
 	scratch        *image.RGBA
 }
 
-// headCanvases recycles the scratch canvases of the heads between frames
-var headCanvases sync.Pool
-
 // startGridTiles lays out the tiles of the windows on a canvas of the size of
 // cfg below top and starts drawing their heads, in the order of the tiles, on
 // half of the CPUs: the resampling gains nothing from the second thread of a
@@ -148,7 +145,7 @@ func (t *gridTiles) draw(dc *gg.Context) (inPlace int) {
 		}
 	}
 	if t.scratch != nil {
-		headCanvases.Put(t.scratch)
+		Recycle(t.scratch)
 	}
 	return inPlace
 }
@@ -169,13 +166,11 @@ func (h *tileHead) drawTo(dst *image.RGBA) bool {
 	return true
 }
 
-// headCanvas is a scratch canvas with bounds r; its pixels are left as they
-// were
+// headCanvas is a scratch canvas with bounds r from the free list of
+// canvases; its pixels are left as they were
 func headCanvas(r image.Rectangle) *image.RGBA {
-	if c, ok := headCanvases.Get().(*image.RGBA); ok && c.Rect == r {
-		return c
-	}
-	return image.NewRGBA(r)
+	img, _ := takeImage(r)
+	return img
 }
 
 // runJobs runs the jobs in their order on n goroutines, at least one, and
