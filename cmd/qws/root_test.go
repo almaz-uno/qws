@@ -32,8 +32,10 @@ func TestAnimationFlags(t *testing.T) {
 		Show: []string{"fade", "zoom"}, Hide: []string{"none"}, Hover: []string{"zoom"},
 	}
 	got := cfg.Appearance.Animation
-	// The keys of specs/014-appearance-keys are checked by TestAppearanceFlags
+	// The keys of specs/014-appearance-keys are checked by TestAppearanceFlags,
+	// those of specs/028-grid-locate by TestLocateFlags
 	got.HoverDuration, got.OverlayZoom, got.HoverZoom = 0, 0, 0
+	got.LocateDuration, got.LocateZoom = 0, 0
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("flags: %+v, want %+v", got, want)
 	}
@@ -80,6 +82,27 @@ func TestAppearanceFlags(t *testing.T) {
 	if cfg.Appearance.Header.Enabled || a.HoverDuration != 60*time.Millisecond || a.OverlayZoom != 0.7 || a.HoverZoom != 1.3 {
 		t.Errorf("flags: header %+v, hover duration %v, zooms %v, %v; want hidden, 60ms, 0.7, 1.3",
 			cfg.Appearance.Header, a.HoverDuration, a.OverlayZoom, a.HoverZoom)
+	}
+}
+
+// TestLocateFlags checks K5 of specs/028-grid-locate: the keys of the
+// selection frame converging after a switch to the grid are read from their
+// flags
+func TestLocateFlags(t *testing.T) {
+	flags := rootCmd.PersistentFlags()
+	for name, value := range map[string]string{
+		"appearance-animation-locate-duration": "650ms",
+		"appearance-animation-locate-zoom":     "2.4",
+	} {
+		if err := flags.Set(name, value); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	cfg = config.Default()
+	applyFlags()
+
+	if a := cfg.Appearance.Animation; a.LocateDuration != 650*time.Millisecond || a.LocateZoom != 2.4 {
+		t.Errorf("flags: %v, %v; want 650ms, 2.4", a.LocateDuration, a.LocateZoom)
 	}
 }
 

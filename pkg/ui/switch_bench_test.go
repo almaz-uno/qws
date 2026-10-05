@@ -118,7 +118,7 @@ func BenchmarkE1Switch(b *testing.B) {
 func loopIdle(s *Selector, done func() bool) {
 	for !done() {
 		switch {
-		case s.step.active || s.fade.active || s.hover.active:
+		case s.moving():
 			s.frame()
 		case s.backgroundDue() || s.liveDue():
 			if s.liveDue() {

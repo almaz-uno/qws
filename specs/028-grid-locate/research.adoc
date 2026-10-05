@@ -103,7 +103,9 @@ apart.
 With the layers of both layouts kept (T2), the same command, 2026-10-05
 00:08, load average 10–12: the grid's layers are held at the key, and its
 first frame is a scene of them — `frame` 0.19–0.23 ms at p50, 0.83–1.62 ms
-at p95 in five runs of 40, within a refresh period of E1, 6.9 ms (K4).
+at p95 in five runs of 40, within a refresh period of E1, 6.9 ms (K4). With
+the convergence (T3), its first frame, 00:19, load average 34–44 from other
+sessions' builds: 0.17–0.19 ms at p50, 0.52–1.04 ms at p95.
 
 == What the animation can be built of
 

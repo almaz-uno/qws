@@ -104,6 +104,8 @@ appearance:
     hover_duration: 0s  # Time of the hover animation (0 = that of duration)
     overlay_zoom: 0.92  # Scale of its size the switcher zooms from and to
     hover_zoom: 1.05    # Scale of its size the hover frame zooms from and to
+    locate_duration: 400ms # After a switch to the grid, the selection frame converges onto its tile (0 = none)
+    locate_zoom: 1.6    # Scale of its size it converges from, above 1
 
 behavior:
   snapshot_interval: 1s   # a visible window that changed is captured again at most this often

@@ -153,6 +153,9 @@ func (s *Selector) grid() bool {
 // stepTo moves the selection to target: animated when it can be, at once
 // otherwise — and for a wrap, a step around the list or a column
 func (s *Selector) stepTo(target int, wrap bool, thumbnails []image.Image) {
+	// A step ends the convergence of the selection frame, and starts from the
+	// tile (specs/028-grid-locate, D6)
+	s.endLocate()
 	// The grid moves over its layers: without them, at once
 	if !s.animates() || wrap || s.grid() && !s.gridReady() {
 		s.cancelStep()
@@ -239,35 +242,37 @@ func (s *Selector) hoverChanged(thumbnails []image.Image) {
 	case s.animates() && s.grid() && s.gridReady():
 		s.requestRest(causeEvent)
 		s.rest.awaited, s.rest.stepEnd = true, false
-		if s.fade.active {
-			// The frames of the fade show the scene
+		if s.fade.active || s.locate.active {
+			// The frames of the fade or of the convergence show the scene
 			return
 		}
-		s.presentScene()
+		s.presentScene(time.Now())
 	default:
 		s.render(thumbnails)
 	}
 }
 
-// presentScene presents the scene of the layout shown at once, for the event
-// read last: what its layers show while its frame at rest is drawn
-func (s *Selector) presentScene() {
-	start := time.Now()
+// presentScene presents the scene of the layout shown at start, now, for the
+// event read last: what its layers show while its frame at rest is drawn. It
+// returns when its items were made and when it ended.
+func (s *Selector) presentScene(start time.Time) (drawEnd, end time.Time) {
 	s.liveBegin()
 	items := s.sceneItems(start)
-	drawEnd := time.Now()
+	drawEnd = time.Now()
 	if err := s.animator.PresentScene(s.base(), items, carousel.Opaque); err != nil {
 		log.Error().Err(err).Msg("Failed to present a scene")
 	}
-	end := time.Now()
+	end = time.Now()
 	s.liveEnd(end)
 	s.logFrame(start, drawEnd, end)
+	return drawEnd, end
 }
 
-// cancelStep ends the step and the hover motion in progress without their
-// frame at rest
+// cancelStep ends the step, the hover motion and the convergence of the
+// selection frame in progress, or its wait, without their frame at rest
 func (s *Selector) cancelStep() {
 	s.step.active = false
+	s.endLocate()
 	s.stopHover()
 	s.rest.want = false
 	s.rest.ready = nil
@@ -503,6 +508,7 @@ func (s *Selector) setLayer(r layerResult) int {
 		}
 	}
 	s.layers.cards[r.key] = layer
+	s.locateWhenHeld()
 	if r.img == nil {
 		return 0
 	}
@@ -608,25 +614,27 @@ func (s *Selector) waitFrame(t time.Time) time.Time {
 }
 
 // frame presents the next frame of the animations when it is due, through
-// the fade if one runs: the scene of the step or the hover that moves; at the
-// end of a step or a hover motion, its frame at rest, or while that is drawn,
-// its scene at the target; with a fade alone, the picture shown
+// the fade if one runs: the scene of the step, the hover or the convergence
+// of the selection frame that moves; at the end of a step, a hover motion or
+// the convergence, its frame at rest, or while that is drawn, its scene at
+// the target; with a fade alone, the picture shown
 func (s *Selector) frame() {
 	now := s.waitFrame(s.frameDue)
 	s.liveBegin()
 	fade := s.fadeAt(now)
 	hovering := s.hover.active && s.hoverMoving(now)
+	locating := s.locate.active && s.locate.level.moving(now)
 
 	var err error
 	stepped, atRest := false, false // a frame of the step; its last
 	drawStart, drawEnd := now, now
 	switch {
-	case s.step.active && s.step.pos.moving(now) || hovering:
+	case s.step.active && s.step.pos.moving(now) || hovering || locating:
 		stepped = s.step.active && s.step.pos.moving(now)
 		items := s.sceneItems(now)
 		drawEnd = time.Now()
 		err = s.animator.PresentScene(s.base(), items, fade)
-	case s.step.active || s.rest.awaited:
+	case s.step.active || s.locate.active || s.rest.awaited:
 		stepped = s.step.active
 		if s.step.active {
 			s.rest.stepEnd = true
@@ -674,6 +682,12 @@ func (s *Selector) frame() {
 		s.hover.active = hovering
 		s.pruneHover(now)
 	}
+	if s.locate.active {
+		// As the hover's: the frame after the last that moved is at rest (F of
+		// specs/028-grid-locate)
+		s.logAnimationFrame(&s.locate.animationLog, "locate", s.locate.level.progress(now), !locating, drawStart, drawEnd, end)
+		s.locate.active = locating
+	}
 
 	// Frames are due at fixed times, a period apart; one that falls behind
 	// by more than a period starts the schedule anew
@@ -697,9 +711,15 @@ func (s *Selector) sceneItems(now time.Time) []carousel.SceneItem {
 // their levels — of the tile under the pointer, and of those it left while
 // they go
 func (s *Selector) gridItems(now time.Time) []carousel.SceneItem {
-	x, y, _, _ := carousel.GridTile(len(s.windows), s.selectedIndex, s.config)
+	x, y, w, h := carousel.GridTile(len(s.windows), s.selectedIndex, s.config)
 	if s.step.active {
 		x, y = s.step.gx.at(now), s.step.gy.at(now)
+	}
+	// The selection frame and the shadow converging onto the tile after a
+	// switch, about its centre (specs/028-grid-locate)
+	look, cx, cy := carousel.Opaque, 0.0, 0.0
+	if f, ok := s.locateLook(now); ok {
+		look, cx, cy = f, x+w/2, y+h/2
 	}
 	// The selected tile is not hovered, as DrawGridLayout draws it
 	hovers := s.hoverLevels(now)
@@ -721,13 +741,13 @@ func (s *Selector) gridItems(now time.Time) []carousel.SceneItem {
 			add(key, hx, hy, s.hoverLook(h.v), hx+w/2, hy+hh/2)
 		}
 	}
-	add(cardKey{index: gridShadow}, x, y, carousel.Opaque, 0, 0)
+	add(cardKey{index: gridShadow}, x, y, look, cx, cy)
 	hovered(cardKey{index: gridHoverShadow})
 	add(cardKey{index: gridTiles}, 0, 0, carousel.Opaque, 0, 0)
 	// The live thumbnails over the tiles, under the frames
 	items = append(items, s.liveTiles()...)
 	hovered(cardKey{index: gridHover})
-	add(cardKey{index: gridSelection}, x, y, carousel.Opaque, 0, 0)
+	add(cardKey{index: gridSelection}, x, y, look, cx, cy)
 	return items
 }
 

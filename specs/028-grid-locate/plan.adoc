@@ -91,15 +91,16 @@ before (026, D2).
 | The bases among the keys of the cache; `prefetch` of the other layout;
   `carouselReady` and `gridReady` of either layout; `gridItems` with the
   animation; `frame` with its frames and records; the frame at rest with
-  its layout; the animation started when the grid's layers come.
+  its layout; the animation started when the grid's layers come; a step
+  ends it, and the hover presents no scene of its own while it runs.
 
 | `pkg/ui/selector.go`
 | `switchLayout` from the layers; `moving` in the loop; the restore of the
   layout out of `handleEventsSync`; the keys in the record "Animations".
 
 | `pkg/ui/fade.go`, `pkg/ui/hover.go`, `pkg/ui/live.go`
-| The layout restored in `hide`; the hover's scene of the grid not
-  presented while the animation runs; no live frame at rest while it runs.
+| The layout restored in `hide`; the hover's frames on the schedule of the
+  animation's; no live frame at rest while it runs.
 
 | `pkg/ui/locate_test.go`
 | New: K1–K4 on the presenter of the tests of 026.

@@ -76,6 +76,7 @@ type Selector struct {
 	mapped              bool                            // The overlay is on the screen
 	chosenAt            time.Time                       // When the event that ended the activation was read
 	live                liveThumbnails                  // The live thumbnails (specs/020-live-thumbnails)
+	locate              locateAnimation                 // The selection frame converging after a switch to the grid (specs/028-grid-locate)
 }
 
 // NewSelector creates a new graphical window selector; snap, when not nil, is
@@ -256,6 +257,8 @@ func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, window
 		Interface("hover", anim.hover).
 		Float64("overlay_zoom", anim.overlayZoom).
 		Float64("hover_zoom", anim.hoverZoom).
+		Dur("locate_duration", anim.locate).
+		Float64("locate_zoom", anim.locateZoom).
 		Msg("Animations")
 
 	// Apply initial workspace filtering based on configuration
@@ -599,29 +602,50 @@ func (s *Selector) layoutConfig(mode string) carousel.Config {
 // On a presenter that composes, with the layers of that layout held — drawn
 // in the background while the other is shown — it is shown from them at
 // once, and its frame at rest, drawn in the background, follows; otherwise
-// its frame is drawn now. The layers of both layouts stay
-// (specs/028-grid-locate).
+// its frame is drawn now. The layers of both layouts stay. In the grid the
+// selection frame converges onto its tile from that first frame, or, without
+// the layers, from when they come (specs/028-grid-locate).
 func (s *Selector) switchLayout(mode string, thumbnails []image.Image) {
 	if s.config.LayoutMode == mode {
 		return
 	}
+	key := s.timing.start
 	held := s.animates() && (mode == "grid" && s.gridReady() || mode != "grid" && s.carouselReady())
 	log.Debug().Str("layout", mode).Bool("layers", held).Msg("Switching layout")
 	s.cancelStep()
 	s.setLayout(mode)
+	locates := mode == "grid" && s.locates()
 	if !held {
 		s.render(thumbnails)
 		s.prefetch()
+		if locates {
+			s.locate.key = key
+		}
 		return
+	}
+	start := time.Now()
+	if locates {
+		s.beginLocate(start, key)
+	}
+	// The frames of a fade show the scene
+	if !s.fade.active {
+		drawEnd, end := s.presentScene(start)
+		if s.locate.active {
+			// The first frame of the convergence, at its start: a record of
+			// the kind locate too (L)
+			s.logAnimationFrame(&s.locate.animationLog, "locate", 0, false, start, drawEnd, end)
+			s.frameDue = start.Add(s.period)
+		}
 	}
 	s.prefetch()
 	s.requestRest(causeKey)
 	s.rest.awaited, s.rest.stepEnd = true, false
-	if s.fade.active {
-		// The frames of the fade show the scene
-		return
-	}
-	s.presentScene()
+}
+
+// moving reports whether something moves — a step, a fade, the hover or the
+// convergence of the selection frame: frames are due
+func (s *Selector) moving() bool {
+	return s.step.active || s.fade.active || s.hover.active || s.locate.active
 }
 
 // handleEventsSync processes keyboard events synchronously
@@ -639,8 +663,9 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 	for {
 		var event xgb.Event
 		switch {
-		case s.step.active || s.fade.active || s.hover.active:
-			// A step, a fade or the hover is moving: frames between the events
+		case s.moving():
+			// A step, a fade, the hover or the selection frame is moving:
+			// frames between the events
 			if event, _ = s.conn.PollForEvent(); event == nil {
 				s.frame()
 				continue
@@ -739,9 +764,9 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 			enterKeycode = s.keysymToKeycode(0xFF0D)
 
 		case xproto.ExposeEvent:
-			// A moving step, fade or hover presents a frame soon anyway, and so
-			// does one whose frame at rest is on its way
-			if e.Window == s.window.GetWindowID() && !s.step.active && !s.fade.active && !s.hover.active && !s.rest.awaited {
+			// What moves presents a frame soon anyway, and so does what has
+			// its frame at rest on its way
+			if e.Window == s.window.GetWindowID() && !s.moving() && !s.rest.awaited {
 				s.refresh(thumbnails)
 			}
 

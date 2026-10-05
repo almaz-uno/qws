@@ -636,6 +636,20 @@ log:
 | `1.05`
 | Scale of its size the hover frame zooms from as it comes and to as it goes, with `zoom` in `hover`; below 1 it grows out of the tile. A positive number; anything else is reported and the default used
 
+| `appearance.animation.locate_duration`
+| `--appearance-animation-locate-duration`
+| `QWS_APPEARANCE_ANIMATION_LOCATE_DURATION`
+| `duration`
+| `400ms`
+| Time in which, after a switch from the carousel to the grid by the layout key or `g`, the selection frame and the shadow of the selected tile converge onto it along ease-out cubic: from `locate_zoom` of their size about the tile's centre and transparent, to the tile and opaque. `0`: none. Not when an activation opens in the grid, nor after a switch to the carousel, nor with `enabled: false`; a step ends it, the hover does not. The layers of the layout not shown are drawn ahead, so that a switch shows it in the next frame. A negative time is reported and is `0` (specification `028-grid-locate`)
+
+| `appearance.animation.locate_zoom`
+| `--appearance-animation-locate-zoom`
+| `QWS_APPEARANCE_ANIMATION_LOCATE_ZOOM`
+| `float`
+| `1.6`
+| Scale of their size the selection frame and the shadow of the selected tile converge from onto the tile after a switch to the grid. A number above 1; anything else is reported and the default used
+
 | `behavior.snapshot_interval`
 | `--behavior-snapshot-interval`
 | `QWS_BEHAVIOR_SNAPSHOT_INTERVAL`
