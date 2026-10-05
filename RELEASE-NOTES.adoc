@@ -9,6 +9,24 @@ newest come first (link:specs/004-releases/spec.adoc[specification 004]). The
 version of a build is `qws version`. Release files are built on Debian 12:
 they need glibc 2.36 or newer and the OpenGL and X11 libraries.
 
+== 1.5.0 — 2026-10-05
+
+*The selected tile shown after a switch to the grid*
+(link:specs/028-grid-locate/spec.adoc[specification 028]), with the `glx`
+renderer:
+
+* After `q` or `g` from the carousel, the selection frame of the grid and
+  the shadow of the selected tile come in larger and transparent and shrink
+  onto the tile within 400 ms: the eye finds the selected window at once.
+  `appearance.animation.locate_duration` sets the time, `0s` for none;
+  `appearance.animation.locate_zoom`, 1.6, the scale they come from.
+* A switch between the carousel and the grid shows the other layout in the
+  next frame: its layers are drawn in the background while the first one is
+  shown, instead of a frame drawn on the CPU after the key, 76–97 ms on
+  ws1. They take some 14 MB more of GPU memory at 2560×1440.
+* The first switch of an activation may still take some tens of
+  milliseconds on NVIDIA: the first use of the grid's textures on the GPU.
+
 == 1.4.0 — 2026-10-04
 
 *Live thumbnails* (link:specs/020-live-thumbnails/spec.adoc[specification
