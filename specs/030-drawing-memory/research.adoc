@@ -227,3 +227,32 @@ back the frame it had just presented, the scenario panicked at once.
 
 The faces: the sets made 109–130 MB of glyph masks in the first ten
 activations and none after; the heap kept grows by them, 82 to 167 MB.
+
+== After D1
+
+2026-10-05, 19:59 to 20:09, the test binaries of D1 on `0095568`: three
+runs of the scenario; `BenchmarkE1Switch` three runs at a time, the
+binaries of T1 and of D1 in turn, twice. Medians of the runs, the range
+after them, MB:
+
+[cols="3,1,2",options="header"]
+|===
+| | before | D1
+| peak `HeapSys` | 1628 | 1325 (1269–1325)
+| 5 s after: `HeapInuse` | 950 | 702 (672–739)
+| 5 s after: `VmRSS` | 1237 | 1202 (1131–1211)
+| `VmHWM` | 1663 | 1221 (1131–1242)
+| kept: the heap | 82 | 490
+| kept: `VmRSS` | 179 | 418 (359–429)
+| collections | 70 | 49
+| glyph masks an activation, 1–10 | 277 | 43 (43–45)
+| glyph masks an activation, 11–50 | 240 | 0
+| images an activation, 11–50 | 391 | 384 (383–387)
+| `E1Switch`, ms/op, in turn | 87.2 | 79.8
+|===
+
+The sets keep their faces, 512 entries each: 430 MB of glyph masks made in
+the first ten activations, none after, and the heap kept grows by them —
+13 sets of 32.5 MB ("A set's faces"). A switch there and back is 8 % the
+quicker for the faces not made again; the drawing of `pkg/carousel`, on the
+shared cache, is unchanged.

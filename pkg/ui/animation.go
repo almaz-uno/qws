@@ -132,8 +132,41 @@ func (s *Selector) base() carousel.LayerID {
 	return s.layers.cards[baseKey(s.config.LayoutMode)].id
 }
 
-// fontSets lends a FontSet to each drawing that runs in parallel
-var fontSets = sync.Pool{New: func() any { return carousel.NewFontSet() }}
+// fontSets lends a FontSet to each drawing that runs in parallel: a free list
+// under a mutex, never emptied — as many sets as drawings have run at once,
+// the layers of layerSlots and the frame at rest, each keeping the faces it
+// made, once per size, for the life of the process
+// (specs/030-drawing-memory, D1). A sync.Pool, which the collector empties
+// every cycle or two, had the sets and the glyph masks of their faces made
+// anew.
+var fontSets fontSetList
+
+// fontSetList is a free list of FontSets
+type fontSetList struct {
+	mu   sync.Mutex
+	free []*carousel.FontSet
+}
+
+// get is the set given back last, its faces the likeliest to be those
+// needed, or a new set when none is free
+func (l *fontSetList) get() *carousel.FontSet {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	n := len(l.free)
+	if n == 0 {
+		return carousel.NewFontSet()
+	}
+	f := l.free[n-1]
+	l.free = l.free[:n-1]
+	return f
+}
+
+// put gives the set back
+func (l *fontSetList) put(f *carousel.FontSet) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.free = append(l.free, f)
+}
 
 // layerSlots bounds the layers drawn at once to half the CPUs: the loop of the
 // animation, locked to the thread of the GL context, then finds a free one
@@ -311,8 +344,8 @@ func (s *Selector) startRest() {
 	frame := restFrame{gen: s.layers.gen, layout: cfg.LayoutMode, selected: s.selectedIndex, hover: s.hoverIndex}
 	renderer, results := s.renderer, s.rest.results
 	go func() {
-		fonts := fontSets.Get().(*carousel.FontSet)
-		defer fontSets.Put(fonts)
+		fonts := fontSets.get()
+		defer fontSets.put(fonts)
 		cfg.Fonts = fonts
 		start := time.Now()
 		if cfg.LayoutMode == "grid" {
@@ -467,8 +500,8 @@ func (s *Selector) requestLayers(keys []cardKey) {
 		go func() {
 			layerSlots <- struct{}{}
 			defer func() { <-layerSlots }()
-			fonts := fontSets.Get().(*carousel.FontSet)
-			defer fontSets.Put(fonts)
+			fonts := fontSets.get()
+			defer fontSets.put(fonts)
 			cfg.Fonts = fonts
 			results <- layerResult{gen, key, drawLayer(data, key, cfg)}
 		}()
