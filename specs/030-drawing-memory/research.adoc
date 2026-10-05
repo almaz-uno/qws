@@ -1,0 +1,63 @@
+= 030 — research
+:toc: left
+:toc-title: Contents
+:revdate: 2026-10-05
+
+The figures the specification quotes, with how they were taken. `develop`
+at `1de774d` (1.5.0).
+
+== The service on ws2
+
+`qws.service` of 1.5.0 on ws2, started at 12:43 on 2026-10-05; its pprof
+(`--pprof=localhost:6061`) read at 13:40 — `/debug/pprof/heap`, and
+`?debug=1` for the `MemStats` — and `/proc/<pid>/smaps_rollup`:
+
+[cols="3,1",options="header"]
+|===
+| | MB
+| `HeapInuse` | 133.7
+| `HeapIdle` − `HeapReleased`: idle, kept | 83.8
+| `HeapSys`: taken from the system, the peak | 958.4
+| `HeapReleased` | 740.9
+| resident set | 325.9
+| anonymous | 267.2
+| the resident set of the service on ws1 at the same time | 91.6
+|===
+
+The anonymous memory beyond the Go heap — some 50 MB — is the driver's and
+the C libraries' (`/dev/nvidia*`, `memfd:/.nvidia_drv.*` in the maps).
+
+The profile, in use: `image.NewRGBA` 49.7 MB, `image.NewAlpha` 41.7 MB —
+41.65 MB of it under `truetype.NewFace`, 44.9 MB under `carousel.Config.face`
+in all; allocated since the start: 8.4 GB, `image.NewRGBA` 6.4 GB,
+`image.NewAlpha` 1.6 GB under `truetype.NewFace`, 2.1 GB under
+`(*Selector).requestLayers`.
+
+== A face's glyph masks
+
+`truetype.NewFace` (`github.com/golang/freetype/truetype/face.go`) allocates
+`image.NewAlpha(maxw, maxh × GlyphCacheEntries)` at once, `maxw` and `maxh`
+the font's bounds at the size plus 2, 512 entries unless set. Computed for
+the default fonts at 72 dpi, a test outside the repository on ws1:
+
+[cols="2,1,1,1,1",options="header"]
+|===
+| Font | 14 px | 20 px | 23 px | 50 px
+| Noto Sans, 512 entries | 0.55 MB | 1.11 MB | 1.43 MB | 6.55 MB
+| Noto Sans, 128 entries | 0.14 MB | 0.28 MB | 0.36 MB | 1.64 MB
+| DejaVu Sans, 512 entries | 0.52 MB | 1.04 MB | 1.35 MB | 6.25 MB
+| DejaVu Sans, 128 entries | 0.13 MB | 0.26 MB | 0.34 MB | 1.56 MB
+|===
+
+20 px is the author's font size, 50 px the hostname of the header at 2.5
+times it.
+
+== The sets and the pool
+
+`pkg/ui/animation.go`: `fontSets = sync.Pool{New: carousel.NewFontSet}`,
+taken by the drawing of a frame at rest and by each layer drawn in the
+background; `layerSlots` bounds those to half the CPUs — 12 on ws1. A
+`sync.Pool` is emptied by the collector (its victim cache survives one
+cycle): a set is lost within two cycles of not being used, 186 cycles in
+the hour on ws2. 020, open decisions: the drawings of the frames at rest
+found the pool empty a third more often with live thumbnails on.

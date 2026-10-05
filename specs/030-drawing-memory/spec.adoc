@@ -1,0 +1,130 @@
+= 030 — the memory of the drawing
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-05
+:status: draft
+:issue: 88
+
+== What and why
+
+qws's heap swells to near a gigabyte at times and comes back to the system
+only in part. The service of 1.5.0 on ws2, an hour after its start
+(2026-10-05, 13:40, the profile of its pprof): 134 MB of heap in use, 84 MB
+idle and kept, 958 MB of heap taken from the system at its peak; a resident
+set of 326 MB, against 92 MB on ws1 at the same time. Of the heap in use,
+some 50 MB are images of frames and layers (`image.NewRGBA`), some 42 MB the
+glyph masks of font faces (`image.NewAlpha` under `truetype.NewFace`). In
+the hour the drawing allocated 8.4 GB: 6.4 GB of images, 1.6 GB of glyph
+masks.
+
+On a machine short of memory the excess goes to swap — ws2 holds 6 to 12 GiB
+under `mlock` for a test of its memory — and an activation waits for it to
+come back (the delay at the release of Alt on ws2, 2026-10-05). The author
+asked for the font faces to be bounded; the images are laid out with them.
+
+The specification is a delta to `develop` at `1de774d` (1.5.0). Unchanged:
+every pixel of every frame and layer — the scene set Σ and its digests —
+and the configuration.
+
+== Where the memory goes
+
+From the code (research):
+
+* *A face is mostly its glyph cache.* `truetype.NewFace` allocates at once
+  a mask buffer of `GlyphCacheEntries` glyphs, 512 by default, each the size
+  of the font's widest glyph at that size: Noto Sans 1.11 MB at 20 px,
+  6.55 MB at the 50 px of the header's hostname; DejaVu Sans 1.04 and
+  6.25 MB — some 2.2 and 12.8 MB for the default chain of the two
+  (research).
+* *Faces per size, per set.* `carousel.Config.face` makes a face for each
+  size it is asked — the font size scaled at each offset of the carousel,
+  the header's two, those of the tiles and of the live labels — and caches
+  it in the `FontSet` of the drawing, or in the shared cache of
+  `NewMultiFallbackFace` for a drawing without one.
+* *The sets are lost.* A drawing in parallel takes a `FontSet` from a
+  `sync.Pool` (`fontSets`, `pkg/ui`): up to 12 at once on ws1, half of its
+  24 CPUs (`layerSlots`), and one for the frame at rest. The collector
+  empties a `sync.Pool` at every cycle or two; the next drawing makes its set
+  and every face of it again — the 1.6 GB of masks in the hour. Found by 020
+  (open decisions) for the frames at rest with live thumbnails on.
+* *Images are made for each drawing.* A frame at rest of the overlay is
+  2520×1400×4 bytes, 14.1 MB, on E1; a tiles layer up to that; a card layer
+  some hundreds of kilobytes. Each drawing makes its canvas anew and drops it
+  once uploaded — the 6.4 GB in the hour — and parallel drawings hold theirs
+  at once: the peak of the heap.
+
+== Decisions — recommended, for the author to confirm
+
+D1. *The font sets kept.* A fixed free list of `FontSet`, under a mutex, in
+place of the `sync.Pool`: as many as drawings run at once, never emptied by
+the collector. A face is made once per size and set for the life of the
+process. As 020 proposed.
+
+D2. *Smaller glyph caches.* `GlyphCacheEntries` 128 instead of 512 — 32
+glyphs at 4 subpixel positions, a quarter of the masks: 0.28 MB for Noto
+Sans at 20 px, 1.64 MB at 50 px. A title draws some 20–40 distinct glyphs; a glyph out of the cache
+is rasterized again. Kept only if the drawing is no slower (K3); else 256.
+
+D3. *Image buffers reused.* The canvases of the frames at rest and of the
+layers taken from free lists by size, returned once the presenter has
+uploaded them (the GPU holds its copy), cleared by the drawing as now —
+the new canvas starts as a copy of the background.
+
+D4. *Memory given back after an activation.* Once the overlay is unmapped,
+in the background, `debug.FreeOSMemory`: a cycle of the collector and the
+idle heap returned to the system, off the path of every frame.
+
+*Scope:* D1 and D2 are what the author asked — the faces. D3 and D4 take the
+images and the peak with them. Recommended: all four, D1 and D2 first in
+their own commits.
+
+== Metrics
+
+M1:: the heap in use, the heap taken from the system (`HeapSys`) at its
+peak, and the resident set, after a scenario off the screen: E1's size,
+33 windows with thumbnails of 512×288, 50 activations of steps through the
+carousel and the grid, switches of the layout and live thumbnails, on the
+presenter of the tests of `pkg/ui` — before and after.
+M2:: the bytes allocated per activation in that scenario, by kind (images,
+glyph masks).
+M3:: the drawing times of 019 and 028 — `BenchmarkE1Grid`, the frames of the
+carousel, `BenchmarkE1Switch` — before and after.
+
+== Acceptance criteria
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| The pictures unchanged: `TestScenes` with `testdata/scenes.json` as it
+  is, `TestGLXPresenterMatchesCPU`, `TestLayers`, `TestParallelDrawing`.
+
+| K2
+| M1 after the change: the peak `HeapSys` at most half of before, the heap
+  in use and the resident set lower — the bounds provisional until T1
+  measures before.
+
+| K3
+| M3 within 5 % of before at p50 (D2 kept only so).
+
+| K4
+| M2: the glyph masks allocated per activation near zero once the sets are
+  made (D1); the images allocated per activation at most a quarter of before
+  (D3).
+
+| K5
+| On ws2, the service of the release a day after its start: the resident
+  set, against 326 MB an hour after the start of 1.5.0.
+
+| K6
+| `go build ./...`, `gofmt -l` empty, `go vet ./...`, `make check-specs`,
+  `go test ./...` on every commit, each in a worktree of its own; `go test
+  -race` of `pkg/ui`, `pkg/carousel`, `pkg/snapshot`, `pkg/x11`.
+|===
+
+== Open decisions
+
+. D1–D4 and the scope, for the author to confirm.
+. The bounds of K2 and K4, provisional until T1.
