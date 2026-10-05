@@ -1,0 +1,99 @@
+= 029 — research
+:toc: left
+:toc-title: Contents
+:revdate: 2026-10-05
+
+The claims of the new `README.md` and where each holds (K1). `develop` at
+`37606c6` (1.5.0); E1 is the author's ws1, 2560×1440 at 144 Hz.
+
+== The figures
+
+[cols="3,4",options="header"]
+|===
+| Claim | Source
+
+| A frame every 6.94 ms at 144 Hz | 1000/144; 007, "Frames on time"
+| Interval between frames 7.09–7.10 ms at p95, 0.45–0.51 % missed, carousel, E1 | 007, Results, K2
+| The frame at rest of the GPU byte for byte that of the CPU, every scene of the test set | 001 and 007, K1: `TestGLXPresenterMatchesCPU` over Σ
+| A change on its card within some 53 ms at p95, some 2 % of one CPU | 020, Results, K7 (52.65–52.98 ms) and K9 (1.97–2.31 points)
+| First frame some 120 ms after the key, 345 ms before | 003, Results, K5: M1 warm p50 123.32 ms against 345.38 ms
+| A frame of the carousel in 33–40 ms on the CPU | 007, research, "The cost of a frame in motion": 33.4–40.1 ms
+| A frame of the grid in 350–385 ms before 019 | 007, research, "The grid"; 019, "What and why"
+| The grid in 43–48 ms instead of 383–390, the same bytes | 019, Results, K4 (42.6–48.0 against 383.1–390.2) and K1
+| Sleep until 3 ms before a frame, spin the rest; a sleep up to half a millisecond late | 007, research, "Frames on time", rows 1 and 7 and "Wake-ups"
+| A collector stop of 5.7 ms from a `memmove` of 14 MB; pauses 0.2–0.7 ms after | 007, research, "Frames on time", "The collector"
+| No live pass while frames come, one 30 ms after; 6 requests instead of 28 | 020, K5 and D6; 023, Results, K3
+| A switch in the next frame, 0.4–2.4 ms, the first of an activation some 38 ms, against 76–97 ms; ws2 at 165 Hz | 028, Results, K4 and K6; 028, research
+| The author's machine: 2560×1440 at 144 Hz, RTX 4080 SUPER, i3, picom | E1 of 001 and 007
+|===
+
+== What qws does
+
+[cols="3,4",options="header"]
+|===
+| Claim | Source
+
+| One binary; releases with `qws-linux-amd64` and `SHA256SUMS`, built on Debian 12, glibc 2.36 or newer | `.github/workflows/release.yml`; 004; `RELEASE-NOTES.adoc`, the preamble
+| `releases/latest/download/…` gives the files of the latest release | GitHub; the asset names of `v1.4.1`
+| The unit and the line of i3 | the author's `~/cfg/systemd/user/qws.service` (less `--pprof` and the working directory) and i3 configuration, ws1, 2026-10-05
+| A compositor for the thumbnails; icons without one | 008 (`NameWindowPixmap` needs a redirected window); the placeholders of `pkg/carousel`
+| `glx` needs OpenGL 4.6 core and a 32-bit ARGB visual, else `cpu` with a warning | `doc/configuration.asciidoc`, `appearance.renderer`; 001
+| Fonts from `appearance.font.paths`, Noto Sans and DejaVu Sans by default | `internal/config`, `Default()`
+| Alt+Tab, Shift backward, release or Enter to switch, Esc to close | `internal/config` defaults; `pkg/ui/selector.go`, `handleEventsSync`, `handleKeyPressSimple`
+| ← → row after row, around the list; ↑ ↓ within the column, around it | `selectNext`, `selectPrevious`, `selectRow`, `columnStep`; 026, K7
+| `q` toggles, the hint at the top right; `c`, `g`; the next activation in `appearance.layout` | 026, K1, K2, K4
+| After a switch to the grid the selection frame converges onto the tile; `locate_duration` 400 ms, `locate_zoom` 1.6 | 028, D1, D4, Results, K1, K2, K5, K9
+| `Ctrl` inverts the workspace filter | `pkg/ui/selector.go`, the workspace modifier; `doc/configuration.asciidoc`, `windows.workspace`
+| Mouse: hover highlights, a click switches | `pkg/ui/selector.go`, `MotionNotify`, `ButtonPressEvent`; 027
+| MRU order | `pkg/mru`
+| Thumbnails averaged on the GPU, kept current; windows drawn into their frame taken by RENDER | 008; 022
+| Live thumbnails with `glx`, in view, at rest | 020, D2, K5
+| Animation of the step, the grid's frame, the hover, the appearance and disappearance, configurable or none | 007, 010, 014: `appearance.animation`
+| Workspaces: all, current, all but current; default `all` | `internal/config`, `Windows.Workspace` default `all`
+| The monitor under the pointer | `pkg/x11/randr.go`, the monitor containing the pointer
+| Themes dark, light, auto; colours, fonts, sizes, spacing, header configurable | `internal/config`; 005, 014
+| YAML, `QWS_` variables, flags, the same keys; flags over variables over the file | `internal/config`, `cmd/qws/root.go`; 002
+| `config init`, `config show` | `cmd/qws/config.go`
+| Two renderers drawing with the same code | 001
+| Every frame of the picture drawn by qws's renderer, off the screen, from synthetic windows | `console/readme-demo`; "The pictures" below
+| `make build` builds the version in; `make test`, `make vet` as CI | `Makefile`; `.github/workflows/test.yml`
+| cgo, `pkg-config`, `libgl-dev`, `libx11-dev` | `scripts/debian-deps.sh`
+| Specifications with criteria, results before the merge | `specs/README.adoc`, `specs/constitution.adoc`
+|===
+
+== The pictures
+
+`console/readme-demo` (`8ef1253`), run by `make readme-images`, draws
+`doc/images/` at 2560×1440 and scales it down to 1280×720 by Catmull-Rom:
+twelve windows drawn by the program — nvim showing `pkg/ui/motion.go` read
+from the repository, a terminal with `make build` and `go test ./...`, a
+browser, the PDF of 007, a chat with invented names, a player, a file
+manager, a system monitor, a calendar, an image viewer, a mail client, `git
+log --graph` — on a desktop with a wallpaper and i3bar; the header
+`devbox v1.4.1`. The thumbnail size, the spacing and the font size are those
+of the author's configuration (512, 600, 20): with the defaults (256, 300,
+14) the cards come out at 128 px in the picture.
+
+* The frames at rest are `Draw3DCarouselWithData` and `DrawGridLayout`.
+* The frames in motion compose the layers of `pkg/carousel` as `pkg/ui`
+  places them (`carouselItems`, `placeLayer`, `gridItems`) and as the
+  presenter draws them: bilinear samples, colour `((1−w)·A + w·B)·alpha`,
+  blend `ONE, ONE_MINUS_SRC_ALPHA`, 8 bits. A scene so composed at an
+  integer position differs from the frame at rest of `cpu` by rounding
+  only: 1.4 % of the channel values of the carousel, at most 4/255; 19 %
+  of the grid's, at most 6/255 — the translucent tiles layer over the base,
+  as on the GPU.
+* Steps of 150 ms along ease-out cubic, a frame every 20 ms; at 144 Hz qws
+  presents seven times as many.
+* The animation is lossless WebP, 35 frames, 6.36 s, 1 965 842 bytes. The
+  PNGs come out byte for byte the same on every run; the WebP did with
+  libwebp 1.2.4 and may not with another version.
+* No hover, no live thumbnails in the pictures: the windows do not change.
+
+== Found on the way
+
+`doc/configuration.asciidoc` gives `current` as the default of
+`windows.workspace`; the code's is `all` (`internal/config`, `Default()`).
+The old README's example wrote `desktop:` for `workspace:`. The README
+follows the code; the document is left to a change of its own, as this one
+leaves `doc/` as it is.
