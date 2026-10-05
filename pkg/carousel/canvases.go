@@ -5,6 +5,7 @@ import (
 	"image"
 	"slices"
 	"sync"
+	"sync/atomic"
 )
 
 // The canvases of the frames and the layers, reused (specs/030-drawing-memory,
@@ -28,6 +29,21 @@ import (
 // canvases is the free list of the pixel buffers of canvases
 var canvases pixelList
 
+// poisonCanvases makes every canvas taken one given back, of bytes no drawing
+// wrote, for the test that every drawing writes each byte of its canvas
+// before it reads one (specs/030-drawing-memory, K1)
+var poisonCanvases atomic.Bool
+
+// poisoned is a buffer of n bytes no drawing would write: a pattern of every
+// value, opaque and transparent alike
+func poisoned(n int) []byte {
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = byte(i*131 + 7)
+	}
+	return b
+}
+
 // pixelList is a free list of pixel buffers by capacity. It keeps at most
 // eight times the largest buffer it was given — eight frames — in all: the
 // drawings in flight give theirs back, and those of sizes no longer asked
@@ -43,6 +59,9 @@ type pixelList struct {
 // one of a capacity from n to half as much again, else a new one, zero. The
 // bytes of a free one are as they were.
 func (l *pixelList) take(n int) ([]byte, bool) {
+	if poisonCanvases.Load() {
+		return poisoned(n), true
+	}
 	l.mu.Lock()
 	i, _ := slices.BinarySearchFunc(l.free, n, byCapacity)
 	if i < len(l.free) && cap(l.free[i]) <= n+n/2 {
