@@ -54,7 +54,10 @@ From the code (research):
   once uploaded — the 6.4 GB in the hour — and parallel drawings hold theirs
   at once: the peak of the heap.
 
-== Decisions — recommended, for the author to confirm
+== Decisions
+
+D1–D4 and the scope decided by the author on 2026-10-05, each as
+recommended.
 
 D1. *The font sets kept.* A fixed free list of `FontSet`, under a mutex, in
 place of the `sync.Pool`: as many as drawings run at once, never emptied by
@@ -75,9 +78,8 @@ D4. *Memory given back after an activation.* Once the overlay is unmapped,
 in the background, `debug.FreeOSMemory`: a cycle of the collector and the
 idle heap returned to the system, off the path of every frame.
 
-*Scope:* D1 and D2 are what the author asked — the faces. D3 and D4 take the
-images and the peak with them. Recommended: all four, D1 and D2 first in
-their own commits.
+*Scope:* all four — D1 and D2, the faces the author asked for first, then D3
+and D4, the images and the peak — D1 and D2 in commits of their own.
 
 == Metrics
 
@@ -126,5 +128,4 @@ carousel, `BenchmarkE1Switch` — before and after.
 
 == Open decisions
 
-. D1–D4 and the scope, for the author to confirm.
 . The bounds of K2 and K4, provisional until T1.
