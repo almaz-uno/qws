@@ -68,6 +68,11 @@ type Animation struct {
 	HoverDuration time.Duration `mapstructure:"hover_duration" yaml:"hover_duration"` // Of the hover; 0: that of Duration
 	OverlayZoom   float64       `mapstructure:"overlay_zoom" yaml:"overlay_zoom"`     // Scale the overlay zooms from as it appears, and to as it goes
 	HoverZoom     float64       `mapstructure:"hover_zoom" yaml:"hover_zoom"`         // Scale the hover frame zooms from as it comes, and to as it goes
+
+	// The selection frame of the grid converging onto its tile after a switch
+	// to the grid (specs/028-grid-locate)
+	LocateDuration time.Duration `mapstructure:"locate_duration" yaml:"locate_duration"` // Its time; 0: none
+	LocateZoom     float64       `mapstructure:"locate_zoom" yaml:"locate_zoom"`         // Scale it converges from, above 1
 }
 
 // Thumbnail contains thumbnail size configuration, and the live thumbnails of
@@ -270,6 +275,10 @@ func Default() *Config {
 				HoverDuration: 0,    // that of Duration
 				OverlayZoom:   0.92, // the overlay grows from it to its size
 				HoverZoom:     1.05, // the hover frame closes in from it on its tile
+
+				// After a switch to the grid (specs/028-grid-locate)
+				LocateDuration: 400 * time.Millisecond,
+				LocateZoom:     1.6, // the selection frame converges from it onto its tile
 			},
 		},
 		Behavior: Behavior{
@@ -469,6 +478,8 @@ func setDefaults(v *viper.Viper, cfg *Config) {
 	v.SetDefault("appearance.animation.hover_duration", cfg.Appearance.Animation.HoverDuration)
 	v.SetDefault("appearance.animation.overlay_zoom", cfg.Appearance.Animation.OverlayZoom)
 	v.SetDefault("appearance.animation.hover_zoom", cfg.Appearance.Animation.HoverZoom)
+	v.SetDefault("appearance.animation.locate_duration", cfg.Appearance.Animation.LocateDuration)
+	v.SetDefault("appearance.animation.locate_zoom", cfg.Appearance.Animation.LocateZoom)
 
 	v.SetDefault("behavior.snapshot_interval", cfg.Behavior.SnapshotInterval)
 	v.SetDefault("behavior.show_delay", cfg.Behavior.ShowDelay)

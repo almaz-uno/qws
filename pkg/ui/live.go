@@ -319,7 +319,7 @@ func (s *Selector) liveGeometry(data []carousel.WindowData) []carousel.LiveItem 
 // liveDue reports whether a picture waits for a frame at rest: nothing moves,
 // so no frame of an animation will show it
 func (s *Selector) liveDue() bool {
-	return s.live.wanted && !s.step.active && !s.fade.active && !s.hover.active
+	return s.live.wanted && !s.moving()
 }
 
 // liveIdle presents the frame shown again with its live pictures once a
@@ -336,7 +336,7 @@ func (s *Selector) liveIdle() {
 	var err error
 	if s.rest.awaited {
 		// The scene at the target, its frame at rest still being drawn
-		err = s.animator.PresentScene(baseLayer, s.sceneItems(now), carousel.Opaque)
+		err = s.animator.PresentScene(s.base(), s.sceneItems(now), carousel.Opaque)
 	} else {
 		s.liveRest()
 		_, err = s.presenter.Refresh()

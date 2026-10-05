@@ -29,7 +29,10 @@ picture:
 
 With `glx` the switcher animates: a step through the carousel or the grid
 moves, the switcher fades and zooms in and out, the hover frame fades and
-zooms onto the window under the pointer. `appearance.animation` sets it:
+zooms onto the window under the pointer, and after a switch to the grid the
+selection frame converges onto the selected tile. A switch of the layout
+shows the other at once, from its layers drawn ahead. `appearance.animation`
+sets it:
 
 ```yaml
 appearance:
@@ -43,6 +46,8 @@ appearance:
     hover_duration: 0s     # of the hover; 0: that of duration
     overlay_zoom: 0.92     # the scale the switcher zooms from and to
     hover_zoom: 1.05       # the scale the hover frame zooms from and to
+    locate_duration: 400ms # after a switch to the grid, the selection frame converges onto its tile; 0: none
+    locate_zoom: 1.6       # the scale it converges from
 ```
 
 `cpu` changes its picture at once whatever these keys say.
