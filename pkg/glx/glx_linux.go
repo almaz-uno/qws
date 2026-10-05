@@ -42,14 +42,22 @@ typedef struct {
 	unsigned long visualid;
 	int           ok;
 	char          err[256];
+	int           shareFailed; // created without the share context, which it could not share
+	char          shareErr[256];
 } GLXSetup;
 
 // Set by the X error handler installed around context creation: GLX reports
-// that failure asynchronously, as an X error
+// that failure asynchronously, as an X error. Errors of other displays — the
+// snapshots have one of their own — go to the handler it replaced.
+static Display *gGLXDpy = 0;
 static int gGLXErr = 0;
+static int (*gGLXPrev)(Display*, XErrorEvent*) = 0;
 static int glxErrorHandler(Display *dpy, XErrorEvent *ev) {
-	gGLXErr = 1;
-	return 0;
+	if (dpy == gGLXDpy) {
+		gGLXErr = ev->error_code ? ev->error_code : 1;
+		return 0;
+	}
+	return gGLXPrev ? gGLXPrev(dpy, ev) : 0;
 }
 
 // glxChooseConfig returns a double-buffered FBConfig without multisampling
@@ -100,7 +108,10 @@ static GLXFBConfig glxChooseConfig(Display *dpy, int screen, int *found) {
 	return chosen;
 }
 
-static GLXSetup glxSetup() {
+// glxSetup opens the display and creates the context, sharing the objects of
+// share when it is given; where a context cannot be created sharing them, it
+// is created without and shareFailed says why
+static GLXSetup glxSetup(GLXContext share) {
 	GLXSetup s;
 	memset(&s, 0, sizeof(s));
 
@@ -140,11 +151,22 @@ static GLXSetup glxSetup() {
 		None
 	};
 
+	gGLXDpy = s.dpy;
 	gGLXErr = 0;
-	int (*oldHandler)(Display*, XErrorEvent*) = XSetErrorHandler(glxErrorHandler);
-	s.ctx = createCtx(s.dpy, fbc, 0, True, ctxAttribs);
+	gGLXPrev = XSetErrorHandler(glxErrorHandler);
+	s.ctx = createCtx(s.dpy, fbc, share, True, ctxAttribs);
 	XSync(s.dpy, False); // deliver an asynchronous X error now
-	XSetErrorHandler(oldHandler);
+	if (share && (s.ctx == 0 || gGLXErr)) {
+		snprintf(s.shareErr, sizeof(s.shareErr),
+			"glXCreateContextAttribsARB with a share context failed (X error %d)", gGLXErr);
+		s.shareFailed = 1;
+		if (s.ctx) glXDestroyContext(s.dpy, s.ctx);
+		gGLXErr = 0;
+		s.ctx = createCtx(s.dpy, fbc, 0, True, ctxAttribs);
+		XSync(s.dpy, False);
+	}
+	XSetErrorHandler(gGLXPrev);
+	gGLXDpy = 0;
 
 	if (s.ctx == 0 || gGLXErr) {
 		s.ctx = 0;
@@ -196,9 +218,17 @@ static void glxTeardown(Display *dpy, GLXContext ctx) {
 import "C"
 
 import (
+	"errors"
 	"fmt"
 	"runtime"
 )
+
+// Share names a GL context that other contexts can be created to share the
+// objects of — textures, buffers, sync objects — on displays of their own
+// (specs/020-live-thumbnails). It stays valid while that context lives.
+type Share struct {
+	ctx C.GLXContext
+}
 
 // Context owns a GL-only Xlib Display and a direct GLX 4.6 core context whose
 // FBConfig has a depth-32 ARGB visual. It is not current on any window until
@@ -207,31 +237,55 @@ type Context struct {
 	dpy      *C.Display
 	ctx      C.GLXContext
 	visualID uint32
+	shareErr error
 }
+
+// errNoShare is the ShareError of a context created without a share context
+var errNoShare = errors.New("glx: no context to share with")
 
 // NewContext opens the GL display, chooses the FBConfig and creates the
 // context. The window the context is made current on must be created with
 // VisualID, or glXMakeCurrent fails with BadMatch.
 //
+// With share, the context shares the objects of share's context. Where it
+// cannot be created so — the driver shares no objects between the two — it is
+// created without, and ShareError says why: a failure to share is not a
+// failure to create.
+//
 // The calling goroutine is locked to its OS thread until Destroy: the context
 // and every GL call must stay on one thread. An error is expected on machines
 // without direct GLX 4.6; callers fall back to presenting without GL.
-func NewContext() (*Context, error) {
+func NewContext(share *Share) (*Context, error) {
 	runtime.LockOSThread()
 
-	s := C.glxSetup()
+	var shareCtx C.GLXContext
+	if share != nil {
+		shareCtx = share.ctx
+	}
+	s := C.glxSetup(shareCtx)
 	if s.ok == 0 {
 		C.glxTeardown(s.dpy, s.ctx)
 		runtime.UnlockOSThread()
 		return nil, fmt.Errorf("glx: %s", C.GoString(&s.err[0]))
 	}
 
-	return &Context{
+	c := &Context{
 		dpy:      s.dpy,
 		ctx:      s.ctx,
 		visualID: uint32(s.visualid),
-	}, nil
+	}
+	switch {
+	case share == nil:
+		c.shareErr = errNoShare
+	case s.shareFailed != 0:
+		c.shareErr = fmt.Errorf("glx: %s", C.GoString(&s.shareErr[0]))
+	}
+	return c, nil
 }
+
+// ShareError is nil when the context shares the objects of the context it
+// was created to share with, and says why it does not otherwise
+func (c *Context) ShareError() error { return c.shareErr }
 
 // VisualID is the X visual of the chosen FBConfig
 func (c *Context) VisualID() uint32 { return c.visualID }

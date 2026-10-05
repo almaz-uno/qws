@@ -1,0 +1,21 @@
+= 019 — tasks
+:toc: left
+:toc-title: Contents
+:revdate: 2026-10-01
+
+. [x] T1. `BenchmarkE1Grid`, and the profile of the frame and of the tiles
+  layer of `develop`, before any other change (research, "Where the time
+  goes").
+. [x] T2. The prototypes on a copy of the code, each checked by
+  `TestScenes`; the workers measured (research, "Prototypes", "Workers").
+. [x] T3. The specification.
+. [x] T4. `truncateTitle` by sums; `GlyphAdvance` kept by the face; K1.
+. [x] T5. Head and tail; the heads drawn apart, the thumbnails before the
+  canvas; `GridTiles` through them; K1.
+. [x] T6. `TestGridHeads` and the grid in `TestParallelDrawing`, each
+  safeguard undone once to see a case fail; K2, K3.
+. [x] T7. `develop` and the change interleaved on ws1; K4–K6 and the results.
+. [x] T8. `go vet ./...`, `go test ./...`, `make check-specs`; K7.
+. [x] T9. S2 and S3 of the grid under `glx` and S1 under `cpu` on the
+  desktop of E1, `develop` and the change in turn; research, "On the
+  desktop".

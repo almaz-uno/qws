@@ -117,4 +117,5 @@ once more itself — and printed every warning twice; the second load is gone.
 == Open decisions
 
 . Whether joined keys stop being read in a later version, once warnings
-  have had time to be seen. Until decided, they are read.
+  have had time to be seen — decided by specification 015: they are not
+  read, and each is reported.

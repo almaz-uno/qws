@@ -35,7 +35,10 @@ cases need an explicit decision, not an omission.
 The project language is English (`AGENTS.md`): documentation, comments,
 commit messages, specifications, command-line help, log messages.
 Identifiers, file names, configuration keys and external terms keep their
-original spelling.
+original spelling. Strings a test feeds to the program are data, not text for
+a reader, and keep their language: the Cyrillic window titles of
+`pkg/carousel/scenes_test.go`, on which font fallback is checked
+(specification `017-english-documents`).
 
 == Documentation is part of the change, not its consequence
 
@@ -211,11 +214,6 @@ The section is introduced by specification `009-spec-checks`.
 Open questions, recorded as open. Each is closed by a separate change with a
 specification, after which the corresponding section appears above.
 
-* *Non-English documents* — `doc/optimization.asciidoc` and about half of
-  `doc/font-fallback.md` are in Russian, and a few paragraphs and code
-  comments in `doc/configuration.asciidoc` and `doc/windows-switcher.asciidoc`
-  are too, contrary to section "Language": they are either translated or the
-  rule gets an exception.
 * *Window contents* — qws reads titles, icons and pixels of the user's windows
   in order to display them; there is no rule yet on whether they may be
   logged, written to disk or sent anywhere.

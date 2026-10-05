@@ -1,0 +1,78 @@
+= 024 — plan
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-03
+
+== Approach
+
+A file of its own in `pkg/x11`, `xids.go`: `nextXIDs`, the range function,
+which asks `xcmisc.GetXIDRange` and returns the range of its reply through
+`xidRange`, which turns the answer of none, start 0 and count 1, into the
+error `errNoXIDs`.
+
+`pkg/x11/extensions.go`: XC-MISC joins `extensionNames`, and its package
+the blank imports, so that the setup of 021 asks for it with the others and
+every connection gets its opcode; `NewConn` sets `nextXIDs` with
+`SetIDRangeFunc` on the connection it made when the opcodes of the setup
+have XC-MISC; `setupExtensions`, run once per process, logs the warning
+when they have not.
+
+Nothing else changes: `x11.Connect`, `x11.NewModel` and `snapshot.New`
+connect through `NewConn` already, and `cmd/qws/root.go` does not change.
+
+== Files
+
+[cols="2,5"]
+|===
+| File | What changes
+
+| `pkg/x11/xids.go`
+| New: `nextXIDs`, `xidRange`, `errNoXIDs`.
+
+| `pkg/x11/xids_test.go`
+| New: `TestXIDsReused` (K1), with the flag `-xid-requests`; a file of
+  its own, which builds on `develop` too, for T-before.
+
+| `pkg/x11/xidrange_test.go`
+| New: `TestXIDRange` (K3).
+
+| `pkg/x11/extensions.go`
+| XC-MISC in `extensionNames` and the imports; the range function in
+  `NewConn`; the warning in `setupExtensions`.
+|===
+
+== Preserved
+
+The rules of 021: no `Init` of an extension package of xgb in qws, the
+tables of events and errors written by the setup alone, every connection
+of qws made by `NewConn`. The first range of a connection, as xgb gives it.
+The console programs, which keep `xgb.NewConn`.
+
+== XIDs given ahead (issue #74)
+
+`pkg/x11/xids.go`: `nextXIDs` becomes the method `next` of `xidRanges`, a
+range function of each connection's own. It keeps the last `xidsAhead` = 64
+XIDs xgb gave as spans, starting from the end of the connection's first
+range, which `newXIDRanges` takes from the setup; `pick` gives the longest
+part of the X server's range without them, and `gave` records the range
+given. Only xgb's goroutine of a connection's XIDs calls it, so it needs no
+lock. `NewConn` sets `newXIDRanges(xproto.Setup(conn)).next`.
+
+[cols="2,5"]
+|===
+| File | What changes
+
+| `pkg/x11/xids.go`
+| `xidRanges`, `xidsAhead`, `errXIDsAhead`; `nextXIDs` folded into `next`.
+
+| `pkg/x11/extensions.go`
+| `NewConn` sets the range function of the connection's own.
+
+| `pkg/x11/xids_test.go`
+| New: `TestXIDsAheadNotGivenAgain` (K6), building on `develop` too, for
+  A-before.
+
+| `pkg/x11/xidrange_test.go`
+| New: `TestXIDRangesAhead` (K7).
+|===

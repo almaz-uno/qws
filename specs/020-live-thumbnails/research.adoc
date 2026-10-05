@@ -1,0 +1,868 @@
+= 020 — research
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-04
+
+Facts the specification rests on, 2026-10-02, `develop` at `6fd664a`
+(1.3.1), E1: ws1 — NVIDIA GeForce RTX 4080 SUPER, driver 580.105.08, Intel
+Core i9-7920X, Debian 12, Xorg 21.1.7, picom 9.1 `--backend glx --vsync`,
+i3, DP-0 at 144 Hz and DP-4 at 60 Hz, 2560×1440 each. The author's desktop
+was in use and the author's service ran 1.3.1 meanwhile. Nothing was drawn
+on the screen: the probes draw into windows of their own off every monitor
+and into framebuffers, and bind no window of the author's. They are outside
+the repository, in `~/.cache/qws-probe-live` on ws1:
+
+* `liveprobe.c`, in C, built with `gcc -O2 -o liveprobe liveprobe.c
+  -lpthread -lm $(pkg-config --cflags --libs gl x11 xcomposite)`; its
+  outputs `share-2.txt`, `cost-1.txt` to `cost-3.txt` with the clocks
+  `clocks-2.txt` and `clocks-3.txt`; `run-paced2.sh` and the runs in
+  `runs/`, summed up by `summary.py` and `table.py`; `liveprobe.v1`, its
+  first build (section "Beside the frames");
+* `geom/`, a Go program printing where the thumbnails of E1 lie;
+* `kernel/`, a Go program comparing the kernel of the CPU with a shader,
+  its output `kernel-1.txt`.
+
+== What the code does today
+
+* *Snapshots* (008, 018; `pkg/snapshot`). The snapshotter has an xgb
+  connection of its own, a DAMAGE object per client window
+  (`ReportLevelNonEmpty`), and a GL context of its own
+  (`glx.NewOffscreen`: a direct 4.6 core context on a pbuffer of 1×1, on an
+  Xlib display of its own, current on the thread of its loop). A capture
+  subtracts the damage, binds the window's pixmap again
+  (`TexturePixmap.Rebind`), averages it by area into a framebuffer of at
+  most 512×512 and reads it back into a new `image.RGBA` — never one changed
+  in place. A window is captured 100 ms after a change (`settle`), at most
+  once a `snapshot_interval`.
+* *An activation* (`cmd/qws/root.go`, `handleKeyPress`). `Refresh(20 ms)`
+  captures the changed windows; the images are put into the window list of
+  the activation (`WindowInfo.Preview`, `WindowData.Thumbnail`) and stay
+  there to its end; `Pause(true)` before `Show` stops the snapshots on
+  change, and the deferred `Pause(false)` runs once `handleKeyPress` has
+  evaluated `selector.FadeOut()` in its `return` — at the end of the
+  fade-out.
+* *The presenter's context* (`glx.NewContext`) has its own Xlib display as
+  well; it is created by `NewSelector` at the first activation, on the
+  thread of the main loop, without a share context. The snapshotter's is
+  created when qws starts.
+* *Frames* (007, 019). At rest, the frame the CPU draws, staged in pieces
+  and presented byte for byte; in motion, scenes of layers drawn by the CPU
+  from the same window list — the base, a card layer per window and integer
+  offset, cross-faded; the tiles layer of the grid with the selection and
+  hover layers. At rest the loop of the selector blocks in `WaitForEvent` of
+  its own connection: nothing is presented but for an event.
+
+== Where a thumbnail lies
+
+Read in `pkg/carousel/renderer-cpu.go`, `fogleman/gg` v1.3.0 and
+`golang.org/x/image` v0.46.0.
+
+*How it is drawn.* `gg.DrawImage` calls `draw.BiLinear.Transform` with
+`draw.Over`; a thumbnail is opaque — the snapshots write alpha 1 — so
+`Transform` takes it as `draw.Src`. A pixel of the canvas whose centre maps
+inside the thumbnail is written with the kernel's value whatever lay under
+it, and no other pixel is: the kernel is a tent of support 1, widened to the
+scale when shrinking ("When shrinking, broaden the effective kernel support
+so that we still visit every source pixel", `impl.go`), its weights
+normalized. A pixel of the thumbnail's interior is therefore a function of
+the thumbnail image, its place and its scale alone, until something is drawn
+over it.
+
+*What is drawn over it.*
+
+[cols="1,4",options="header"]
+|===
+| Where | Over the thumbnail
+
+| Card
+| The border, a stroke of 2 px centred on the edge — its inner half 1 px in,
+  antialiased; nothing else. The shadow lies under the thumbnail; the
+  selection frame begins 3.5 px outside its edge, the hover frame 3 px
+  outside; the icon, the title and the workspace lie above and below it.
+
+| Tile
+| The border, a stroke of 1 px on the edge — 0.5 px in; the icon, 24 px at
+  8 px from the tile's corner, over the thumbnail where they meet. The
+  thumbnail ends 50 px above the tile's bottom and the urgent bar begins 45
+  px above it; the selection and hover frames lie on the tile's edge, at
+  least 8 px from the thumbnail.
+|===
+
+*Sizes on E1*, the author's configuration (thumbnails of 512×512, font 20,
+spacing 600, the header on), for a window of 2556×1357, whose snapshot is
+512×271 (`geom`):
+
+[cols="2,3",options="header"]
+|===
+| Where | Thumbnail on the screen
+
+| card at offset 0 | 512×271
+| at offset 1 | 443.7×234.9
+| at offset 2 | 409.6×216.8
+| at offset 3 | 389.1×206.0
+| at offset 4 | 375.5×198.7
+| at offset 5 | 365.7×193.6
+| tile, grid of 2 | 532.0×281.6 — the snapshot enlarged
+| tile, grid of 12 | 460.0×243.5
+| tile, grid of 36 | 255.1×135.0, in tiles of 396.7×195
+|===
+
+From a window to a tile of the grid of 36 the scale is 1:10; from a
+snapshot, 1:2.
+
+*Which windows have contents.* At 08:35, of the 36 client windows of
+`_NET_CLIENT_LIST` on ws1, 2 were viewable (`xwininfo`): one on each
+monitor, the others on hidden workspaces of i3. 008 counted 1 of 30, 018
+four on two monitors.
+
+== What the specifications allow
+
+`GLX_EXT_texture_from_pixmap`
+(https://registry.khronos.org/OpenGL/extensions/EXT/GLX_EXT_texture_from_pixmap.txt):
+
+* "The contents of the texture after the drawable has been bound are
+  defined as the result of all rendering that has completed before the call
+  to glXBindTexImageEXT"; "Rendering to the drawable while it is bound to a
+  texture will leave the contents of the texture in an undefined state." A
+  texture shows a change of its window for certain only once bound again.
+* "The texture image is taken from <buffer> and need not be copied."
+* Mipmaps: `GLX_MIPMAP_TEXTURE_EXT` sets storage aside, and
+  `GenerateMipmapEXT` defines the levels.
+* Nothing on share lists, on other contexts or other displays; a revision
+  "removed language referring to sharing of color buffers when pixmaps are
+  bound to textures".
+
+Sharing between contexts — `GLX_ARB_create_context` and chapter 5 of OpenGL
+4.6 core: the research of 013, "What the specifications allow". Textures and
+sync objects are shared, framebuffers and vertex arrays are not; a change
+made in one context is seen in another once complete and the object bound
+again there; `glClientWaitSync` with a timeout of 0 tests a fence without
+blocking.
+
+== Sharing
+
+`liveprobe share`: the window of its own, of 2556×1357, painted one colour
+after another by a third connection; context A as the snapshotter's, on
+display A; context B on display B, created with A as share context; B
+draws a texture into a framebuffer of 64×64 and reads the mean colour back.
+
+[cols="4,3",options="header"]
+|===
+| Step | Outcome
+
+| A names the window's pixmap and binds it to texture T
+| bound; `GLX_Y_INVERTED_EXT` 1
+
+| B created with A as its share context
+| created; `glIsTexture(T)` true in B
+
+| B draws T, the window red
+| red
+
+| the window painted blue, T not bound again
+| B draws blue
+
+| A binds T again and makes a fence; B waits for it and draws T
+| blue
+
+| the window painted green; A binds T again and averages it into a
+  thumbnail texture of its own, then a fence; B waits and draws the
+  thumbnail
+| green
+
+| B binds A's GLX pixmap to a texture of its own, on display B, while A
+  holds it bound
+| X error 2, BadValue, on 152.16 (`glXBindTexImageEXT`)
+
+| the same once A has released it
+| bound; B draws the window, white by then
+
+| B makes a GLX pixmap of its own of the window
+| X error 11, BadAlloc, on 152.22 (`glXCreatePixmap`), as in 018
+
+| D created with A as share context on a display of its own while A is
+  current on another thread
+| created; D draws T
+
+| C created with B as share context, A binds T again
+| C draws T as A last bound it
+|===
+
+One GLX pixmap serves every context of the process: the context that binds
+it — the snapshotter's — owns it, and every context of its share group, on
+any display and thread, draws its texture and the thumbnails averaged from
+it. A second owner is refused. NVIDIA's texture is the pixmap's storage
+itself: B saw the blue window without a new binding, which the extension
+does not promise.
+
+== The cost of sampling
+
+`liveprobe cost`: in context A alone, frames of 2520×1400 into a
+framebuffer — the base copied as the presenter copies a frame, then N quads
+of 268×142 at the places of the tiles of a grid of 36 (5 % larger than
+the 255×135 of E1) — 300 frames a variant after 30 not counted, one every
+1/144 s, the time of each on the GPU by a timer query. N windows of
+2556×1357 of its own, bound as 008 binds them; for the mipmapped variant,
+36 more windows bound with `GLX_MIPMAP_TEXTURE_EXT`, whose mipmaps are made
+once. The clock of the GPU logged by `nvidia-smi` every 200 ms (`clocks-2.txt`).
+
+[cols="4,1,1,2",options="header"]
+|===
+| Frame | p50, ms | p95, ms | Clock, MHz
+
+| the base alone | 0.014 | 0.059 | 2610 to 615
+| area average from the windows, N = 1 | 0.384 | 0.506 | 615 to 285
+| N = 12 | 0.848 | 1.186 | 2610
+| N = 36 | 2.737 | 3.254 | 1290 to 2100
+| bilinear from the windows, N = 1 | 0.018 | 0.074 | 2100 to 555
+| N = 12 | 0.202 | 0.253 | 375 to 225
+| N = 36 | 2.877 | 3.044 | 210 to 915
+| trilinear from the windows, mipmapped, N = 1 | 0.042 | 0.147 | 915 to 270
+| N = 12 | 0.203 | 0.203 | 210
+| N = 36 | 0.258 | 0.301 | 210
+| bilinear from thumbnails of 512×271, N = 1 | 0.179 | 0.180 | 210
+| N = 12 | 0.203 | 0.206 | 210
+| N = 36 | 0.250 | 0.272 | 210
+|===
+
+The run of 08:38 (`cost-2.txt`); those of 08:36 and 09:10 gave the same
+within 0.05 ms at p50, but bilinear from 36 windows, 2.6–2.9 ms.
+
+*The clock.* NVIDIA's driver sets the clock of the GPU to the load:
+between frames of a fraction of a millisecond it stays at 210 MHz, P8, its
+memory at 405 MHz; it rises only under loads of a millisecond or more a
+frame. A light load is measured at the clock it leaves the GPU at — so at
+210 MHz the frames of 1–36 thumbnails from snapshots cost 0.18–0.25 ms, 2 µs
+a thumbnail, and the frames that average whole windows, at 0.3–2.6 GHz,
+0.35–2.7 ms. Each window read in full costs a frame some 3.5 million texel
+fetches, 14 MB.
+
+*Per change*, one window at a time, 30 a second, at 210 MHz:
+
+[cols="3,2,2",options="header"]
+|===
+| Change | GPU p50 / p95, ms | CPU p50 / p95, ms
+
+| bind again | 0.003 / 0.003 | 0.230 / 0.365
+| bind again, make the mipmaps | 3.111 / 5.171 | 0.279 / 0.502
+| bind again, average into 512×271 | 1.009 / 1.592 | 0.264 / 0.443
+| the same, 36 windows at once, back to back (09:10) | 1.013 / 1.828 a window | —
+|===
+
+200 changes each after 30, at 08:38; the CPU is that of the calls, the GPU
+that of the commands by a timer query. The longest call took 10.1 ms in
+each variant then, under 0.8 ms at 09:10. 36 windows back to back, as at
+an activation, did not raise the clock: 36 ms of GPU at 210–300 MHz.
+
+Binding again costs the GPU nothing; the CPU of the thread that calls it
+some 0.25 ms — a request to the X server — and up to 10 ms when the X server
+is busy, as 008 found. The mipmaps of a window cost three times a pass into
+a thumbnail.
+
+== Beside the frames
+
+`liveprobe paced`, after the probe of 013: a presenter in context B on a
+window of 2520×1400 off the screen, swap interval 0, a frame due every
+1/144 s — slept to 3 ms before it, then spun, as `waitFrame` does — of the
+base copied and N thumbnails drawn bilinear from textures of 512×271, a
+swap and `glFinish`. Meanwhile a second thread changes the N windows R
+times a second through a connection of its own — a band of 20 rows painted
+over and 150 strokes, a terminal printing a line — and, with display A,
+follows them by the mode:
+
+[cols="1,5",options="header"]
+|===
+| Mode | What follows the windows
+
+| `clients` | nothing: the clients' drawing alone, the baseline
+| `thumb` | A binds every changed window again and averages it into the
+  other of its two thumbnails, all at once, then a fence; B draws the new
+  thumbnails from the first frame whose fence test, `glClientWaitSync` with
+  timeout 0, finds it signalled, never waiting for it
+| `spread` | as `thumb`, one window at a time, spread over 1/R
+| `inline` | A binds the changed windows again, then a fence; B averages
+  them from A's window textures into thumbnails of its own, in the pause
+  after a frame if it ends no sooner than 3 ms before the next — as the
+  uploads of 007 — at most B windows a pause, the longest waiting first
+| `live` | A binds them again; B averages each window's texture into its
+  tile in every frame, option a
+|===
+
+4000 frames a run, 50 not counted; per frame, by timer queries, how long its
+first command waited on the GPU ("queued") and how long it took there to the
+end of its swap ("on the GPU"); on the CPU, from the start of the frame to
+the end of `glFinish` ("presented"), and the share of frames presented in
+more than 2 ms. The runs of `run-paced2.sh`, two rounds, the modes in turn
+for each N and R; the clock logged meanwhile.
+
+2026-10-02 08:49–09:09, `runs/20261002-0849`: each cell the first round,
+then the second; MHz is the median clock of the GPU while the run ran, the
+first 4 s left out, when the windows are made and the clock is up. B, the
+windows `inline` averages a pause at most, is 4 but where said.
+
+[cols="1,1,2,3,3,3,3",options="header"]
+|===
+| N | R | Mode | Presented p95, ms | p99, ms | Over 2 ms, % | MHz
+
+| 4 | 30 | `clients` | 1.55 / 1.15 | 2.97 / 2.14 | 2.58 / 1.05 | 210 / 210
+| 4 | 30 | `thumb` | 2.70 / 3.93 | 5.78 / 5.34 | 7.35 / 12.25 | 442 / 270
+| 4 | 30 | `spread` | 1.16 / 1.38 | 2.35 / 5.26 | 1.38 / 2.00 | 435 / 285
+| 4 | 30 | `inline` | 1.82 / 1.75 | 3.41 / 2.93 | 3.23 / 1.68 | 420 / 270
+| 4 | 30 | `live` | 3.26 / 2.94 | 3.72 / 3.73 | 33.38 / 83.28 | 1290 / 675
+| 12 | 30 | `clients` | 1.22 / 1.25 | 4.35 / 2.67 | 1.43 / 1.93 | 210 / 210
+| 12 | 30 | `thumb` | 2.26 / 2.27 | 4.89 / 4.86 | 7.40 / 8.05 | 480 / 540
+| 12 | 30 | `spread` | 1.18 / 1.30 | 1.36 / 2.54 | 0.35 / 1.80 | 930 / 1140
+| 12 | 30 | `inline` | 1.26 / 1.13 | 2.03 / 1.75 | 1.32 / 0.80 | 510 / 735
+| 12 | 30 | `live` | 2.92 / 2.67 | 3.67 / 3.63 | 72.67 / 36.85 | 555 / 840
+| 36 | 30 | `clients` | 2.01 / 2.69 | 4.33 / 3.41 | 5.17 / 10.07 | 240 / 270
+| 36 | 30 | `thumb` | 1.97 / 1.99 | 2.98 / 3.03 | 4.72 / 4.92 | 465 / 555
+| 36 | 30 | `spread` | 0.73 / 0.70 | 0.78 / 0.82 | 0.07 / 0.12 | 1440 / 1575
+| 36 | 30 | `inline` | 1.69 / 1.66 | 2.99 / 2.51 | 3.45 / 2.85 | 1050 / 420
+| 36 | 30 | `inline`, B = 36 | 1.69 / 1.53 | 2.46 / 2.49 | 2.58 / 2.52 | 435 / 540
+| 36 | 30 | `live` | 3.66 / 3.61 | 4.39 / 4.37 | 100.00 / 100.00 | 2655 / 2775
+| 4 | 144 | `clients` | 1.66 / 1.27 | 2.35 / 1.48 | 1.38 / 0.15 | 225 / 240
+| 4 | 144 | `thumb` | 0.88 / 1.67 | 0.96 / 1.92 | 0.20 / 0.60 | 1035 / 878
+| 4 | 144 | `spread` | 0.80 / 0.90 | 0.84 / 1.05 | 0.17 / 0.20 | 1455 / 1065
+| 4 | 144 | `inline` | 1.05 / 1.00 | 1.12 / 1.10 | 0.42 / 0.17 | 675 / 930
+| 4 | 144 | `live` | 3.03 / 3.50 | 3.24 / 3.84 | 26.23 / 12.18 | 1155 / 1080
+|===
+
+*What the frames show.* The clock confounds the comparison: work that a
+mode adds raises the clock, and the frames then take less — `spread` with
+36 windows ran at 1.4–1.6 GHz and presented its frames sooner than the
+clients alone at 240–270 MHz. Where the clocks were alike — 4 windows at
+30 a second, 270–440 MHz — and over all the runs:
+
+* `live` put 12–100 % of the frames over 2 ms: each frame averages whole
+  windows, 2.3–3.3 ms on the GPU at p95.
+* `thumb`, the passes all at once, 4.7–12.3 % at 30 a second, against
+  1.0–10.1 % for the clients alone and 7.4–12.3 % where the clocks were
+  alike: a burst of passes in the other context holds up the frames that
+  come meanwhile, though no frame waits for its fence; p99 up to 5.8 ms.
+* `spread`, 0.07–2.0 %, and `inline`, 0.8–3.5 %, stayed within a point or
+  so of the clients alone, and below them where they raised the clock;
+  the p99 of a frame 0.8–3.4 ms, but 5.3 ms in one run of `spread`.
+* At 144 changes a second with 4 windows the clock rose to 0.7–1.5 GHz,
+  and every mode but `live` left 0.2–0.6 % of the frames over 2 ms.
+* `inline` with no bound on the windows a pause, B = 36, did as with 4.
+
+*The snapshotter's CPU.* A pass of `spread`, binding again included, took
+0.09–0.22 ms of its thread at p50; binding again alone, as in `inline` and
+`live`, 0.08–0.19 ms a window; the passes of `thumb` 0.4–3.6 ms a burst.
+
+Off the screen nothing waits for a vertical blank: a frame is late only by
+the GPU or the CPU. What the vertical blank of picom makes of these
+figures only the session on the screen tells, S5 of the specification.
+
+*A frame that waits for a pass takes the pass in.* The first build of the
+probe made B wait on the GPU, `glWaitSync`, for A's last fence before every
+frame of `thumb` and `live`
+(`runs/20261002-0840-blocking`, the first round, stopped there): with 36
+windows at 10 a second a frame took 15.0 ms on the GPU at p95, 16.0 ms to be
+presented. The presenter tests a fence and draws the older thumbnail; it
+does not wait.
+
+== The kernel on the GPU
+
+`kernel` (`~/.cache/qws-probe-live/kernel`, Go, with the offscreen context
+of `pkg/glx` and the code of the worktree): a snapshot of 512×271 about as
+hard to scale as a window — lines of strokes on a light page, a dark panel,
+a bar with a gradient — drawn into a frame of 2520×1400 at the places and
+scales of E1 by `draw.BiLinear.Transform` with `draw.Over`, as
+`gg.DrawImage` draws it, and by a fragment shader that computes the kernel
+of `transform_RGBA_RGBA_Src` — for each pixel whose centre the inverse of
+the matrix maps inside the snapshot, a tent widened to the scale when
+shrinking, the weights normalized, the sum in 16 bits a channel truncated
+and shifted by 8 — in single and in double precision; the pixels compared.
+
+[cols="3,1,2,2,2",options="header"]
+|===
+| Place | Scale | Pixels | Equal, float / double | GPU, float / double
+
+| card, offset 0 | 1.000 | 138 752 | 99.90 / 99.90 % | 0.004 / 0.121 ms
+| card, offset 1 | 0.867 | 103 896 | 99.91 / 99.95 % | 0.008 / 0.231 ms
+| card, offset 2 | 0.800 | 88 560 | 99.88 / 99.88 % | 0.007 / 0.203 ms
+| card, offset 3, cut by the edge | 0.760 | 17 922 | 99.94 / 99.97 % | 0.003 / 0.051 ms
+| tile 0, grid of 36 | 0.498 | 34 425 | 99.85 / 99.85 % | 0.004 / 0.117 ms
+| tile 7, grid of 36 | 0.498 | 34 560 | 99.90 / 99.91 % | 0.004 / 0.119 ms
+|===
+
+Every pixel the CPU writes the shader writes, and no other; where they
+differ, it is by 1 in a channel — likely a sum that falls on a step of the
+truncation, which the two sides round to either side of it.
+The cards at offsets 4 and 5 lie outside the frame at the spacing of 600.
+Double precision is no closer and some 30 times slower; the GPU ran at 210
+MHz but for a moment. The live picture can be exact but for 0.03–0.15 % of
+its pixels, by 1, for 4–8 µs a thumbnail.
+
+== Found on the way
+
+* NVIDIA shows a window's change in its bound texture without binding it
+  again ("Sharing"). qws binds again all the same: the extension promises
+  the contents only then, and what Mesa does is not known.
+* `glXCreateContextAttribsARB` takes as share context a context current on
+  another thread and created on another display.
+* A live pass needs no read back: `glReadPixels` and the copy into an image
+  were most of the CPU of the snapshots in 008 ("After the services were
+  replaced").
+* Once A releases its binding, B can bind A's GLX pixmap on its own
+  display ("Sharing"): the ownership of a window texture could pass from
+  one context to another, at a release and a bind — not needed by the
+  plan.
+
+== The implementation off the screen
+
+2026-10-02, 11:44–12:13, ws1 as above, the author's desktop in use and the
+service of 1.3.1 running; the branch at `ff9bc7f` and then with the
+changes of `0cc271d` and `95316de`, before its merge with 1.3.2, whose
+pause for the switchers of other instances none of these runs meets. Windows of the tests off every monitor
+and pixmaps of their own; no window of the author's bound. The logs and
+the scripts that ran them are in `~/.cache/qws-probe-live/impl` on ws1:
+`run-impl.sh`, `run-guard.sh`, `run-guard2.sh`, `table.sh`.
+
+=== The live picture against the cpu
+
+`go test -run 'TestLiveThumbnails|TestLiveCovers' -v ./pkg/carousel`:
+pictures written in a context like the snapshotter's, drawn by the
+presenter over the frames of `cpu`, against `cpu` drawing the same
+pictures as the thumbnails. Outside the live rectangles no pixel differs
+in any scene; inside:
+
+[cols="4,2,2,1,1",options="header"]
+|===
+| Scene | Live pixels | Equal | Worst | Holes
+
+| the carousel of E1, 13 windows, the 7th selected; two titles and a
+  workspace long enough to reach over the cards before them
+| 547 428 | 99.954 % | 1 | 2
+| the same windows at the sizes of the defaults: thumbnails of 256,
+  spacing 300, font 14 — cards at offsets 0 to ±5 in the frame
+| 222 266 | 99.934 % | 1 | 1
+| the grid of 36 of E1, icons over 18 of its thumbnails
+| 1 529 364 | 99.932 % | 1 | 18
+| the same in a font of 30, its titles over the thumbnails
+| 1 498 980 | 99.932 % | 1 | 36
+|===
+
+The same in a scene whose base is the frame and whose items carry the
+pictures. Through the zoom of 0.92 the rectangle of a picture of one
+colour lies where the zoom takes the live rectangle, within a pixel.
+`TestLiveCovers`: every pixel a card draws, in the carousels of Σ and of
+the table, lies in its cover, the hover frame with it; in the two grids,
+1 494 and 3 104 pixels of labels and icons lie in live rectangles, all in
+their holes.
+
+=== The cost of a picture and of a pass
+
+`go test -run '^$' -bench LiveFrame -benchtime 600x ./pkg/carousel`, three
+runs: a frame at rest of E1, 2520×1400, presented again every 1/144 s
+without live pictures and with one over every thumbnail, on the GPU by a
+timer query:
+
+[cols="2,2,2,2",options="header"]
+|===
+| Frame | Without, p50 | With, p50 | A picture, p50 / p95
+
+| the carousel, 7 pictures | 0.102–0.114 ms | 0.137–0.153 ms | 5.0–5.6 / 8.0–9.2 µs
+| the grid of 36, 36 pictures | 0.125–0.133 ms | 0.243–0.253 ms | 3.3–3.4 / 4.0–5.8 µs
+|===
+
+`go test -run '^$' -bench LivePass -benchtime 300x ./pkg/snapshot`, three
+runs: a pass of a pixmap of 2556×1357 into a picture of 512×271, 30 a
+second: on the snapshotter's thread 0.35–0.36 ms at p50 and 2.5–3.5 ms at
+p95 — binding again, a request to the X server, which the desktop in use
+holds up; on the GPU 0.13–0.14 ms at p50, 0.37–0.92 at p95; from its start
+to its publication 0.54–0.59 ms at p50, 2.8–3.6 at p95. The GPU did not
+drop to 210 MHz between the passes here, as it did in "The cost of
+sampling".
+
+=== Passes in the pauses
+
+`BenchmarkLiveBeside` of `pkg/snapshot` is the probe of "Beside the
+frames" with the code of qws: the presenter of `pkg/carousel` presents a
+frame at rest of the grid of 36 of E1 every 1/144 s, slept and spun as the
+selector waits, with `glFinish`; N pixmaps of 2556×1357 change R times a
+second — a band painted over and 150 strokes, through a connection of
+their own; in blocks of 400 frames in turn, the changes alone
+(`clients`), and the snapshotter's schedule, passes and publications —
+its loop fed the changes as DAMAGE would — with each frame drawing the
+pictures published (`live`). The share of the frames presented in more
+than 2 ms, their p99, the lag of a pass from the change it shows to the
+end of the first frame that draws it — L but for the vertical blank — and
+the passes published in the blocks of `live`, of 4 800 frames:
+
+----
+LIVE_N=<N> LIVE_R=<R> LIVE_GUARD=<guard> go test -run '^$' -bench LiveBeside -benchtime 4800x ./pkg/snapshot
+LIVE_HOLD=0s ...   # the passes whenever due
+----
+
+[cols="1,1,3,2,2,2,2",options="header"]
+|===
+| N | R | Passes | Over 2 ms | p99, ms | L p50 / p95, ms | Published
+
+| 1 | 50 | whenever due | 0.57–0.75 % | 1.43–1.69 | 29.3–29.6 / 39.1–39.7 | 502
+| 1 | 50 | not 2.5 ms before a frame | 0.35–0.39 % | 1.46 | 31.6–31.7 / 40.9–41.0 | 485
+| 1 | 50 | not 4 ms before a frame | 0.13 % | 1.35–1.47 | 31.7 / 40.2–40.4 | 484
+| 1 | 50 | after the frames | 0.13–0.26 % | 1.26–1.47 | 31.6–31.7 / 40.7–41.0 | 484
+| 4 | 30 | whenever due | 1.80–3.38 % | 2.96–4.34 | 24.6–25.0 / 39.7–40.7 | 1 891–1 903
+| 4 | 30 | not 2.5 ms before a frame | 0.75–1.36 % | 1.73–2.29 | 26.1–26.5 / 41.6–42.6 | 1 792–1 801
+| 4 | 30 | not 4 ms before a frame | 0.48–0.66 % | 1.37–1.48 | 31.4–31.8 / 46.7–47.0 | 1 610–1 613
+| 4 | 30 | after the frames | 0.31–0.48 % | 1.39–1.49 | 45.8–45.9 / 60.9–61.8 | 1 213–1 217
+|===
+
+N = 1 twice and N = 4 three times for each, in turn; the changes alone left
+0–0.18 % of their frames over 2 ms, p99 1.28–1.57 ms. Passes after the
+frames, as `ff9bc7f` first made them, wait for a frame each, and the
+spreading for the next; each window's own interval then counts from the
+pass, so the passes thin out and the lag grows. Passes not made in the
+4 ms before the end of a frame — `95316de` — leave one window's frames
+nearly as the changes alone left them, for 0.7 ms of lag at p95; with four
+windows the lag at p95 is 47 ms, past the 45 of K7, and the passes a
+window 15 % fewer. With twelve windows, the guard of 2.5 ms against
+passes whenever due: 1.3–2.6 % of the frames over 2 ms against 4.1–5.7 %,
+L at p95 48.0–48.2 ms against 46.1–46.8.
+
+The runs of `ff9bc7f` at more windows and changes, after the frames
+against whenever due, two each: 12 windows at 30 a second, 0.61–1.23 %
+against 4.3–5.2 %, but 2 435–2 439 passes against 4 860–4 865; 36 windows,
+0.61–1.71 % against 2.4–3.9 %, 2 560 passes against 12 770–12 910; 4
+windows at 144 a second, 0–0.26 % against 1.8–2.5 %, 1 219–1 222 passes
+against 1 903. Passes whenever due hold the frames as the `spread` of the
+probe did, 1.4–2.0 % at four windows; the changes alone of the probe, with
+its drawing, left more, 1.1–2.6 %.
+
+Off the screen nothing waits for the vertical blank: a frame presented in
+more than 2 ms misses it only where its due time falls less than that
+before it; how many do, K8 of S5 tells.
+
+=== Found in the implementation
+
+* The border of a card's thumbnail is `2 / scale` pixels wide, not 2: `gg`
+  strokes in pixels of the canvas whatever its matrix, and
+  `drawWindowWithData` divides the width by the scale it draws the
+  thumbnail at — 4 px at the sizes of the defaults. With a border of 2 the
+  live rectangle took its inner pixels: 95.45 % equal, worst 204, until
+  the width was the drawing's.
+* What the cards drawn after a card draw lies over it where they reach: a
+  title or a workspace of 30 wide letters of the card to its right, in the
+  carousel of E1; the glyphs of the labels of a tile in a font of 30, 2–3
+  rows into its thumbnail. "Where a thumbnail lies" did not have them; the
+  holes of the live rectangles do.
+* Windows viewable but not shown — on the workspace of another monitor
+  that the filter of the switcher leaves out — took passes; only the
+  windows of the last frame do now.
+* A benchmark run twice — as `go test -bench` runs it, with `b.N` of 1
+  first — aborted twice in some 25 runs, glibc finding the heap corrupted
+  in `glxSetup` (`crash-before-teardown-fix.log`): its second run created
+  its contexts while the thread of the first destroyed its own. The tests now end their threads of GL
+  before going on, and some 60 runs since went through. qws creates the
+  presenter's context once, at the first activation, while the
+  snapshotter's thread works, as since 1.1.0, and destroys none but at its
+  end.
+
+== S5 on the desktop, the first runs
+
+2026-10-02, 14:27–16:07, ws1, the author away: the commands of the tasks
+with the branch at `2abf3b5` and `develop` at `759c6d3`, 18 runs; two of
+`live: false` stopped part way, and their pools take what they logged.
+The runs are in `~/.cache/qws-runs/20261002-1427-020` on ws1. What they
+showed, and what was changed for the second runs:
+
+* *The window of S5 took no pass.* The xterm is of depth 24, drawn into
+  the pixmap of its frame: Composite names no pixmap of its own, and the
+  snapshotter binds none (022). Of the 805 passes of a run of the grid,
+  795 were of an editor of depth 32 on DP-0, under the overlay, 5 and 5 of
+  two mate-terminals; a run of the carousel made 37. So K7–K9 measured the
+  passes of a window changing about twice a second, not 50 times.
+  `measure.sh` now starts a mate-terminal, of depth 32 on ws1, and writes
+  the depth of the window into `meta` (`cc6fa18`).
+* *The frames at rest of the carousel.* Of the last frames of its steps,
+  42.90 % missed with `live: true`, against 0.91 % with `live: false` and
+  0.78 % for `develop`; the frames between, 1.32 % against 1.31 and
+  1.21 %. The last frame drew in 4.11 ms at p50 against 0.79: the live
+  rectangles of the frame at rest, computed anew at each selection,
+  measured the labels of the cards with `font.BoundString`, which loads
+  and hints each glyph at each call. `BenchmarkLiveGeometry` (`pkg/carousel`,
+  the fonts of E1): `CarouselLive` 2.13–2.28 ms at p50 a step, `GridLive`
+  9.5–9.7 ms; with the bounds of a glyph kept by its face (`501cc2d`),
+  0.08–0.15 ms (at most 0.36) and 0.2–0.6 ms.
+* *The fades.* The fade-ins missed 10.39 % of their intervals in the
+  carousel and 15.22 % in the grid with `live: true`, against 6.27 and
+  9.49 %; the fade-outs 1.75 and 4.05 % against 1.21 and 2.48 %. The
+  first pass of an activation ran right after its first frame, which
+  uploads a whole frame and the layers: the second frame of the carousel's
+  fade-in presented in 10.0 ms on average against 5.4, 40 of its 60
+  intervals missed against 9 of 51; in the grid the third, which drew the
+  first picture and so computed `GridLive`, in 15.7 ms against 1.8, 58 of
+  60 missed. The passes now run from the end of the fade-in to the start
+  of the fade-out (`5762008`).
+* *L in the carousel.* p50 77 ms, p95 2 208 ms, max 4 931 ms, of 337
+  frames; in the grid 9.9, 42.1 and 203.5 ms, of 1 900. The selector gave
+  every window as shown, so the windows off the strip took passes, drawn
+  for the first time when a step brought their cards back. Only the cards
+  and tiles in view take passes now (`c218cb6`), and L counts them from
+  when they came into view if later than the change (`6424841`).
+* *K9.* `C shown` of the grid: 406.86 % of a CPU with `live: true`,
+  403.60 % with `false` — 3.26 points, past the bound of 3 — and 402.72 %
+  for `develop`; the runs of one build and setting spread over 1.1–3.8
+  points. The profiles of the runs of the grid, each some 298 s shown,
+  `live: true` against `false`: the snapshotter's loop 0.85–0.92 s more,
+  most of it woken at the end of each frame for no pass (`8802f3c` wakes it
+  only for one); `GridLive` 0.26–0.33 s, its hinting; `liveTiles` 0.40 s;
+  the presenter's drawing of the pictures 0.39–0.48 s. And the drawing of
+  the frames at rest in the background hinted 1.0 s more, 4.24–4.47 s
+  against 2.90–3.43 s for `false` and `develop`, its faces allocated
+  17.2–17.9 GB against 13.1–13.8 GB, the same number of frames at rest
+  drawn — the canvases 23.5–23.6 GB in every run: the drawings found their
+  `sync.Pool` of font sets empty a third more often, and made their faces
+  anew. A `sync.Pool` keeps an object a goroutine put back for the next
+  goroutine on the same P, and the snapshotter's thread and the frames of
+  the live pictures change where the drawings run: a likely cause, not
+  checked. The heads of the tiles, resampled on half of the CPUs, varied
+  by up to 4.4 s between two runs of `develop`, some 1.5 points of a CPU.
+  Of the 3.26 points some 0.8 is the live thumbnails' own, a third of a
+  point the pools', and the rest within the spread of the runs.
+
+== The author's trial at rest
+
+2026-10-02, 22:23–22:27, ws1, the build at `e2c2fda` with live
+thumbnails on, the service stopped, 19 activations of Alt+F11: the
+author saw no live thumbnails, in the carousel or the grid. The log is
+`~/.cache/qws-trial-020/log-at-rest-2228.json` on ws1.
+
+* *What the log has.* 17 passes, each followed by a frame of cause
+  `live`. Activations 1, 4, 10, 12, 17, 18 and 19 had one each, 174–273
+  ms after the overlay opened: the window focused at the time, drawn anew
+  as the overlay took the keyboard, passed once the fade-in ended.
+  Activations 13 and 15, with the Claude app (0x7000004, depth 32)
+  changing, had 7 in 4 s and 3 in 1 s, at rest, each 1.3–2.6 ms after the
+  DAMAGE event it covers. The others had none.
+* *What changed meanwhile.* With the switcher hidden a window that changes
+  is captured at most once a second, so the snapshots on change say which
+  windows did. ilovlya (0x9400003, depth 24, taken from the pixmap of its
+  frame by RENDER, 022) changed every second the whole time: 133
+  snapshots. The Claude app changed in spans, 130 snapshots, none between
+  22:24:09 and 22:25:50 — activations 2–12 fall in that span. The
+  terminals changed when the focus did, at the ends of activations, 2–10
+  snapshots each. In activations 6 and 8, 7 and 10 s long, the only
+  window seen to change is ilovlya, which takes no pass (spec, D2). A
+  focused application may stop drawing its cursor while the overlay holds
+  the keyboard.
+* *The stall supposed.* `TestLiveAtRest` runs the loop of the snapshotter
+  as qws runs it, on a root of the test's own off the screen whose
+  children the X server redirects, with a switcher that presents a frame
+  only when woken: a window drawn anew every 5 ms, 45 pictures in 1.5 s
+  at 33 ms — all the interval allows — each drawn by a frame, three runs;
+  drawn every 500 ms after a change before the live passes start, 6 in
+  3 s. With the `DamageSubtract` of a pass removed, 1. No pass waits for
+  a frame at rest, and DAMAGE reports again after a pass.
+* *The desktop now.* A probe of the DAMAGE of the viewable windows, read
+  only, 10 s at 22:44: the Claude app 112.2 changes a second, ilovlya
+  2.5, a terminal 0.1 — `~/.cache/qws-probe-live/damage-probe` on ws1.
+
+The window that changes all the time on the author's desktop, ilovlya, is
+one of those drawn into the pixmap of their frame, which take no pass;
+the open decision of D2 decides whether they will. The windows of depth
+32 took passes when they changed. (The author's answer, 2026-10-03: A —
+"Passes from the frame".)
+
+== Passes from the frame
+
+2026-10-03, 00:05–00:50, ws1, the author's desktop in use, the service
+running; the branch with the passes from frames (`fd2b4a1`). The windows
+of the tests off the screen, in frames of their own; no window of the
+author's bound or redirected. ilovlya (0x8c00003), read only: depth 24,
+visual 0x2b, in an i3 frame (0x801320) of depth 24 and visual 0x21; the
+DAMAGE probe of `~/.cache/qws-probe-live/damage-probe`, 10 s, 2.3 changes
+a second.
+
+* *The tests of 022 ran no more.* Since 021 RENDER is checked on a
+  connection of `x11.NewConn`; `frameSnapshotter` took one of
+  `xgb.NewConn` and `TestCaptureFromFrame` and `BenchmarkFrameRender`
+  skipped, on `develop` as well; run again, they met the `thumbGen` of
+  020. Fixed (`a7ffe61`): the means of 022, 0.51–0.69, and 1.17 ms at
+  p50.
+* *The picture.* `TestLiveFromFrame`: the live picture of a window in a
+  frame equals its snapshot — worst 0 — RENDER scaling both alike and the
+  copy on the GPU being at a scale of 1; from the area average 0.67–1.31
+  a channel at the mean, for the pictures of the test.
+* *The X server and the GPU.* The scaled pixmap is drawn by the X server,
+  through the snapshotter's connection, and read by the GPU through the
+  display of its GL context. With the composites checked — the X server
+  has answered — but no `glXWaitX`, 10 of 200 passes read the pixmap as
+  it was before (5 runs of 40, 2–3 each); with `glXWaitX` before binding
+  it again, 0 of 200; with an `XSync` of the GL display instead, 7 of 80.
+  The flaky "drawn anew" of `TestGPUThumbnail` and `TestSharedLive` may
+  be the same, for pixmaps the clients draw; not tried.
+* *The cost.* `go test -run '^$' -bench 'LivePass' -benchtime 300x
+  ./pkg/snapshot`, three runs, a window of 2556×1357 passed 30 times a
+  second, the fences polled every 0.5 ms as the loop does; the CPU of the
+  X server a pass less its own over as long a stretch before, idle at
+  54–66 ms a second with the desktop in use; that of the test's process,
+  /proc in ticks of 10 ms:
++
+[cols="2,2,2,2,2",options="header"]
+|===
+| Pass | On the thread, p50 / p95 | Done, p50 / p95 | qws's CPU | The X server's CPU
+
+| from a pixmap of its own | 0.35–0.39 / 0.5–3.7 ms | 1.60–1.65 / 2.9–3.9 ms | 0.97–1.00 ms | 0.1–0.9 ms
+| from the frame | 1.48–1.57 / 3.5–6.0 ms | 2.60–2.70 / 6.1–8.1 ms | 2.40–2.47 ms | 0.8–1.3 ms
+|===
++
+A window changing all the time passed every 33 ms costs then some 7 % of
+a CPU of qws and 3 % of the X server's from a frame, against 3 % and
+0.3–3 % from a pixmap of its own; ilovlya, 2.3 changes a second, some
+0.6 % and 0.2 %. Without `glXWaitX` the X server took 0.34–0.61 ms a pass and qws
+the same; with the rectangle in the frame asked once, not at each pass,
+qws took 2.17 ms against 2.40. The rest of qws's CPU a pass from a frame
+is the some 25 requests of a pass — the copy of the window out of the
+frame, the pixmaps and pictures of the halvings made and freed — each
+through the goroutines of xgb and a thread locked to the GL context; kept
+between passes, a pass would send some 5 (spec, open decisions).
+
+== S5 at rest
+
+2026-10-03, from 11:24, ws1, the author away, the service stopped: the
+short rest variant of the tasks, the branch at `fe9e85f`, 16 runs — a
+mate-terminal and an xterm changing every 20 ms on DP-4, the carousel and
+the grid, `live` on and off, two runs each; 10 activations of 5 steps,
+each then held still 10 s. The runs are in
+`~/.cache/qws-runs/20261003-1124-020-rest` on ws1.
+
+[cols="2,2,2,2,2",options="header"]
+|===
+| Pool | A1 missed, on / off | R at rest | L in view p50 / p95 | C shown, on − off
+
+| mate-terminal, grid | 5.63 / 0.68 % | 59.2 a second | 25.5 / 38.9 ms | 45.74 − 38.34: +7.40
+| xterm, grid | 8.14 / 0.91 % | 58.7 a second | 27.7 / 40.6 ms | 46.90 − 38.23: +8.67
+| mate-terminal, carousel | 1.69 / 0.82 % | 0 | 32.8 / 180.9 ms | 21.06 − 21.29
+| xterm, carousel | 1.69 / 0.64 % | 0 | 33.2 / 178.9 ms | 21.10 − 20.99
+|===
+
+* *No pass at rest in the carousel.* The window of S5 was never in view:
+  the warm-up of `measure.sh` focuses the windows in i3's order of focus,
+  which takes the workspaces of the focused output before those of the
+  other; the workspace shown on DP-4, where the terminal floats, is 29th of
+  33 in it now, so the terminal was some 29 cards to the right, and the
+  five steps from the second card leave the cards 0 to 9 in view on E1
+  (`CardLive` at the sizes of E1: 0–4 at the selection 1, 3–9 at 6). The
+  carousel passed what it showed: the Claude app, the first card, 56, 50
+  and 6 passes at the selections 1, 2 and 3, the last with its card in
+  view, none after; the terminal none, and nothing at rest, where only the
+  cards 3–9 were in view. In the grid, every tile in view, the two took
+  59 passes a second. `measure.sh` now puts the window of S5 second in the
+  order of the switcher, and the rest variant rests on its card
+  (`1e4ba51`).
+* *The steps of the grid.* Not a burst at the start of live: the windows
+  passed during the steps were the two changing all the time, the
+  terminal and the Claude app, 30 times a second each, in every step —
+  the misses by step, of 228–230 frames: 17–26, 13–15, 7–19, 4–17, 10–14
+  on, 6, 1, 1, 0, 0 off. Of the frames missed, 40 of 52 and 57 of 70 came
+  right after a pass that took the snapshotter's thread 6.6–7.0 ms on
+  average, against 2.3 ms for all the passes: binding again, or scaling by
+  RENDER, waits for the X server of the desktop, and the overlay's frames
+  with it; the xterm, passed by RENDER, the more. Off the screen the passes
+  beside frames cost little (`BenchmarkLiveBeside`, 2 windows 50 times a
+  second: 1.1 % of the frames over 2 ms against 0.34–0.38 %). Since
+  `ae12383` no pass is made while frames come one after another, a step or
+  a hover moving: 0.42–0.58 % against 0.63–0.67 %, 1–2 passes; with steps
+  of 21 frames and pauses of 200 ms, 1.42–1.47 % against 1.25–1.59 %, the
+  1 182–1 185 passes all in the pauses, L at p95 58.5–58.8 ms against
+  52–53 for passes whenever due.
+* *The X server and the GPU, for windows of their own pixmap.* As for the
+  pixmaps scaled from frames ("Passes from the frame"), a pass that binds a
+  window's pixmap again may read it before the X server's drawing is done
+  on the GPU: `TestSharedLive`, 55 runs each with the desktop in use,
+  interleaved, 5 failed without `glXWaitX`, none with (`de4083b`).
+* *K9 at rest.* `C shown` of the grid, `live` on less off: 7.40 points of
+  a CPU with the mate-terminal and the Claude app changing all the time,
+  8.67 with the xterm and the Claude app — two windows passed some 30
+  times a second each, every publication followed by a frame of cause
+  `live`, 58 a second, with `glFinish` busy-waiting in each (`-v`). Some
+  3.7 points a window of its own pixmap, and some 5 for the xterm passed
+  from its frame; `BenchmarkLivePass` gives 0.8–1.0 ms of qws's CPU a
+  pass from a pixmap of its own, 2.4 ms from a frame, without the frame
+  that draws it. The bound of 3 points was set for S5 with one window
+  changing; the cost a window changing all the time is that of the
+  passes and of their frames at the full rate of `live_interval`, which
+  spec 023 (#66) takes up.
+
+=== The second runs
+
+2026-10-03, from 16:02, the same set with `measure.sh` at `1e4ba51` — the
+window of S5 second in the order of the switcher, each rest on its card —
+and qws at `8a47cb3`, no pass in motion. The runs are in
+`~/.cache/qws-runs/20261003-1602-020-rest2` on ws1. The Claude app was
+quiet: the passes were of the terminal of S5, 22 of 0x3c00013.
+
+[cols="2,2,2,2,2",options="header"]
+|===
+| Pool | A1 missed, on / off | R at rest, the fewest | L in view p95 | C shown, on − off
+
+| mate-terminal, grid | 0.50 / 0.35 % | 31.4, 30.9 | 35.9 ms | +4.70
+| xterm, grid | 0.48 / 0.29 % | 31.4, 30.9 | 37.5 ms | +5.38
+| mate-terminal, carousel | 0.42 / 0.23 % | 11.3, 0.0 | 36.9 ms | +1.58
+| xterm, carousel | 0.52 / 0.23 % | 12.0, 0.0 | 39.4 ms | +2.15
+|===
+
+* *Rests without a pass in the carousel.* 23 of the 40 rests of the
+  carousel passed nothing, not a line of the log in 10 s; the others 30 a
+  second. Each rest was on the card of the terminal, the selection 1, the
+  steps back where they were meant — the last frame before every rest.
+  The steps to the selections 5 and 6 took the card out of view; the
+  terminal changed meanwhile, DAMAGE reported it once, and with no pass
+  to subtract it, nothing more. Back in view, `BeginFrame` gave the
+  terminal among the windows shown but did not wake the snapshotter's
+  loop, asleep with nothing to wait for — since `8802f3c` no end of frame
+  wakes it. Another window's change woke it now and then, and those rests
+  had their passes. Since `c70c4e1` a slice of windows shown other than
+  the last wakes the loop; `TestLiveAtRest`, the card out of view and
+  back before the rest: 0 pictures in 1.5 s without, 45 with.
+* *K8.* Of 3 300 intervals a run: the carousel 7 and 8 missed off, 12 and
+  16 on with the mate-terminal, 16 and 18 with the xterm; the grid 13 and
+  10 off, 17 and 16 on, and 10 and 9 off, 12 and 20 with the xterm. The
+  first step, right after the fade-in, misses 5–8 in every run; the rest
+  of the misses with `live` on fall in the steps after it — no pass is
+  made in motion, but a pass made in the short pause before a step can
+  meet its first frames. A cost, if a small one: both runs of the xterm
+  in the carousel 8–11 more than off. A longer hold than 10 ms would keep
+  the passes from the pauses between the keys of a step — 30 ms, say;
+  not measured.
+* *K9 with one window changing all the time.* The grid of the
+  mate-terminal, run 1: 6.15 s of qws's CPU more in 142.4 s shown, 3 598
+  passes and 3 541 frames of cause `live`, 1.71 ms a pass; the xterm
+  2.24 ms; the carousel 1.83 and 2.34 ms. By the profiles, on less off, a
+  pass of the mate-terminal: the frame of cause `live` 0.52 ms — its
+  `glFinish`, busy-waiting under `-v` only, 0.35 ms, the rest of the frame
+  0.17 ms; the snapshotter 0.34 ms — the pass 0.20, its publication 0.08,
+  `glXWaitX` 0.04; the reader of xgb 0.03 ms; the scheduler of Go and its
+  system calls some 0.3 ms; some 0.5 ms not in the profiles — threads of
+  the driver. Without `-v` a user pays some 1.35 ms a pass, 4 % of a CPU
+  for a window of its own pixmap changing all the time at 30 passes a
+  second, some 5.5 % from a frame; with `live_interval` at 66 ms, half.
+
+=== The third runs
+
+2026-10-04, from 10:57, the same set with the build of 023 at `9f84a68` —
+this branch with the passes from the frame made cheaper — and the default
+`live_interval` of 50 ms, `live: true` against `live: false` of that build;
+`~/.cache/qws-runs/20261004-1057-020-rest3` on ws1, 16 runs, all ended
+well. Of the 17 675 passes of the runs on, 17 595 were of the terminal of
+S5, 80 of a window of the desktop.
+
+[cols="2,2,2,2,2",options="header"]
+|===
+| Pool | A1 missed, on / off; p95 | R at rest, the fewest | L in view p95 | K9, without `glFinish`
+
+| mate-terminal, carousel | 1.31 / 1.48 %; 7.70 / 7.59 ms | 19.7, 19.7 | 52.65 ms | 1.97
+| mate-terminal, grid | 1.74 / 0.88 %; 7.59 / 7.39 ms | 19.7, 19.7 | 52.85 ms | 2.08
+| xterm, carousel | 1.50 / 1.34 %; 7.44 / 7.31 ms | 19.7, 19.7 | 52.82 ms | 2.31
+| xterm, grid | 1.42 / 0.88 %; 7.24 / 7.13 ms | 19.7, 19.7 | 52.98 ms | 2.27
+|===
+
+The off runs missed 0.9–1.5 % of their intervals, against 0.2–0.35 % the
+day before: a noisier desktop. The passes of a terminal took the
+snapshotter's thread 0.82–0.89 ms at p50, 1.17–1.62 at p95, and were done
+in 1.96–2.01 ms at p50 — the xterm's through the chain of 023 as the
+mate-terminal's from its own pixmap.

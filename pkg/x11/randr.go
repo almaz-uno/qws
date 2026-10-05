@@ -21,9 +21,11 @@ type MonitorGeometry struct {
 
 // GetMonitors returns a list of all active monitors using XRandR
 func GetMonitors(conn *xgb.Conn, root xproto.Window) ([]MonitorGeometry, error) {
-	// Initialize RandR extension
-	if err := randr.Init(conn); err != nil {
-		return nil, fmt.Errorf("failed to initialize RandR extension: %w", err)
+	// RandR is set up with the connection, not here: an Init at each
+	// activation raced the readers of every connection
+	// (specs/021-xgb-extension-init)
+	if err := CheckExtension(conn, "RANDR"); err != nil {
+		return nil, fmt.Errorf("RandR: %w", err)
 	}
 
 	// Check RandR version (we need at least 1.3 for GetScreenResourcesCurrent)

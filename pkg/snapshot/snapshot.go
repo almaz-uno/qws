@@ -3,7 +3,12 @@
 // change, at most once an interval: its pixmap, named through Composite, is
 // bound as a texture (GLX_EXT_texture_from_pixmap) in a GL context of the
 // package's own, averaged by area on the GPU to at most 512×512, and read
-// back. Windows the window manager unmaps keep their last thumbnail.
+// back. A pixmap the GPU will not bind — another client holds a GLX pixmap of
+// the window — is scaled in the X server by RENDER instead
+// (specs/018-snapshot-bind-conflicts). Windows the window manager unmaps keep
+// their last thumbnail. While the switcher is shown, the windows that change
+// are averaged again into textures the presenter draws: the live thumbnails of
+// live.go (specs/020-live-thumbnails).
 package snapshot
 
 import (
@@ -16,6 +21,7 @@ import (
 
 	"github.com/almaz-uno/qws/pkg/composite"
 	"github.com/almaz-uno/qws/pkg/glx"
+	"github.com/almaz-uno/qws/pkg/x11"
 	"github.com/go-gl/gl/v4.6-core/gl"
 	"github.com/jezek/xgb"
 	xcomposite "github.com/jezek/xgb/composite"
@@ -38,29 +44,59 @@ type Snapshotter struct {
 	conn     *xgb.Conn
 	root     xproto.Window
 	interval time.Duration
-	atoms    struct{ clientList xproto.Atom }
+	atoms    struct{ clientList, live xproto.Atom }
+	share    *glx.Share // the GL context, for the presenter's to share
 
-	mu     sync.RWMutex
-	thumbs map[xproto.Window]image.Image
+	mu       sync.RWMutex
+	thumbs   map[xproto.Window]image.Image
+	thumbGen map[xproto.Window]uint64 // the generation of each thumbnail
 
-	paused  atomic.Bool
-	events  chan xgb.Event
-	refresh chan chan struct{}
-	quit    chan struct{}
-	done    chan struct{}
+	// The live thumbnails shared with the presenter's thread
+	// (specs/020-live-thumbnails, live.go), under mu: the pictures published,
+	// the publications so far, those a frame being drawn took them after, the
+	// fence after the last frame that drew any, whether the switcher has been
+	// woken since its last frame, and what SetLive asked for
+	pics      map[xproto.Window]Picture
+	seq       uint64
+	fetchSeq  uint64
+	inFrame   bool
+	presFence uintptr
+	woken     bool
+	lastEnd   time.Time       // the end of the last frame
+	prevEnd   time.Time       // and of the one before
+	shown     []xproto.Window // the windows of the last frame, those the switcher shows
+	liveWant  liveSession
+
+	paused   atomic.Bool
+	wake     chan struct{} // the pause ended, or the windows shown changed
+	liveWake chan struct{} // SetLive was called
+	events   chan xgb.Event
+	refresh  chan chan struct{}
+	quit     chan struct{}
+	done     chan struct{}
 
 	// Owned by the loop
 	windows map[xproto.Window]*window
 	frames  map[xproto.Window]xproto.Window // frame of the window manager → its client
-	off     *glx.Offscreen
-	gpu     *gpu
-	cpu     *composite.Capturer
+	// The switchers of the qws instances, for the pause (specs/011-snapshot-pause)
+	switchers switchers
+	off       *glx.Offscreen
+	gpu       *gpu
+	render    *xrender // nil without RENDER or MIT-SHM
+	cpu       *composite.Capturer
+	live      liveSession     // the live thumbnails taken; overlay 0: none
+	lastPass  time.Time       // the last live pass
+	hold      time.Duration   // liveHold; 0 in a test: no pass waits for the frames
+	liveRetry time.Time       // a pass a frame held back is tried again then
+	trash     []*liveTextures // live textures to delete once no frame is drawn
+	noScaled  bool            // a scaled pixmap would not bind: no live pass from a frame
 }
 
 // window is what the snapshotter knows of a client window
 type window struct {
 	id       xproto.Window
 	frame    xproto.Window // its parent, when not the root
+	visual   xproto.Visualid
 	damage   damage.Damage
 	schedule schedule
 
@@ -69,7 +105,9 @@ type window struct {
 	mapped, frameMapped bool
 
 	// The pixmap bound as a texture; stale after a map, an unmap or a
-	// change of size, when Composite gives the window a new pixmap
+	// change of size, when Composite gives the window a new pixmap. Named but
+	// not bound, when the GPU would not bind it: taken by RENDER until named
+	// anew
 	stale         bool
 	retried       int // captures retried since the last that worked
 	pixmap        xproto.Pixmap
@@ -77,6 +115,32 @@ type window struct {
 	bound         *glx.TexturePixmap
 	width, height int
 	depth         int
+
+	// The ancestor whose pixmap the window is drawn in and taken from, when
+	// the X server does not redirect the window itself, 0 when the pixmap is
+	// its own; the visual and the depth of the pixmap named
+	// (specs/022-uncaptured-windows)
+	via       xproto.Window
+	pixVisual xproto.Visualid
+	pixDepth  int
+
+	// Where the window lies in its ancestor's pixmap: the ancestor's border,
+	// from the naming of the pixmap, and the window's offset in the pixmap,
+	// border and all, as the X server last told it — at a snapshot, or a
+	// live pass, which checks it (specs/023-frame-pass-cost, D2 c)
+	viaBorder int
+	at        image.Point
+
+	// The live thumbnails (specs/020-live-thumbnails): the pictures so far,
+	// snapshots and passes, which number their generations; the textures of
+	// the passes, nil before the first; when it is due one; for a window
+	// taken from its frame, the pixmap its passes scale it into, nil before
+	// the first
+	pictures uint64
+	live     *liveTextures
+	liveDue  liveSchedule
+	scaled   *scaledPixmap
+	chain    *chain // the RENDER chain of the passes from the frame, for an activation
 }
 
 // errNotViewable: the X server would not name the window's pixmap — it is not
@@ -87,30 +151,51 @@ var errNotViewable = errors.New("window not viewable")
 // retries bounds the captures retried a settle later after errNotViewable
 const retries = 3
 
+// errNotBound: the GPU would not bind the window's pixmap — another client
+// holds a GLX pixmap of the window, or no FBConfig has its depth
+var errNotBound = errors.New("pixmap not bound on the GPU")
+
+// errNotRedirected: the window is viewable, but neither its pixmap nor that
+// of an ancestor can be named — without a compositor, a window the X server
+// does not redirect on its own (specs/022-uncaptured-windows)
+var errNotRedirected = errors.New("no pixmap of the window or of an ancestor")
+
 // newOffscreen is the GL context of the snapshots; a variable, so that a test
 // can make it fail
 var newOffscreen = glx.NewOffscreen
 
 // New starts the snapshotter. It fails without Composite, DAMAGE, GLX 4.6 or
 // GLX_EXT_texture_from_pixmap; the caller then keeps the snapshots of 1.0.0.
-// scaling is the algorithm of pkg/composite, for windows of a depth the GPU
-// cannot bind.
+// scaling is the algorithm of pkg/composite, for the windows neither the GPU
+// nor RENDER can take.
 func New(interval time.Duration, scaling string) (*Snapshotter, error) {
-	conn, err := xgb.NewConn()
+	conn, err := x11.NewConn()
 	if err != nil {
 		return nil, fmt.Errorf("snapshot: %w", err)
 	}
+	return start(conn, xproto.Setup(conn).DefaultScreen(conn).Root, interval, scaling)
+}
+
+// start runs a snapshotter on conn of the client windows listed on root, the
+// root window but in a test; conn is closed should it fail
+func start(conn *xgb.Conn, root xproto.Window, interval time.Duration, scaling string) (*Snapshotter, error) {
 	s := &Snapshotter{
-		conn:     conn,
-		root:     xproto.Setup(conn).DefaultScreen(conn).Root,
-		interval: interval,
-		thumbs:   make(map[xproto.Window]image.Image),
-		events:   make(chan xgb.Event, 256),
-		refresh:  make(chan chan struct{}),
-		quit:     make(chan struct{}),
-		done:     make(chan struct{}),
-		windows:  make(map[xproto.Window]*window),
-		frames:   make(map[xproto.Window]xproto.Window),
+		conn:      conn,
+		root:      root,
+		interval:  interval,
+		thumbs:    make(map[xproto.Window]image.Image),
+		thumbGen:  make(map[xproto.Window]uint64),
+		pics:      make(map[xproto.Window]Picture),
+		wake:      make(chan struct{}, 1),
+		liveWake:  make(chan struct{}, 1),
+		hold:      liveHold,
+		switchers: noSwitchers{},
+		events:    make(chan xgb.Event, 256),
+		refresh:   make(chan chan struct{}),
+		quit:      make(chan struct{}),
+		done:      make(chan struct{}),
+		windows:   make(map[xproto.Window]*window),
+		frames:    make(map[xproto.Window]xproto.Window),
 	}
 	if err := s.initX(scaling); err != nil {
 		conn.Close()
@@ -127,21 +212,22 @@ func New(interval time.Duration, scaling string) (*Snapshotter, error) {
 	return s, nil
 }
 
-// initX sets up the extensions and watches the client list
+// initX checks the extensions, set up with the connection
+// (specs/021-xgb-extension-init), and watches the client list
 func (s *Snapshotter) initX(scaling string) error {
-	if err := xcomposite.Init(s.conn); err != nil {
+	if err := x11.CheckExtension(s.conn, "Composite"); err != nil {
 		return fmt.Errorf("Composite: %w", err)
 	}
 	if _, err := xcomposite.QueryVersion(s.conn, 0, 4).Reply(); err != nil {
 		return fmt.Errorf("Composite: %w", err)
 	}
-	if err := xfixes.Init(s.conn); err != nil {
+	if err := x11.CheckExtension(s.conn, "XFIXES"); err != nil {
 		return fmt.Errorf("XFIXES: %w", err)
 	}
 	if _, err := xfixes.QueryVersion(s.conn, 5, 0).Reply(); err != nil {
 		return fmt.Errorf("XFIXES: %w", err)
 	}
-	if err := damage.Init(s.conn); err != nil {
+	if err := x11.CheckExtension(s.conn, "DAMAGE"); err != nil {
 		return fmt.Errorf("DAMAGE: %w", err)
 	}
 	if _, err := damage.QueryVersion(s.conn, 1, 1).Reply(); err != nil {
@@ -153,9 +239,19 @@ func (s *Snapshotter) initX(scaling string) error {
 		return err
 	}
 	s.atoms.clientList = atom.Atom
+	atom, err = xproto.InternAtom(s.conn, false, uint16(len(LiveAtom)), LiveAtom).Reply()
+	if err != nil {
+		return err
+	}
+	s.atoms.live = atom.Atom
 	if err := xproto.ChangeWindowAttributesChecked(s.conn, s.root, xproto.CwEventMask,
 		[]uint32{xproto.EventMaskPropertyChange}).Check(); err != nil {
 		return err
+	}
+	if sw, err := x11.NewSwitchers(s.conn, s.root); err == nil {
+		s.switchers = sw
+	} else {
+		log.Debug().Err(err).Msg("Switchers of other instances not followed")
 	}
 	cpu, err := composite.NewCapturer(s.conn, s.root, scaling)
 	if err != nil {
@@ -209,9 +305,52 @@ func (s *Snapshotter) Refresh(timeout time.Duration) {
 }
 
 // Pause stops or resumes the snapshots taken on change: they are paused while
-// the switcher is shown (specs/007-animation); Refresh still captures
+// the switcher is shown (specs/007-animation), and while that of another qws
+// instance is (specs/011-snapshot-pause); Refresh still captures, and the
+// live passes between two SetLive run paused or not, but for the switchers of
+// the other instances (specs/020-live-thumbnails)
 func (s *Snapshotter) Pause(paused bool) {
 	s.paused.Store(paused)
+	if !paused {
+		select {
+		case s.wake <- struct{}{}:
+		default:
+		}
+	}
+}
+
+// pausedNow reports whether the snapshots on change are paused: for this
+// instance's switcher or another's. In the loop only.
+func (s *Snapshotter) pausedNow() bool {
+	return s.paused.Load() || s.switchers != nil && s.switchers.Shown(0)
+}
+
+// switchers is what the snapshotter needs of the switchers of the qws
+// instances, x11.Switchers, an interface so that a test can give switchers of
+// its own; nil, or noSwitchers, follows none
+type switchers interface {
+	// Handle takes an event and reports whether it was about the switchers
+	Handle(ev xgb.Event) bool
+	// Shown reports whether a switcher is shown, but the overlay except
+	Shown(except xproto.Window) bool
+}
+
+// noSwitchers are the switchers where none can be followed
+type noSwitchers struct{}
+
+func (noSwitchers) Handle(xgb.Event) bool    { return false }
+func (noSwitchers) Shown(xproto.Window) bool { return false }
+
+// wait is how long the loop waits for a window due at due, at now: no
+// longer than till then, and not at all once that has passed; while paused,
+// or with no window due, an hour — the loop wakes for its events, an
+// activation or the end of the pause. Armed for a window due while paused, the
+// timer fired at once and the loop spun (specs/011-snapshot-pause).
+func wait(paused bool, due time.Time, ok bool, now time.Time) time.Duration {
+	if paused || !ok {
+		return time.Hour
+	}
+	return max(0, due.Sub(now))
 }
 
 // Close stops the snapshotter and frees what it holds in the X server and the
@@ -237,7 +376,13 @@ func (s *Snapshotter) run(ready chan<- error) {
 		return
 	}
 	defer g.close()
-	s.off, s.gpu = off, g
+	s.off, s.gpu, s.share = off, g, off.Share()
+	if x, err := newXRender(s.conn, s.root); err != nil {
+		log.Info().Err(err).Msg("RENDER unavailable, windows the GPU will not bind are captured on the CPU")
+	} else {
+		defer x.close()
+		s.render = x
+	}
 
 	s.reconcile()
 	ready <- nil
@@ -245,27 +390,44 @@ func (s *Snapshotter) run(ready chan<- error) {
 	timer := time.NewTimer(time.Hour)
 	defer timer.Stop()
 	for {
-		if due, ok := s.nextDue(); ok {
-			timer.Reset(max(0, time.Until(due)))
+		if s.live.overlay != 0 {
+			timer.Reset(s.liveWait(time.Now()))
 		} else {
-			timer.Reset(time.Hour)
+			due, ok := s.nextDue()
+			timer.Reset(wait(s.pausedNow(), due, ok, time.Now()))
 		}
 		select {
 		case ev := <-s.events:
 			s.handle(ev)
+		case <-s.wake:
+		case <-s.liveWake:
+			s.setLive()
 		case done := <-s.refresh:
 			s.captureChanged(time.Now(), causeActivation, true)
 			close(done)
 		case <-timer.C:
-			if !s.paused.Load() {
-				s.captureChanged(time.Now(), causeChange, false)
-			}
+			s.tick(time.Now())
 		case <-s.quit:
 			for id := range s.windows {
 				s.forget(id)
 			}
+			s.emptyTrash()
+			if s.presFence != 0 {
+				gl.DeleteSync(s.presFence)
+			}
 			return
 		}
+	}
+}
+
+// tick is the work of the timer: while live, the live passes and no snapshot
+// on change (specs/020-live-thumbnails); else the snapshots due, unless paused
+func (s *Snapshotter) tick(now time.Time) {
+	switch {
+	case s.live.overlay != 0:
+		s.liveTick(now)
+	case !s.pausedNow():
+		s.captureChanged(now, causeChange, false)
 	}
 }
 
@@ -295,6 +457,9 @@ func (s *Snapshotter) captureChanged(now time.Time, cause string, all bool) {
 // handle follows the windows: the client list, their structure and that of
 // their frames, their damage
 func (s *Snapshotter) handle(ev xgb.Event) {
+	if s.switchers != nil && s.switchers.Handle(ev) {
+		return
+	}
 	now := time.Now()
 	switch e := ev.(type) {
 	case xproto.PropertyNotifyEvent:
@@ -304,6 +469,7 @@ func (s *Snapshotter) handle(ev xgb.Event) {
 	case damage.NotifyEvent:
 		if w, ok := s.windows[xproto.Window(e.Drawable)]; ok {
 			w.schedule.change(now)
+			w.liveDue.change(now)
 		}
 	case xproto.MapNotifyEvent:
 		s.setMapped(e.Window, true)
@@ -316,6 +482,9 @@ func (s *Snapshotter) handle(ev xgb.Event) {
 		}
 	case xproto.ConfigureNotifyEvent:
 		if w, ok := s.windows[e.Window]; ok && (int(e.Width) != w.width || int(e.Height) != w.height) {
+			s.restructured(e.Window, now)
+		} else if w := s.client(e.Window); w != nil && w.via != 0 && w.via == e.Window {
+			// The frame the window is taken from: of a new size, a new pixmap
 			s.restructured(e.Window, now)
 		}
 	case xproto.ReparentNotifyEvent:
@@ -398,6 +567,7 @@ func (s *Snapshotter) follow(id xproto.Window, now time.Time) {
 	w := &window{id: id, stale: true}
 	if attrs, err := xproto.GetWindowAttributes(s.conn, id).Reply(); err == nil {
 		w.mapped = attrs.MapState != xproto.MapStateUnmapped
+		w.visual = attrs.Visual
 	}
 	if d, err := damage.NewDamageId(s.conn); err == nil {
 		if damage.CreateChecked(s.conn, d, xproto.Drawable(id), damage.ReportLevelNonEmpty).Check() == nil {
@@ -435,6 +605,9 @@ func (s *Snapshotter) forget(id xproto.Window) {
 		return
 	}
 	s.release(w)
+	s.dropLive(w)
+	s.dropChain(w)
+	s.dropScaled(w)
 	if w.texture != 0 {
 		gl.DeleteTextures(1, &w.texture)
 	}
@@ -445,6 +618,7 @@ func (s *Snapshotter) forget(id xproto.Window) {
 	delete(s.windows, id)
 	s.mu.Lock()
 	delete(s.thumbs, id)
+	delete(s.thumbGen, id)
 	s.mu.Unlock()
 }
 
@@ -488,22 +662,32 @@ func (s *Snapshotter) capture(w *window, cause string) {
 		return
 	}
 	w.retried = 0
+	if errors.Is(err, errNotBound) && s.render != nil {
+		path = "render"
+		var r image.Rectangle
+		if r, err = s.pixmapRect(w); err == nil {
+			img, err = s.render.thumbnail(w.pixmap, w.pixVisual, w.pixDepth, r)
+		}
+	}
 	if err != nil {
-		log.Debug().Err(err).Uint32("window", uint32(w.id)).Msg("Snapshot on the GPU failed, taken on the CPU")
+		log.Debug().Err(err).Uint32("window", uint32(w.id)).Str("path", path).Msg("Snapshot failed, taken on the CPU")
 		path = "cpu"
 		var cimg image.Image
 		if cimg, err = s.cpu.CaptureWindow(w.id, maxSide, maxSide); err == nil {
-			s.store(w.id, cimg)
+			s.store(w, cimg)
 		}
 	} else {
-		s.store(w.id, img)
+		s.store(w, img)
 	}
 	w.schedule.shot(time.Now())
 	if err != nil {
 		return
 	}
-	log.Debug().
-		Uint32("window", uint32(w.id)).
+	e := log.Debug()
+	if w.via != 0 {
+		e = e.Uint32("via", uint32(w.via))
+	}
+	e.Uint32("window", uint32(w.id)).
 		Int("width", w.width).
 		Int("height", w.height).
 		Str("path", path).
@@ -513,7 +697,13 @@ func (s *Snapshotter) capture(w *window, cause string) {
 }
 
 // captureGPU averages the window's pixmap on the GPU, naming and binding it
-// anew when it is stale
+// anew when it is stale. A pixmap the GPU would not bind stays named, for
+// RENDER, and is bound again only once named anew: the client holding a GLX
+// pixmap of the window holds it, as qws does, while the window keeps its
+// pixmap (specs/018-snapshot-bind-conflicts). Each binding first waits for
+// the drawing the X server has done, glXWaitX: on NVIDIA a drawing it has
+// answered can still be on the GPU, and the pixmap would be read as it was
+// before (specs/025-snapshot-wait-x).
 func (s *Snapshotter) captureGPU(w *window) (*image.RGBA, error) {
 	if w.texture == 0 {
 		w.texture = newWindowTexture()
@@ -521,36 +711,121 @@ func (s *Snapshotter) captureGPU(w *window) (*image.RGBA, error) {
 	gl.ActiveTexture(gl.TEXTURE0)
 	gl.BindTexture(gl.TEXTURE_2D, w.texture)
 
-	if w.stale || w.bound == nil {
+	switch {
+	case w.stale:
 		s.release(w)
 		geom, err := xproto.GetGeometry(s.conn, xproto.Drawable(w.id)).Reply()
 		if err != nil {
 			return nil, err
 		}
-		pixmap, err := xproto.NewPixmapId(s.conn)
-		if err != nil {
-			return nil, err
-		}
-		if err := xcomposite.NameWindowPixmapChecked(s.conn, w.id, pixmap).Check(); err != nil {
-			return nil, fmt.Errorf("%w: %v", errNotViewable, err)
-		}
-		w.pixmap = pixmap
 		w.width, w.height, w.depth = int(geom.Width), int(geom.Height), int(geom.Depth)
-		bound, err := s.off.BindPixmap(uint32(pixmap), w.depth)
-		if err != nil {
-			s.release(w)
+		if err := s.namePixmap(w); err != nil {
 			return nil, err
 		}
-		w.bound, w.stale = bound, false
-	} else {
+		w.stale = false
+		if w.via != 0 {
+			// The pixmap of a frame is the compositor's, bound on the GPU by
+			// it: taken by RENDER, never bound by qws, which would hold the one
+			// GLX pixmap its storage may have (specs/018-snapshot-bind-conflicts)
+			log.Debug().Uint32("window", uint32(w.id)).Uint32("via", uint32(w.via)).
+				Msg("No pixmap of its own: taken from its frame by RENDER")
+			return nil, errNotBound
+		}
+		s.off.WaitX()
+		bound, err := s.off.BindPixmap(uint32(w.pixmap), w.depth)
+		if err != nil {
+			log.Debug().Err(err).Uint32("window", uint32(w.id)).Msg("Pixmap not bound on the GPU until named anew")
+			return nil, errNotBound
+		}
+		w.bound = bound
+	case w.bound == nil:
+		return nil, errNotBound
+	default:
+		s.off.WaitX()
 		w.bound.Rebind()
 	}
 	return s.gpu.thumbnail(w.width, w.height, w.bound.YInverted), nil
 }
 
-// store keeps the thumbnail of the window
-func (s *Snapshotter) store(id xproto.Window, img image.Image) {
+// namePixmap names the pixmap the window is drawn in: its own, when the X
+// server redirects it — as it does a window whose visual differs from its
+// frame's, one of the two the 32-bit ARGB visual of Composite — and else,
+// when the window is viewable, the pixmap of its nearest ancestor below the
+// root that can be named: its frame, which the compositor redirects
+// (specs/022-uncaptured-windows). errNotViewable when the window is not
+// viewable, errNotRedirected when no ancestor's pixmap can be named.
+func (s *Snapshotter) namePixmap(w *window) error {
+	w.via, w.pixVisual, w.pixDepth, w.viaBorder, w.at = 0, w.visual, w.depth, 0, image.Point{}
+	pixmap, err := xproto.NewPixmapId(s.conn)
+	if err != nil {
+		return err
+	}
+	refusal := xcomposite.NameWindowPixmapChecked(s.conn, w.id, pixmap).Check()
+	if refusal == nil {
+		w.pixmap = pixmap
+		return nil
+	}
+	// BadMatch either way: not viewable, or not redirected
+	attrs, err := xproto.GetWindowAttributes(s.conn, w.id).Reply()
+	if err != nil || attrs.MapState != xproto.MapStateViewable {
+		return fmt.Errorf("%w: %v", errNotViewable, refusal)
+	}
+	for id := w.id; ; {
+		tree, err := xproto.QueryTree(s.conn, id).Reply()
+		if err != nil {
+			return err
+		}
+		if tree.Parent == 0 || tree.Parent == s.root {
+			return errNotRedirected
+		}
+		id = tree.Parent
+		// The ID of a pixmap not named stays free for the next attempt
+		if xcomposite.NameWindowPixmapChecked(s.conn, id, pixmap).Check() != nil {
+			continue
+		}
+		geom, err := xproto.GetGeometry(s.conn, xproto.Drawable(id)).Reply()
+		if err == nil {
+			attrs, err = xproto.GetWindowAttributes(s.conn, id).Reply()
+		}
+		if err != nil {
+			xproto.FreePixmap(s.conn, pixmap)
+			return err
+		}
+		w.pixmap, w.via = pixmap, id
+		w.pixVisual, w.pixDepth = attrs.Visual, int(geom.Depth)
+		w.viaBorder = int(geom.BorderWidth)
+		return nil
+	}
+}
+
+// pixmapRect is where the window lies in the pixmap named for it: all of its
+// own, but for its border; in its ancestor's, at its offset from the
+// ancestor's origin, asked at each capture — i3 moves a window in its frame,
+// and its ConfigureNotify events in root coordinates do not tell — and past
+// the ancestor's border, which the pixmap holds
+func (s *Snapshotter) pixmapRect(w *window) (image.Rectangle, error) {
+	r := image.Rect(0, 0, w.width, w.height)
+	if w.via == 0 {
+		return r, nil
+	}
+	pos, err := xproto.TranslateCoordinates(s.conn, w.id, w.via, 0, 0).Reply()
+	if err != nil {
+		return image.Rectangle{}, err
+	}
+	geom, err := xproto.GetGeometry(s.conn, xproto.Drawable(w.via)).Reply()
+	if err != nil {
+		return image.Rectangle{}, err
+	}
+	b := int(geom.BorderWidth)
+	w.at = image.Pt(int(pos.DstX)+b, int(pos.DstY)+b)
+	return r.Add(w.at), nil
+}
+
+// store keeps the thumbnail of the window, a picture of a new generation
+func (s *Snapshotter) store(w *window, img image.Image) {
+	w.pictures++
 	s.mu.Lock()
-	s.thumbs[id] = img
+	s.thumbs[w.id] = img
+	s.thumbGen[w.id] = w.pictures
 	s.mu.Unlock()
 }

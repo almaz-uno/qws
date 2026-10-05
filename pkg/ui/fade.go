@@ -69,7 +69,7 @@ func (s *Selector) fadeAt(now time.Time) carousel.Fade {
 	if s.fade.out {
 		e = s.anim.hide
 	}
-	return e.look(s.fade.level.at(now), overlayZoom)
+	return e.look(s.fade.level.at(now), s.anim.overlayZoom)
 }
 
 // fadesOut reports whether the overlay disappears by an animation
@@ -90,6 +90,7 @@ func (s *Selector) FadeOut() []xgb.Event {
 		return nil
 	}
 
+	s.setLive(false)
 	s.beginFade(true, time.Now(), s.chosenAt)
 	var events []xgb.Event
 	for s.fade.active {
@@ -118,8 +119,11 @@ func (s *Selector) ChosenAt() time.Time {
 	return s.chosenAt
 }
 
-// hide unmaps the overlay
+// hide unmaps the overlay, ends its live thumbnails and restores the layout
+// of appearance.layout for the next activation
 func (s *Selector) hide() {
 	s.window.Hide()
 	s.mapped = false
+	s.setLive(false)
+	s.restoreInitialLayoutMode()
 }

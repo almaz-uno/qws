@@ -6,12 +6,19 @@ keybindings:
   backward: Shift
   workspace_modifier: Ctrl
   cancel: Escape
+  # Toggles the carousel and the grid while the switcher is shown, without the
+  # workspace modifier; the next activation opens in appearance.layout again.
+  # With the header shown, its top right says what the key does now:
+  # "Q — grid" in the carousel, "Q — carousel" in the grid. "" for none.
+  layout_toggle: q
 
 appearance:
   # Layout mode: "carousel" (default, 3D perspective) or "grid" (Windows-style tile view)
   # You can also switch on-the-fly when selector is open:
   #   - Press 'c' to switch to carousel
   #   - Press 'g' to switch to grid
+  #   - Press keybindings.layout_toggle ('q') to toggle them
+  # In the grid, Up and Down move the selection a row within its column.
   layout: carousel
 
   # Renderer backend: how frames reach the screen; both show the same picture
@@ -25,11 +32,22 @@ appearance:
     width: 256
     height: 256
     # Scaling algorithm for thumbnails taken on the CPU, where the GPU cannot
-    # take them (no GLX or texture_from_pixmap); the GPU averages by area:
+    # take them (no GLX or texture_from_pixmap) — or, for a window the GPU will
+    # not bind, where RENDER cannot either; the GPU averages by area, RENDER
+    # halves and filters bilinearly:
     #   - "nearest"      - Fastest, lowest quality (pixelated)
     #   - "bilinear"     - Balanced speed and quality (default, recommended)
     #   - "catmull-rom"  - Highest quality, slowest (smooth, professional look)
     scaling_algorithm: bilinear
+    # Live thumbnails, on the glx renderer: while the switcher is shown, a
+    # visible window that changes is averaged again on the GPU and its card
+    # or tile follows it; false keeps the snapshots taken before the switcher
+    # appeared. No effect under cpu, nor where the GPU cannot share the
+    # thumbnails with the switcher (said once in the log).
+    live: true
+    # A shown window that changed is averaged again at most this often;
+    # 0: once a refresh of the monitor the switcher is on
+    live_interval: 50ms
   spacing: 300
   perspective: 0.6
 
@@ -71,6 +89,8 @@ appearance:
   window_padding:
     horizontal: 20px    # Horizontal padding from screen edges (e.g., "5%" or "50px")
     vertical: 20px      # Vertical padding from screen edges (e.g., "5%" or "50px")
+  header:
+    enabled: true       # The hostname and the qws version at the top left; false: none
 
   # Animations of the "glx" renderer; "cpu" changes its picture at once.
   # An effect list is fade, zoom, both ([fade, zoom] or fade,zoom), or none.
@@ -78,9 +98,14 @@ appearance:
     enabled: true       # false: every change shows at once
     duration: 150ms     # Time of every animation (0 = at once)
     step: true          # The selection moves to the next card or tile
-    show: [fade, zoom]  # How the switcher appears; zoom grows it from 0.92
+    show: [fade, zoom]  # How the switcher appears; zoom grows it from overlay_zoom
     hide: [fade, zoom]  # How it disappears, after the chosen window is activated
-    hover: [fade, zoom] # How the hover frame comes and goes; zoom closes in from 1.05
+    hover: [fade, zoom] # How the hover frame comes and goes; zoom closes in from hover_zoom
+    hover_duration: 0s  # Time of the hover animation (0 = that of duration)
+    overlay_zoom: 0.92  # Scale of its size the switcher zooms from and to
+    hover_zoom: 1.05    # Scale of its size the hover frame zooms from and to
+    locate_duration: 400ms # After a switch to the grid, the selection frame converges onto its tile (0 = none)
+    locate_zoom: 1.6    # Scale of its size it converges from, above 1
 
 behavior:
   snapshot_interval: 1s   # a visible window that changed is captured again at most this often

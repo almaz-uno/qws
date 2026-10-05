@@ -1,0 +1,152 @@
+= 011 — research
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-02
+
+== Conditions
+
+E1 as in 010: ws1, RTX 4080 SUPER, DP-0 at 144 Hz, a period of 6.94 ms;
+32 i3 windows. The services stopped, and in their place two instances of
+this change, `v1.2.0-3-g90754e3`, with the flags of the two services of
+then — `--pprof=localhost:6061`, and `--keybindings-key grave
+--windows-workspace current` — and debug logging in JSON, for their records
+`Snapshot`. The measured instance is a third one of the same build, on
+Alt+F11: S4 is `HOLD=2 LAYOUT=carousel`, then S3 with the grid and with the
+carousel, `SWEEP=1`; 20 activations each, 22:25–22:48. The logs are in
+`~/.cache/qws-011-runs/20261001-2225/` on ws1. Other sessions of the author
+ran on ws1 meanwhile.
+
+== The pause
+
+The two instances took 521 snapshots on change during the runs, none in a
+second strictly between the first frame of an activation of the measured
+instance and the end of its fade-out — some 1240 s of switcher shown in all.
+The logs time their records to the second, so a snapshot in the second an
+activation began or ended is not told apart.
+
+== Frames
+
+A1 p95 in ms and the share of intervals above 1.5 periods; "calm", the
+activations with at most 10 such intervals.
+
+[cols="3,3,3",options="header"]
+|===
+| Run, kind | all activations | calm activations
+
+| S4, carousel
+| 8.09, 1.67 %
+| 11 of 20: 7.92, 0.15 %
+
+| S3, carousel: steps and hover
+| 7.97, 0.88 %
+| 14 of 20: 7.92, 0.12 %
+
+| S3, grid: steps
+| 8.01, 1.77 %
+| —
+
+| S3, grid: hover
+| 7.91, 0.23 %
+| —
+
+| S4, fade-in / fade-out
+| 7.91, 2.1 % / 8.01, 0.7 %
+| —
+|===
+
+For comparison, from 010: with the services of 1.1.0 running, the step at
+8.42 ms and 1.10 %, the fade-in at 15.12 ms and 9.8 %, the hover of the grid
+at 11.49 ms and 9.8 %; with them stopped, the step at 7.09 ms and 0.51 %,
+spread evenly over the activations.
+
+The missed frames come in bursts: nine of the activations 10–20 of S4 miss
+from 14 to 130 intervals each, the activations 16 and 17 of S3 with the
+carousel 95 and 98 and four others of it 10 to 16, the rest at most six. Outside the bursts this change misses a fifth as many frames
+as 010 did with nothing beside it — consistent with the snapshotter of the
+measured instance no longer spinning while its switcher is shown, which 010's
+build did. Its p95, though, is 7.92 ms against 7.09: more intervals run a
+millisecond past the period without missing one. Neither the bursts nor the
+shift are explained here; the other sessions on ws1 at the time are the
+first suspects, and a run on an idle ws1 the way to tell.
+
+`dnsmasq` answers some 620 queries a minute on ws1 — the names of ws1–ws5,
+resolved over and over — in every window of runs alike, the clean one of
+010 at 21:07 included (`journalctl -t dnsmasq`): it tells nothing of the
+load. An earlier draft read it from `journalctl -o cat`, which drops the
+name of the process, and counted none.
+
+== On an idle ws1
+
+2026-10-02, 06:33–07:02, the other sessions done, load average 3.5–4.8; the build `v1.2.0-17-ge4adfb3`, this change merged with
+`develop` after 1.2.0 — specifications 012 and 018 and the dependency
+updates among it. First S2 of the build alone, the service stopped and
+nothing beside it; then S4 and S3 as before, two instances of the build in
+place of the service. The logs are in
+`~/.cache/qws-011-runs/20261002-0633-idle/` on ws1. From S4 on,
+`measure.sh` leaves out the frames that answer an Expose, which have no
+selection, in its wait for K5.
+
+The two instances took 534 snapshots on change, none while the measured
+switcher was shown — some 1220 s.
+
+[cols="3,3,3,3",options="header"]
+|===
+| Run | step | fade-in / fade-out | hover
+
+| S2, alone
+| 7.80, 0.15 %
+| 7.63, 0.45 % / 7.72, 0.24 %
+| —
+
+| S4
+| 7.83, 0.07 %
+| 7.80, 0 % / 7.73, 0 %
+| —
+
+| S3, grid
+| 7.84, 1.51 %
+| 7.85, 0 % / 7.74, 0 %
+| 7.82, 0.40 %
+
+| S3, carousel
+| 7.82, 0.08 %
+| 7.78, 0 % / 7.82, 0.24 %
+| 7.82, 0.26 %
+|===
+
+Both sets of runs are of this branch before 1.3.0 was merged into it.
+
+No bursts: the missed frames of the evening came, most likely, from outside
+qws — the same build missed none in bursts here. Beside
+two instances of this change the step misses 0.07–0.08 % of its intervals,
+a seventh of 010 with nothing beside it (0.51 %); the grid 1.51 %, against
+3.7 % in 007, as its frame at rest is drawn on the CPU while it moves.
+
+The p95 stays at 7.8 ms in every run, the build alone included, against
+7.09 for 010's build alone in the evening: it is not the instances beside.
+
+== Three builds back to back
+
+2026-10-02, 08:07–08:23: S2 alone — the service stopped, nothing beside —
+of 1.2.0, 1.3.0 and this branch merged with 1.3.0 (`v1.3.0-21-gcf0fee8`),
+one after another; `~/.cache/qws-011-runs/20261002-0807-p95/` on ws1.
+
+[cols="2,3,3,3",options="header"]
+|===
+| Build | step | fade-in | fade-out
+
+| 1.2.0 | 8.59, 1.44 % | 8.10, 1.4 % | 9.94, 3.8 %
+| 1.3.0 | 9.04, 1.94 % | 8.55, 3.0 % | 9.75, 3.8 %
+| this change | 8.56, 1.63 % | 8.37, 1.1 % | 9.94, 3.6 %
+|===
+
+The builds measure alike, this change no worse than 1.3.0 under it; and all
+three worse than this change alone at 06:33, the misses even over the
+activations — 10 to 40 in each — not in bursts. The build alone moved from
+7.80 ms and 0.15 % at 06:33 to 8.56 ms and 1.63 % at 08:18; 1.2.0's build,
+010's, measured 7.09 ms and 0.51 % at 21:07 the evening before. The p95 on
+ws1 follows the state of the machine from one set of runs to the next —
+by up to 2 ms — more than the builds tell apart, and what in that state
+moves it is not found here. Against a fixed threshold of 7.44 ms the
+builds can only be compared back to back.

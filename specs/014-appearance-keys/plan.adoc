@@ -1,0 +1,44 @@
+= 014 — plan
+:toc: left
+:toc-title: Contents
+:revdate: 2026-10-01
+
+[cols="2,5"]
+|===
+| File | What changes
+
+| `internal/config/config.go`
+| `Header` with `Enabled` under `Appearance`; `HoverDuration`, `OverlayZoom`
+  and `HoverZoom` at the end of `Animation`, so that `config init` writes
+  the keys of 010 where it did; their defaults in `Default()` and
+  `setDefaults`, which makes the environment variables read.
+
+| `cmd/qws/root.go`
+| The four flags and `applyFlags`.
+
+| `pkg/ui/effects.go`
+| The constants `overlayZoom` and `hoverZoom` become fields of
+  `animationOptions`, with `hoverDuration`; `parseAnimation` reads and
+  checks them.
+
+| `pkg/ui/fade.go`, `pkg/ui/hover.go`
+| The overlay zooms from `overlayZoom`; the hover frame from `hoverZoom`,
+  its levels moved in `hoverDuration`.
+
+| `pkg/ui/selector.go`
+| `SetHeader` gives the renderer no hostname and no version with the header
+  off; the debug record of the animations names the new options.
+
+| `internal/config/config_test.go`, `cmd/qws/root_test.go`,
+  `pkg/ui/effects_test.go`, `pkg/ui/selector_test.go`
+| K1–K5. The tests of 010 that compare a whole `Animation` or
+  `animationOptions` get the new fields at their defaults;
+  `TestAnimationFlags` leaves the flags of this change to
+  `TestAppearanceFlags`, so that their order does not matter.
+
+| `doc/configuration.asciidoc`, `config.yaml.example`, `README.md`
+| The keys.
+|===
+
+What must stay: `pkg/carousel` is not touched, so the frames are drawn by
+the code that drew them; `testdata/scenes.json` is not rewritten.

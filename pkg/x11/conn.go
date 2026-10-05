@@ -17,7 +17,7 @@ type Connection struct {
 // Connect establishes a connection to an X server
 func Connect() (*Connection, error) {
 	// Connect to X server (uses DISPLAY environment variable)
-	conn, err := xgb.NewConn()
+	conn, err := NewConn()
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to X server: %w", err)
 	}

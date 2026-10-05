@@ -5,12 +5,16 @@ import (
 	"fmt"
 	"image"
 	"math"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/almaz-uno/qws/internal/config"
 	"github.com/almaz-uno/qws/pkg/carousel"
 	"github.com/almaz-uno/qws/pkg/focus"
+	"github.com/almaz-uno/qws/pkg/glx"
 	"github.com/almaz-uno/qws/pkg/keygrab"
+	"github.com/almaz-uno/qws/pkg/snapshot"
 	"github.com/almaz-uno/qws/pkg/x11"
 	"github.com/jezek/xgb"
 	"github.com/jezek/xgb/xproto"
@@ -24,6 +28,8 @@ type keyConfig struct {
 	workspaceModifierMask uint16 // Workspace filter modifier (Ctrl)
 	mainKeysym            uint32 // Main trigger key keysym (Tab, F10, etc.)
 	cancelKeysym          uint32 // Cancel key keysym (Escape)
+	layoutToggleKeysym    uint32 // Key that toggles the carousel and the grid; 0: none (specs/026-layout-keys)
+	layoutToggleName      string // Its name as configured, for the hint of the header
 }
 
 // Selector provides a graphical carousel interface for window selection
@@ -69,10 +75,14 @@ type Selector struct {
 	animations          int                             // Animations so far, for the frame records
 	mapped              bool                            // The overlay is on the screen
 	chosenAt            time.Time                       // When the event that ended the activation was read
+	live                liveThumbnails                  // The live thumbnails (specs/020-live-thumbnails)
+	locate              locateAnimation                 // The selection frame converging after a switch to the grid (specs/028-grid-locate)
 }
 
-// NewSelector creates a new graphical window selector
-func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, windows []x11.WindowInfo, appearance config.Appearance, keybindings config.Keybindings, initialWorkspaceOpt string, watcher *focus.Watcher) (*Selector, error) {
+// NewSelector creates a new graphical window selector; snap, when not nil, is
+// the snapshotter whose pictures the live thumbnails show
+// (specs/020-live-thumbnails)
+func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, windows []x11.WindowInfo, appearance config.Appearance, keybindings config.Keybindings, initialWorkspaceOpt string, watcher *focus.Watcher, snap *snapshot.Snapshotter) (*Selector, error) {
 	// Try to get current monitor geometry, fallback to full screen on error
 	monitor, err := x11.GetCurrentMonitor(conn, root)
 	if err != nil {
@@ -188,6 +198,11 @@ func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, window
 		keyConf.cancelKeysym = keysym
 	}
 
+	// The keys of the switcher the layout key cannot be: Enter, the cancel and
+	// main keys, c, g and the arrows
+	keyConf.layoutToggleKeysym, keyConf.layoutToggleName = parseLayoutToggle(keybindings.LayoutToggle,
+		0xFF0D, keyConf.cancelKeysym, keyConf.mainKeysym, 0x0063, 0x0067, 0xFF51, 0xFF52, 0xFF53, 0xFF54)
+
 	s := &Selector{
 		ctx:                 ctx,
 		conn:                conn,
@@ -208,9 +223,14 @@ func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, window
 		initialLayoutMode:   appearance.Layout, // Save initial layout mode
 		watcher:             watcher,
 	}
+	s.setLayout(appearance.Layout)
 
 	// Initialize renderer and presenter
-	renderer, presenter, err := carousel.NewBackend(appearance.Renderer)
+	var share *glx.Share
+	if snap != nil && appearance.Thumbnail.Live {
+		share = snap.Share()
+	}
+	renderer, presenter, err := carousel.NewBackend(appearance.Renderer, share)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create renderer: %w", err)
 	}
@@ -219,6 +239,7 @@ func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, window
 	if a, ok := presenter.(carousel.Animator); ok {
 		s.animator = a
 	}
+	s.initLive(snap, presenter)
 	anim, warnings := parseAnimation(appearance.Animation)
 	for _, w := range warnings {
 		log.Warn().Msg(w)
@@ -230,9 +251,14 @@ func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, window
 		Bool("composes", s.animator != nil).
 		Dur("duration", anim.duration).
 		Dur("step", anim.step).
+		Dur("hover_duration", anim.hoverDuration).
 		Interface("show", anim.show).
 		Interface("hide", anim.hide).
 		Interface("hover", anim.hover).
+		Float64("overlay_zoom", anim.overlayZoom).
+		Float64("hover_zoom", anim.hoverZoom).
+		Dur("locate_duration", anim.locate).
+		Float64("locate_zoom", anim.locateZoom).
 		Msg("Animations")
 
 	// Apply initial workspace filtering based on configuration
@@ -277,8 +303,13 @@ func (s *Selector) UpdateWindows(windows []x11.WindowInfo) {
 }
 
 // SetHeader sets what the header of the overlay shows: the hostname and the
-// version of qws (specs/005-host-and-version)
+// version of qws (specs/005-host-and-version) — nothing, and the grid takes
+// the whole window, when appearance.header.enabled is false
+// (specs/014-appearance-keys)
 func (s *Selector) SetHeader(hostname, version string) {
+	if !s.appearance.Header.Enabled {
+		hostname, version = "", ""
+	}
 	s.config.Hostname = hostname
 	s.config.Version = version
 }
@@ -396,6 +427,11 @@ func (s *Selector) Show() (*x11.WindowInfo, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to create window: %w", err)
 		}
+		// Listed, so that the snapshots of other instances pause while it is
+		// shown (specs/011-snapshot-pause)
+		if err := x11.ListSwitcher(s.conn, s.root, s.window.GetWindowID()); err != nil {
+			log.Debug().Err(err).Msg("Switcher not listed for other instances")
+		}
 		if err := s.presenter.Bind(s.window); err != nil {
 			return nil, fmt.Errorf("failed to bind presenter to window: %w", err)
 		}
@@ -472,6 +508,10 @@ func (s *Selector) Show() (*x11.WindowInfo, error) {
 	// composes
 	s.fade.pending = s.animator != nil && s.anim.show.any()
 	s.render(thumbnails)
+	if !s.fade.active {
+		// Shown at once
+		s.setLive(true)
+	}
 	s.prefetch()
 
 	// Event loop - wait for user input
@@ -489,15 +529,123 @@ func (s *Selector) Show() (*x11.WindowInfo, error) {
 	return result, nil
 }
 
-// restoreInitialLayoutMode restores the initial layout mode before hiding
+// restoreInitialLayoutMode restores the initial layout mode as the overlay
+// is unmapped, so that the next activation opens in it (specs/026-layout-keys,
+// D2); the fade-out shows the layout shown (specs/028-grid-locate)
 func (s *Selector) restoreInitialLayoutMode() {
 	if s.config.LayoutMode != s.initialLayoutMode {
 		log.Debug().
 			Str("from", s.config.LayoutMode).
 			Str("to", s.initialLayoutMode).
 			Msg("Restoring initial layout mode")
-		s.config.LayoutMode = s.initialLayoutMode
+		s.setLayout(s.initialLayoutMode)
 	}
+}
+
+// parseLayoutToggle is the keysym of the layout key named by
+// keybindings.layout_toggle and the name its hint shows; 0 and "" for no
+// key: an empty name, one keygrab does not know, or one of the keys taken by
+// the switcher, which keep their meaning — the last two reported
+// (specs/026-layout-keys)
+func parseLayoutToggle(name string, taken ...uint32) (uint32, string) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return 0, ""
+	}
+	keysym, err := keygrab.GetKeysym(name)
+	if err != nil {
+		log.Warn().Err(err).Str("layout_toggle", name).Msg("Failed to parse layout toggle key, no layout toggle")
+		return 0, ""
+	}
+	for _, k := range taken {
+		if keysym == k {
+			log.Warn().Str("layout_toggle", name).Msg("Layout toggle key is another key of the switcher, no layout toggle")
+			return 0, ""
+		}
+	}
+	return keysym, name
+}
+
+// layoutHint is the hint at the top right of the header of what the layout
+// key named key does in the layout mode: "Q — grid" in the carousel, "Q —
+// carousel" in the grid, a name of one letter upper-cased, any other as
+// written; none without the key or the header (specs/026-layout-keys)
+func layoutHint(key, mode string, header bool) string {
+	if key == "" || !header {
+		return ""
+	}
+	if r := []rune(key); len(r) == 1 && unicode.IsLetter(r[0]) {
+		key = strings.ToUpper(key)
+	}
+	if mode == "grid" {
+		return key + " — carousel"
+	}
+	return key + " — grid"
+}
+
+// setLayout makes mode the layout mode, with the hint of the layout key for
+// it in the header
+func (s *Selector) setLayout(mode string) {
+	s.config = s.layoutConfig(mode)
+}
+
+// layoutConfig is the configuration of the frames of the layout mode: the
+// mode, and the hint of the layout key for it in the header
+func (s *Selector) layoutConfig(mode string) carousel.Config {
+	cfg := s.config
+	cfg.LayoutMode = mode
+	cfg.LayoutHint = layoutHint(s.keyConfig.layoutToggleName, mode, s.appearance.Header.Enabled)
+	return cfg
+}
+
+// switchLayout shows the layout mode, when it is not shown, ending what moves.
+// On a presenter that composes, with the layers of that layout held — drawn
+// in the background while the other is shown — it is shown from them at
+// once, and its frame at rest, drawn in the background, follows; otherwise
+// its frame is drawn now. The layers of both layouts stay. In the grid the
+// selection frame converges onto its tile from that first frame, or, without
+// the layers, from when they come (specs/028-grid-locate).
+func (s *Selector) switchLayout(mode string, thumbnails []image.Image) {
+	if s.config.LayoutMode == mode {
+		return
+	}
+	key := s.timing.start
+	held := s.animates() && (mode == "grid" && s.gridReady() || mode != "grid" && s.carouselReady())
+	log.Debug().Str("layout", mode).Bool("layers", held).Msg("Switching layout")
+	s.cancelStep()
+	s.setLayout(mode)
+	locates := mode == "grid" && s.locates()
+	if !held {
+		s.render(thumbnails)
+		s.prefetch()
+		if locates {
+			s.locate.key = key
+		}
+		return
+	}
+	start := time.Now()
+	if locates {
+		s.beginLocate(start, key)
+	}
+	// The frames of a fade show the scene
+	if !s.fade.active {
+		drawEnd, end := s.presentScene(start)
+		if s.locate.active {
+			// The first frame of the convergence, at its start: a record of
+			// the kind locate too (L)
+			s.logAnimationFrame(&s.locate.animationLog, "locate", 0, false, start, drawEnd, end)
+			s.frameDue = start.Add(s.period)
+		}
+	}
+	s.prefetch()
+	s.requestRest(causeKey)
+	s.rest.awaited, s.rest.stepEnd = true, false
+}
+
+// moving reports whether something moves — a step, a fade, the hover or the
+// convergence of the selection frame: frames are due
+func (s *Selector) moving() bool {
+	return s.step.active || s.fade.active || s.hover.active || s.locate.active
 }
 
 // handleEventsSync processes keyboard events synchronously
@@ -515,17 +663,22 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 	for {
 		var event xgb.Event
 		switch {
-		case s.step.active || s.fade.active || s.hover.active:
-			// A step, a fade or the hover is moving: frames between the events
+		case s.moving():
+			// A step, a fade, the hover or the selection frame is moving:
+			// frames between the events
 			if event, _ = s.conn.PollForEvent(); event == nil {
 				s.frame()
 				continue
 			}
-		case s.backgroundDue():
-			// Layers for the next step, or the frame at rest of the last one:
-			// taken between the events
+		case s.backgroundDue() || s.liveDue():
+			// Layers for the next step, or the frame at rest of the last one,
+			// or a frame for the live thumbnails: between the events
 			if event, _ = s.conn.PollForEvent(); event == nil {
-				s.uploadIdle()
+				if s.liveDue() {
+					s.liveIdle()
+				} else {
+					s.uploadIdle()
+				}
 				continue
 			}
 		default:
@@ -535,6 +688,10 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 			}
 		}
 
+		if e, ok := event.(xproto.ClientMessageEvent); ok && s.liveEvent(e) {
+			// A live picture published: not a cause of the frames of keys
+			continue
+		}
 		if _, ok := event.(xproto.KeyPressEvent); ok {
 			s.markFrameCause(causeKey)
 		} else {
@@ -550,7 +707,6 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 
 			// Handle Enter key - select current window
 			if enterKeycode != 0 && e.Detail == enterKeycode {
-				s.restoreInitialLayoutMode()
 				if s.selectedIndex >= 0 && s.selectedIndex < len(s.windows) {
 					return &s.windows[s.selectedIndex]
 				}
@@ -559,7 +715,6 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 
 			if s.handleKeyPressSimple(e, thumbnails) {
 				// Cancel key pressed
-				s.restoreInitialLayoutMode()
 				return nil
 			}
 
@@ -594,8 +749,6 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 				// Only react to modifier release if modifier was pressed while selector was open
 				if s.modifierPressed {
 					s.modifierPressed = false
-					// Restore layout mode before exiting
-					s.restoreInitialLayoutMode()
 					// Return selected window when modifier is released
 					if s.selectedIndex >= 0 && s.selectedIndex < len(s.windows) {
 						return &s.windows[s.selectedIndex]
@@ -611,9 +764,9 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 			enterKeycode = s.keysymToKeycode(0xFF0D)
 
 		case xproto.ExposeEvent:
-			// A moving step, fade or hover presents a frame soon anyway, and so
-			// does one whose frame at rest is on its way
-			if e.Window == s.window.GetWindowID() && !s.step.active && !s.fade.active && !s.hover.active && !s.rest.awaited {
+			// What moves presents a frame soon anyway, and so does what has
+			// its frame at rest on its way
+			if e.Window == s.window.GetWindowID() && !s.moving() && !s.rest.awaited {
 				s.refresh(thumbnails)
 			}
 
@@ -637,8 +790,6 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 			if e.Detail == 1 {
 				windowIndex := s.getWindowIndexAtPosition(int(e.EventX), int(e.EventY))
 				if windowIndex >= 0 && windowIndex < len(s.windows) {
-					// Restore layout mode before exiting
-					s.restoreInitialLayoutMode()
 					// Select and return the clicked window
 					return &s.windows[windowIndex]
 				}
@@ -706,6 +857,8 @@ func (s *Selector) render(thumbnails []image.Image) {
 	if appears {
 		s.beginFade(false, drawEnd, s.timing.start)
 	}
+	s.liveBegin()
+	s.liveRest()
 	var err error
 	if s.fade.active {
 		err = s.animator.PresentFaded(img, s.fadeAt(drawEnd))
@@ -716,6 +869,7 @@ func (s *Selector) render(thumbnails []image.Image) {
 		log.Error().Err(err).Msg("Failed to present frame")
 	}
 	end := time.Now()
+	s.liveEnd(end)
 	if appears {
 		// The appearance runs from the end of its first frame, which uploads
 		// a whole frame; the level of that frame stays
@@ -733,15 +887,19 @@ func (s *Selector) render(thumbnails []image.Image) {
 // holds it, so it is not drawn anew
 func (s *Selector) refresh(thumbnails []image.Image) {
 	start := time.Now()
+	s.liveBegin()
+	s.liveRest()
 	ok, err := s.presenter.Refresh()
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to refresh frame")
 	}
+	end := time.Now()
+	s.liveEnd(end)
 	if !ok {
 		s.render(thumbnails)
 		return
 	}
-	s.logRefresh(start, time.Now())
+	s.logRefresh(start, end)
 }
 
 // handleKeyPressSimple handles a key press event
@@ -796,24 +954,12 @@ func (s *Selector) handleKeyPressSimple(e xproto.KeyPressEvent, thumbnails []ima
 	ctrlPressed := (state & s.keyConfig.workspaceModifierMask) != 0
 
 	if !ctrlPressed && s.isKeycode(keycode, cKeysym) {
-		if s.config.LayoutMode != "carousel" {
-			log.Debug().Msg("Switching to carousel layout")
-			s.config.LayoutMode = "carousel"
-			s.dropLayers()
-			s.render(thumbnails)
-			s.prefetch()
-		}
+		s.switchLayout("carousel", thumbnails)
 		return false
 	}
 
 	if !ctrlPressed && s.isKeycode(keycode, gKeysym) {
-		if s.config.LayoutMode != "grid" {
-			log.Debug().Msg("Switching to grid layout")
-			s.config.LayoutMode = "grid"
-			s.dropLayers()
-			s.render(thumbnails)
-			s.prefetch()
-		}
+		s.switchLayout("grid", thumbnails)
 		return false
 	}
 
@@ -851,6 +997,28 @@ func (s *Selector) handleKeyPressSimple(e xproto.KeyPressEvent, thumbnails []ima
 		return false
 	}
 
+	// Up and Down move by a row in the grid; the carousel has none
+	// (specs/026-layout-keys)
+	if s.isKeycode(keycode, 0xFF54) { // XK_Down
+		s.selectRow(1, thumbnails)
+		return false
+	}
+	if s.isKeycode(keycode, 0xFF52) { // XK_Up
+		s.selectRow(-1, thumbnails)
+		return false
+	}
+
+	// The layout key, after every other key of the switcher, as c and g
+	// without the workspace modifier: the other layout
+	if !ctrlPressed && s.keyConfig.layoutToggleKeysym != 0 && s.isKeycode(keycode, s.keyConfig.layoutToggleKeysym) {
+		if s.grid() {
+			s.switchLayout("carousel", thumbnails)
+		} else {
+			s.switchLayout("grid", thumbnails)
+		}
+		return false
+	}
+
 	return false
 }
 
@@ -877,9 +1045,46 @@ func (s *Selector) selectPrevious(thumbnails []image.Image) {
 	s.animateTransition(targetIndex, thumbnails)
 }
 
-// animateTransition animates transition from current to target index
+// animateTransition animates transition from current to target index; a
+// step around the list, from the last window to the first or back, is not
+// animated (specs/007-animation)
 func (s *Selector) animateTransition(targetIndex int, thumbnails []image.Image) {
-	s.stepTo(targetIndex, thumbnails)
+	wrap := targetIndex-s.selectedIndex > 1 || s.selectedIndex-targetIndex > 1
+	s.stepTo(targetIndex, wrap, thumbnails)
+}
+
+// selectRow moves the selection of the grid a row down, dir 1, or up, -1,
+// within its column and around it; nothing in the carousel. The selection
+// frame slides to the tile above or below; around a column of three tiles or
+// more it is at once, as a step around the list (specs/026-layout-keys).
+func (s *Selector) selectRow(dir int, thumbnails []image.Image) {
+	if !s.grid() || len(s.windows) == 0 {
+		return
+	}
+	cols := carousel.GridColumns(len(s.windows), s.config)
+	target := columnStep(s.selectedIndex, len(s.windows), cols, dir)
+	if target == s.selectedIndex {
+		return
+	}
+	s.stepTo(target, target-s.selectedIndex != cols && s.selectedIndex-target != cols, thumbnails)
+}
+
+// columnStep is the tile a row down, dir 1, or up, -1, from tile i of n laid
+// out row after row in cols columns, the last row from the left: within the
+// column of i and around it — down from its last tile to its top, up from
+// its top to its last tile; i itself in a column of one tile
+func columnStep(i, n, cols, dir int) int {
+	c := i % cols
+	if dir > 0 {
+		if i+cols < n {
+			return i + cols
+		}
+		return c
+	}
+	if i-cols >= 0 {
+		return i - cols
+	}
+	return c + cols*((n-1-c)/cols)
 }
 
 // Close closes the selector window and frees resources
@@ -1058,66 +1263,17 @@ func (s *Selector) getWindowIndexAtPositionCarousel(mouseX, mouseY int) int {
 	return -1
 }
 
-// getWindowIndexAtPositionGrid calculates position for grid layout
+// getWindowIndexAtPositionGrid is the tile of the grid under the mouse, or
+// -1: each tile where the grid draws it, below the band of the header
+// (specs/027-grid-mouse)
 func (s *Selector) getWindowIndexAtPositionGrid(mouseX, mouseY int) int {
-	// Calculate grid dimensions (same logic as in DrawGridLayout)
-	cols := s.config.GridColumns
-	if cols <= 0 {
-		// Auto-calculate columns
-		cols = int(math.Ceil(math.Sqrt(float64(len(s.windows)) * 1.5)))
-		if cols < 2 {
-			cols = 2
-		}
-		if cols > 6 {
-			cols = 6
-		}
-	}
-
-	rows := (len(s.windows) + cols - 1) / cols
-
-	spacing := s.config.GridSpacing
-	if spacing == 0 {
-		spacing = 20
-	}
-
-	// Calculate tile size
-	availableWidth := float64(s.config.Width) - spacing*(float64(cols)+1)
-	availableHeight := float64(s.config.Height) - spacing*(float64(rows)+1)
-
-	tileW := availableWidth / float64(cols)
-	tileH := availableHeight / float64(rows)
-
-	// Respect max thumbnail size
-	maxTileW := float64(s.config.ThumbWidth) + 40
-	maxTileH := float64(s.config.ThumbHeight) + 60
-	if tileW > maxTileW {
-		tileW = maxTileW
-	}
-	if tileH > maxTileH {
-		tileH = maxTileH
-	}
-
-	// Center the grid
-	totalGridW := float64(cols)*tileW + (float64(cols)+1)*spacing
-	totalGridH := float64(rows)*tileH + (float64(rows)+1)*spacing
-	offsetX := (float64(s.config.Width) - totalGridW) / 2
-	offsetY := (float64(s.config.Height) - totalGridH) / 2
-
-	// Check each tile
+	px, py := float64(mouseX), float64(mouseY)
 	for i := range s.windows {
-		row := i / cols
-		col := i % cols
-
-		x := offsetX + spacing + float64(col)*(tileW+spacing)
-		y := offsetY + spacing + float64(row)*(tileH+spacing)
-
-		// Check if mouse is within tile bounds
-		if float64(mouseX) >= x && float64(mouseX) <= x+tileW &&
-			float64(mouseY) >= y && float64(mouseY) <= y+tileH {
+		x, y, w, h := carousel.GridTile(len(s.windows), i, s.config)
+		if px >= x && px <= x+w && py >= y && py <= y+h {
 			return i
 		}
 	}
-
 	return -1
 }
 

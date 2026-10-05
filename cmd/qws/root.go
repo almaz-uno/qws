@@ -68,6 +68,7 @@ func init() {
 	rootCmd.PersistentFlags().String("keybindings-backward", defaultCfg.Keybindings.Backward, "modifier for reverse navigation")
 	rootCmd.PersistentFlags().String("keybindings-workspace-modifier", defaultCfg.Keybindings.WorkspaceModifier, "modifier to filter current workspace")
 	rootCmd.PersistentFlags().String("keybindings-cancel", defaultCfg.Keybindings.Cancel, "key to cancel selection")
+	rootCmd.PersistentFlags().String("keybindings-layout-toggle", defaultCfg.Keybindings.LayoutToggle, "key to toggle the carousel and the grid while the switcher is shown (empty = none)")
 
 	// Appearance
 	rootCmd.PersistentFlags().StringP("appearance-layout", "l", defaultCfg.Appearance.Layout, "layout mode (carousel, grid)")
@@ -76,6 +77,8 @@ func init() {
 	rootCmd.PersistentFlags().Int("appearance-thumbnail-width", defaultCfg.Appearance.Thumbnail.Width, "thumbnail width in pixels")
 	rootCmd.PersistentFlags().Int("appearance-thumbnail-height", defaultCfg.Appearance.Thumbnail.Height, "thumbnail height in pixels")
 	rootCmd.PersistentFlags().String("appearance-thumbnail-scaling-algorithm", defaultCfg.Appearance.Thumbnail.ScalingAlgorithm, "thumbnail scaling algorithm (nearest, bilinear, catmull-rom)")
+	rootCmd.PersistentFlags().Bool("appearance-thumbnail-live", defaultCfg.Appearance.Thumbnail.Live, "thumbnails follow their windows while the switcher is shown (glx renderer)")
+	rootCmd.PersistentFlags().Duration("appearance-thumbnail-live-interval", defaultCfg.Appearance.Thumbnail.LiveInterval, "a shown window that changed is averaged again at most this often (0 = once a refresh)")
 	rootCmd.PersistentFlags().Float64("appearance-spacing", defaultCfg.Appearance.Spacing, "distance between carousel items")
 	rootCmd.PersistentFlags().Float64("appearance-perspective", defaultCfg.Appearance.Perspective, "perspective effect factor (0.0-1.0)")
 	rootCmd.PersistentFlags().Int("appearance-grid-columns", defaultCfg.Appearance.Grid.Columns, "number of columns in grid layout (0 = auto)")
@@ -100,12 +103,18 @@ func init() {
 	rootCmd.PersistentFlags().Float64("appearance-window-background-border-radius", defaultCfg.Appearance.WindowBackground.BorderRadius, "window background corner radius in pixels")
 	rootCmd.PersistentFlags().String("appearance-window-padding-horizontal", defaultCfg.Appearance.WindowPadding.Horizontal, "horizontal padding from screen edges (e.g., \"5%\" or \"50px\")")
 	rootCmd.PersistentFlags().String("appearance-window-padding-vertical", defaultCfg.Appearance.WindowPadding.Vertical, "vertical padding from screen edges (e.g., \"5%\" or \"50px\")")
+	rootCmd.PersistentFlags().Bool("appearance-header-enabled", defaultCfg.Appearance.Header.Enabled, "show the hostname and the version at the top left of the switcher")
 	rootCmd.PersistentFlags().Bool("appearance-animation-enabled", defaultCfg.Appearance.Animation.Enabled, "animate the switcher (glx renderer); false: every change at once")
 	rootCmd.PersistentFlags().Duration("appearance-animation-duration", defaultCfg.Appearance.Animation.Duration, "duration of every animation (0 = at once)")
 	rootCmd.PersistentFlags().Bool("appearance-animation-step", defaultCfg.Appearance.Animation.Step, "animate the step of the selection")
 	rootCmd.PersistentFlags().StringSlice("appearance-animation-show", defaultCfg.Appearance.Animation.Show, "effects of the appearance (fade, zoom, none)")
 	rootCmd.PersistentFlags().StringSlice("appearance-animation-hide", defaultCfg.Appearance.Animation.Hide, "effects of the disappearance (fade, zoom, none)")
 	rootCmd.PersistentFlags().StringSlice("appearance-animation-hover", defaultCfg.Appearance.Animation.Hover, "effects of the hover frame (fade, zoom, none)")
+	rootCmd.PersistentFlags().Duration("appearance-animation-hover-duration", defaultCfg.Appearance.Animation.HoverDuration, "duration of the hover animation (0 = that of --appearance-animation-duration)")
+	rootCmd.PersistentFlags().Float64("appearance-animation-overlay-zoom", defaultCfg.Appearance.Animation.OverlayZoom, "scale the switcher zooms from as it appears and to as it disappears")
+	rootCmd.PersistentFlags().Float64("appearance-animation-hover-zoom", defaultCfg.Appearance.Animation.HoverZoom, "scale the hover frame zooms from as it comes and to as it goes")
+	rootCmd.PersistentFlags().Duration("appearance-animation-locate-duration", defaultCfg.Appearance.Animation.LocateDuration, "duration of the selection frame converging onto its tile after a switch to the grid (0 = none)")
+	rootCmd.PersistentFlags().Float64("appearance-animation-locate-zoom", defaultCfg.Appearance.Animation.LocateZoom, "scale, above 1, the selection frame converges from onto its tile after a switch to the grid")
 
 	// Behavior
 	rootCmd.PersistentFlags().Duration("behavior-snapshot-interval", defaultCfg.Behavior.SnapshotInterval, "background thumbnail refresh interval")
@@ -169,6 +178,9 @@ func applyFlags() {
 	if rootCmd.PersistentFlags().Changed("keybindings-cancel") {
 		cfg.Keybindings.Cancel, _ = rootCmd.PersistentFlags().GetString("keybindings-cancel")
 	}
+	if rootCmd.PersistentFlags().Changed("keybindings-layout-toggle") {
+		cfg.Keybindings.LayoutToggle, _ = rootCmd.PersistentFlags().GetString("keybindings-layout-toggle")
+	}
 
 	// Appearance
 	if rootCmd.PersistentFlags().Changed("grid") {
@@ -191,6 +203,12 @@ func applyFlags() {
 	}
 	if rootCmd.PersistentFlags().Changed("appearance-thumbnail-scaling-algorithm") {
 		cfg.Appearance.Thumbnail.ScalingAlgorithm, _ = rootCmd.PersistentFlags().GetString("appearance-thumbnail-scaling-algorithm")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-thumbnail-live") {
+		cfg.Appearance.Thumbnail.Live, _ = rootCmd.PersistentFlags().GetBool("appearance-thumbnail-live")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-thumbnail-live-interval") {
+		cfg.Appearance.Thumbnail.LiveInterval, _ = rootCmd.PersistentFlags().GetDuration("appearance-thumbnail-live-interval")
 	}
 	if rootCmd.PersistentFlags().Changed("appearance-spacing") {
 		cfg.Appearance.Spacing, _ = rootCmd.PersistentFlags().GetFloat64("appearance-spacing")
@@ -264,6 +282,9 @@ func applyFlags() {
 	if rootCmd.PersistentFlags().Changed("appearance-window-padding-vertical") {
 		cfg.Appearance.WindowPadding.Vertical, _ = rootCmd.PersistentFlags().GetString("appearance-window-padding-vertical")
 	}
+	if rootCmd.PersistentFlags().Changed("appearance-header-enabled") {
+		cfg.Appearance.Header.Enabled, _ = rootCmd.PersistentFlags().GetBool("appearance-header-enabled")
+	}
 	if rootCmd.PersistentFlags().Changed("appearance-animation-enabled") {
 		cfg.Appearance.Animation.Enabled, _ = rootCmd.PersistentFlags().GetBool("appearance-animation-enabled")
 	}
@@ -281,6 +302,21 @@ func applyFlags() {
 	}
 	if rootCmd.PersistentFlags().Changed("appearance-animation-hover") {
 		cfg.Appearance.Animation.Hover, _ = rootCmd.PersistentFlags().GetStringSlice("appearance-animation-hover")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-animation-hover-duration") {
+		cfg.Appearance.Animation.HoverDuration, _ = rootCmd.PersistentFlags().GetDuration("appearance-animation-hover-duration")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-animation-overlay-zoom") {
+		cfg.Appearance.Animation.OverlayZoom, _ = rootCmd.PersistentFlags().GetFloat64("appearance-animation-overlay-zoom")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-animation-hover-zoom") {
+		cfg.Appearance.Animation.HoverZoom, _ = rootCmd.PersistentFlags().GetFloat64("appearance-animation-hover-zoom")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-animation-locate-duration") {
+		cfg.Appearance.Animation.LocateDuration, _ = rootCmd.PersistentFlags().GetDuration("appearance-animation-locate-duration")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-animation-locate-zoom") {
+		cfg.Appearance.Animation.LocateZoom, _ = rootCmd.PersistentFlags().GetFloat64("appearance-animation-locate-zoom")
 	}
 
 	// Behavior
@@ -415,6 +451,15 @@ func run(cmd *cobra.Command, args []string) error {
 		defer snap.Close()
 	}
 
+	// The windows of an activation from a model kept by events
+	// (specs/003-window-list); without it, collected at each activation
+	model, err := x11.NewModel()
+	if err != nil {
+		log.Info().Err(err).Msg("Window model unavailable, the list is collected at each activation")
+	} else {
+		defer model.Close()
+	}
+
 	// Create Focus Watcher to track active windows
 	watcher, err := focus.NewWatcher(ctx, conn.Conn, conn.Root, mruList, capturer, cfg.Behavior.SnapshotInterval)
 	if err != nil {
@@ -481,7 +526,7 @@ func run(cmd *cobra.Command, args []string) error {
 		switch e := event.(type) {
 		case xproto.KeyPressEvent:
 			var read []xgb.Event
-			selector, read = handleKeyPress(ctx, conn, e, selector, mruList, watcher, snap)
+			selector, read = handleKeyPress(ctx, conn, e, selector, mruList, watcher, snap, model)
 			pending = append(read, pending...)
 		case xproto.PropertyNotifyEvent:
 			// Handle focus changes via PropertyNotify
@@ -501,7 +546,7 @@ func run(cmd *cobra.Command, args []string) error {
 // It returns the selector, to preserve its state, and the events read while
 // the switcher faded out, for the main loop to handle.
 func handleKeyPress(ctx context.Context, conn *x11.Connection, e xproto.KeyPressEvent, selector *ui.Selector,
-	mruList *mru.MRUList, watcher *focus.Watcher, snap *snapshot.Snapshotter) (*ui.Selector, []xgb.Event) {
+	mruList *mru.MRUList, watcher *focus.Watcher, snap *snapshot.Snapshotter, model *x11.Model) (*ui.Selector, []xgb.Event) {
 	start := time.Now()
 
 	// Apply show delay if configured
@@ -516,7 +561,19 @@ func handleKeyPress(ctx context.Context, conn *x11.Connection, e xproto.KeyPress
 		IgnoreSkipTaskbar: cfg.Windows.IgnoreSkipTaskbar,
 		SortMinimizedLast: cfg.Windows.SortMinimizedLast,
 	}
-	windows, err := conn.GetWindowListFiltered(filterOpts)
+	var windows []x11.WindowInfo
+	var err error
+	listStart := time.Now()
+	if model != nil {
+		windows, err = model.List(filterOpts)
+	} else {
+		windows, err = conn.GetWindowListFiltered(filterOpts)
+	}
+	log.Debug().
+		Bool("model", model != nil).
+		Int("windows", len(windows)).
+		Dur("ms", time.Since(listStart)).
+		Msg("Window list")
 	if err != nil {
 		return selector, nil
 	}
@@ -555,7 +612,7 @@ func handleKeyPress(ctx context.Context, conn *x11.Connection, e xproto.KeyPress
 	// Create or reuse selector
 	if selector == nil {
 		var err error
-		selector, err = ui.NewSelector(ctx, conn.Conn, conn.Root, windows, cfg.Appearance, cfg.Keybindings, cfg.Windows.Workspace, watcher)
+		selector, err = ui.NewSelector(ctx, conn.Conn, conn.Root, windows, cfg.Appearance, cfg.Keybindings, cfg.Windows.Workspace, watcher, snap)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to create selector")
 			return selector, nil
@@ -575,6 +632,10 @@ func handleKeyPress(ctx context.Context, conn *x11.Connection, e xproto.KeyPress
 		watcher.PauseSnapshots(true)
 		defer watcher.PauseSnapshots(false)
 	}
+	// No snapshot on change while the switcher is shown: from here, so that
+	// the snapshots of the cards stay those of the window list; the live
+	// thumbnails of specs/020-live-thumbnails run meanwhile, from the end of
+	// the fade-in to the start of the fade-out
 	if snap != nil {
 		snap.Pause(true)
 		defer snap.Pause(false)

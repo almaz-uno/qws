@@ -50,3 +50,26 @@ func TestSchedule(t *testing.T) {
 		t.Errorf("long after: due %v after the change, want %v", due.Sub(late), settle)
 	}
 }
+
+// TestWait checks criterion K5 of specs/011-snapshot-pause: while paused the
+// loop arms no timer for a window due, however late; unpaused, one for the
+// time it is due, at once when that has passed
+func TestWait(t *testing.T) {
+	now := time.Unix(1000, 0)
+	for _, c := range []struct {
+		paused bool
+		due    time.Time
+		ok     bool
+		want   time.Duration
+	}{
+		{false, now.Add(300 * time.Millisecond), true, 300 * time.Millisecond},
+		{false, now.Add(-time.Second), true, 0},
+		{false, time.Time{}, false, time.Hour},
+		{true, now.Add(-time.Second), true, time.Hour},
+		{true, now.Add(300 * time.Millisecond), true, time.Hour},
+	} {
+		if got := wait(c.paused, c.due, c.ok, now); got != c.want {
+			t.Errorf("paused %v, due in %v (%v): wait %v, want %v", c.paused, c.due.Sub(now), c.ok, got, c.want)
+		}
+	}
+}

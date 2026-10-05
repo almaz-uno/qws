@@ -50,6 +50,7 @@ type scene struct {
 	hover    int
 	hostname string // the header of specs/005-host-and-version
 	version  string
+	hint     string // the hint of the layout key in the header (specs/026-layout-keys)
 }
 
 func TestScenes(t *testing.T) {
@@ -137,6 +138,37 @@ func BenchmarkE1Frame(b *testing.B) {
 	}
 }
 
+// BenchmarkE1Grid draws the frame of E1 in the grid, without and with the
+// header, and the tiles layer of the animation for the latter
+// (specs/019-grid-speed)
+func BenchmarkE1Grid(b *testing.B) {
+	goFont := filepath.Join(b.TempDir(), "goregular.ttf")
+	if err := os.WriteFile(goFont, goregular.TTF, 0o644); err != nil {
+		b.Fatal(err)
+	}
+	zerolog.SetGlobalLevel(zerolog.InfoLevel)
+	defer zerolog.SetGlobalLevel(zerolog.TraceLevel)
+	byName := map[string]scene{}
+	for _, s := range scenes() {
+		byName[s.name] = s
+	}
+	for _, name := range []string{"grid-e1-24-second", "grid-e1-header"} {
+		sc := byName[name]
+		b.Run(name, func(b *testing.B) {
+			for range b.N {
+				drawScene(sc, []string{goFont})
+			}
+		})
+	}
+	sc := byName["grid-e1-header"]
+	cfg := sceneConfig(sc, []string{goFont})
+	b.Run("grid-e1-header-tiles", func(b *testing.B) {
+		for range b.N {
+			GridTiles(sc.windows, cfg)
+		}
+	})
+}
+
 // drawScene draws a scene the way Selector.render does
 func drawScene(sc scene, fonts []string) *image.RGBA {
 	cfg := sceneConfig(sc, fonts)
@@ -153,6 +185,7 @@ func sceneConfig(sc scene, fonts []string) Config {
 	cfg := Config{
 		Hostname:                sc.hostname,
 		Version:                 sc.version,
+		LayoutHint:              sc.hint,
 		Width:                   sc.width,
 		Height:                  sc.height,
 		ThumbWidth:              512,
@@ -194,10 +227,12 @@ func scenes() []scene {
 
 	var list []scene
 	add := func(name string, host bool, layout, theme string, w, h int, windows []WindowData, selected, hover int) {
-		list = append(list, scene{name, host, layout, theme, w, h, windows, selected, hover, "", ""})
+		list = append(list, scene{name, host, layout, theme, w, h, windows, selected, hover, "", "", ""})
 	}
+	// The header with the hint of the default layout key, q, as the selector
+	// draws it (specs/026-layout-keys)
 	addHeader := func(name, layout, theme string, w, h int, selected int, hostname string) {
-		list = append(list, scene{name, false, layout, theme, w, h, many, selected, -1, hostname, "v0.1.0"})
+		list = append(list, scene{name, false, layout, theme, w, h, many, selected, -1, hostname, "v0.1.0", sceneHint(layout)})
 	}
 	for _, layout := range []string{"carousel", "grid"} {
 		// The frame of E1: 2520×1400, 24 windows, Alt+Tab selects the second
@@ -215,8 +250,22 @@ func scenes() []scene {
 		addHeader(layout+"-e1-header", layout, "dark", 2520, 1400, 1, "ws1")
 		addHeader(layout+"-header-light", layout, "light", 1260, 700, 12, "ws1")
 		addHeader(layout+"-header-no-hostname", layout, "dark", 1260, 700, 1, "")
+
+		// Without the layout key: the header of specs/005-host-and-version
+		// alone, the frames of the scenes above before specs/026-layout-keys
+		list = append(list, scene{layout + "-e1-header-no-hint", false, layout, "dark", 2520, 1400, many, 1, -1, "ws1", "v0.1.0", ""})
+		// An overlay too narrow for the hint beside the version: none
+		list = append(list, scene{layout + "-header-narrow", false, layout, "dark", 280, 700, many[:6], 1, -1, "ws1", "v0.1.0", sceneHint(layout)})
 	}
 	return list
+}
+
+// sceneHint is the hint of the layout key q in the layout
+func sceneHint(layout string) string {
+	if layout == "grid" {
+		return "Q — carousel"
+	}
+	return "Q — grid"
 }
 
 // portableWindows gives n windows drawn with the Go font alone: thumbnails of

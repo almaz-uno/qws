@@ -11,9 +11,11 @@ import (
 )
 
 // TestParallelDrawing draws frames and card layers in parallel, each with a
-// FontSet of its own, as the animation of specs/007-animation does, and
-// compares them with the same drawn one after another; with -race it also
-// checks that they share nothing unguarded
+// FontSet of its own, as the animation of specs/007-animation does — and the
+// frames and the tiles layer of the grid, whose heads are drawn in parallel
+// themselves (specs/019-grid-speed) — and compares them with the same drawn
+// one after another; with -race it also checks that they share nothing
+// unguarded
 func TestParallelDrawing(t *testing.T) {
 	goFont := filepath.Join(t.TempDir(), "goregular.ttf")
 	if err := os.WriteFile(goFont, goregular.TTF, 0o644); err != nil {
@@ -30,12 +32,20 @@ func TestParallelDrawing(t *testing.T) {
 	type job struct {
 		frame  bool
 		offset int
+		grid   bool // the grid frame, or its tiles layer
 	}
 	jobs := []job{{frame: true}, {frame: true}}
 	for o := -3; o <= 3; o++ {
 		jobs = append(jobs, job{offset: o})
 	}
+	jobs = append(jobs, job{grid: true, frame: true}, job{grid: true, frame: true}, job{grid: true}, job{grid: true})
 	run := func(j job, c Config) []byte {
+		if j.grid && j.frame {
+			return DrawGridLayout(sc.windows, sc.selected, sc.hover, c).Pix
+		}
+		if j.grid {
+			return GridTiles(sc.windows, c).Pix
+		}
 		if j.frame {
 			return Draw3DCarouselWithData(sc.windows, sc.selected, sc.hover, 0, c).Pix
 		}

@@ -1,0 +1,110 @@
+= 026 — research
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-04
+
+What the code does today, `develop` at `fd00d27`, read on 2026-10-04, and
+the figures the specification quotes, with how they were taken.
+
+== The keys of the switcher
+
+* `handleEventsSync` (`pkg/ui/selector.go`) takes Enter itself, before any
+  other key; every other press goes to `handleKeyPressSimple`, which looks
+  at the keys in this order: the workspace modifier, the cancel key, `c`,
+  `g`, Ctrl+`c` — the cancel without the configuration — the main key with
+  or without the backward modifier, Right, Left. Anything else is ignored:
+  Up and Down, and `q`.
+* `c` and `g` are keysyms 0x63 and 0x67 fixed in the code. They count only
+  without the workspace modifier — `state & workspaceModifierMask` — and
+  with any other: Shift+`g` shows the grid. A layout already shown is not
+  drawn again; another sets `LayoutMode`, drops the layers (`dropLayers`),
+  draws the frame (`render`) and asks for the layers of the next steps
+  (`prefetch`).
+* `restoreInitialLayoutMode` sets `LayoutMode` back to `appearance.layout`
+  on Enter, the cancel key, the release of the primary modifier and a click;
+  `Show` drops the layers at the start of every activation.
+* A key is matched by its keycode: `keysymToKeycode` looks the keysym up in
+  the keyboard mapping, which the selector reads once an activation and
+  keeps in `keymap`, as the modifier mapping in `modmap` (007). The range of
+  keycodes comes from `xproto.Setup`, which only decodes `Conn.SetupBytes`.
+  A test can thus hand presses to `handleKeyPressSimple` on an `xgb.Conn`
+  holding no more than `SetupBytes`, its mappings set in advance, with no X
+  server.
+* `keygrab.ParseKey` trims the name, lowers its case and looks it up in
+  `keysyms.yaml`: `q` is 0x71, `Up` 0xFF52, `Down` 0xFF54, `F2` 0xFFBF,
+  `space` 0x20. A bad cancel key is reported — "Failed to parse cancel key,
+  using Escape", the name in the field `cancel` — and replaced by a default.
+
+== The steps
+
+* `stepTo` (`pkg/ui/animation.go`) takes a step to a window more than one
+  away for a wrap — `target − selected > 1` or `selected − target > 1` — and
+  makes it at once, the carousel scrolling past every card otherwise (007).
+  In the grid a step moves the selection frame in pixels, from the tile of
+  the selection to that of the target (`gx`, `gy`); the step between two
+  tiles a row apart is `cols` windows away, two at least, and would be at
+  once by that test. Hence D7 of the specification: the callers say what
+  is a wrap.
+* Right from the end of a row to the start of the next is one window away
+  and slides across the grid; from the last tile to the first is a wrap.
+
+== The grid
+
+* `layoutGrid` (`pkg/carousel/renderer-cpu.go`) lays n tiles out row after
+  row in `appearance.grid.columns` columns, or, at 0,
+  ⌈√(1.5 n)⌉ within 2 to 6: 2 columns for 1 or 2 tiles, 3 for 3 to 6, 4 for
+  7 to 10, 5 for 11 to 16, 6 from 17. The last row is filled from the left.
+  The tiles lie below `top`, the band of the header (005).
+* `getWindowIndexAtPositionGrid` (`pkg/ui/selector.go`), the tile under the
+  pointer, repeats the formula of the columns and lays the tiles over the
+  whole window: its available height and its vertical offset leave out
+  `top`. Where the tiles are of their largest size the two grids have tiles
+  of one size, and the one of the pointer lies higher by half the band;
+  elsewhere the tiles of the pointer are taller as well. Not changed here
+  (spec, open decisions).
+
+== The header
+
+`drawHeader` (005, 014): with a hostname or a version, the hostname at 2.5
+times `appearance.font.size` in the text colour at 0.9 of its alpha, 24 px
+from the left and top edges, its baseline 24 px plus the ascent of its face
+from the top; the version after it, 16 px on, on the same baseline, at the
+font size, at 0.6. The band is 24 px, the height of the large face and
+16 px; the grid lays its tiles out below it. gg's `MeasureString` gives
+whole pixels — the advance in 26.6 fixed point shifted right by 6 — so text
+placed at the margin from the right edge by its measure starts at a whole
+pixel, as the version does, and the picture of the same text drawn there is
+the version's moved by a whole number of pixels: what `TestLayoutHint`
+compares.
+
+The overlay is 2520 px wide on E1, a monitor of 2560 px less the default
+padding of 20 px on each side. With the font of the tests — the Go font of
+`golang.org/x/image`, which `TestScenes` draws with — at the size 20 of E1,
+`Q — carousel` beside the hostname `ws1` and the version `v0.1.0` begins
+16 px after the version on an overlay of 348 px, as `TestLayoutHint` logs
+it: 24 + `ws1` + 16 + `v0.1.0` + 16 + the hint + 24. The figure for the fonts
+of E1 — Noto Sans, and a version of `git describe` — was not measured; it
+differs from this one by the widths of the glyphs and of the version.
+
+== The configuration
+
+* Viper treats an empty environment variable as unset (`clearEnvironment`
+  of `internal/config` relies on it): `QWS_KEYBINDINGS_LAYOUT_TOGGLE=` keeps
+  the value of the file. An empty value in the file, `layout_toggle: ""`, is
+  read as empty, and so is an empty flag.
+* `config init` writes `yaml.Marshal(config.Default())`, `config show`
+  `yaml.Marshal` of the configuration read; yaml.v3 indents by 4 spaces, the
+  key under `keybindings:` as `    layout_toggle: q`.
+* `TestJoinedKeys` (015) derives the joined names from the fields: the new
+  field gets its joined name, `keybindings.layouttoggle`, with no change to
+  the test.
+
+== The live thumbnails
+
+The selector takes the windows in view for the snapshotter (`liveShown`)
+and the live items of the frame at rest (`liveGeometry`) under keys made of
+the generation of the layers and the layout; a switch of layout drops the
+layers, which moves the generation, so both are computed anew for the new
+layout at its first frame. Nothing of 020 depends on how the layout was
+switched; `TestLiveFrames` switches it by setting `LayoutMode`.

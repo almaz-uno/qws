@@ -106,9 +106,12 @@ viper.BindPFlag("keybindings.workspace_modifier",
 * CLI flags convert both dots and underscores to dashes for GNU/POSIX compliance
 * Viper handles all conversions transparently — just use the YAML key in code
 * `qws config init` of versions before specification `002-config-names` wrote
-  multi-word keys joined (`workspacemodifier`, `snapshotinterval`). qws reads
-  such a key as the one it stands for and logs a warning naming the key to use;
-  when a file has both, the key with underscores wins
+  multi-word keys joined (`workspacemodifier`, `snapshotinterval`). qws no
+  longer reads such a key (specification `015-no-joined-keys`; versions up to
+  1.2.0 read it as the one it stands for): the key it stands for takes its
+  value from the other sources or its default, and qws logs a warning naming
+  the key to use. When a file has both, the key with underscores is read and
+  the joined one ignored, with a warning
 * `QWS_CONFIG` gives the path of the configuration file; `--config` takes
   precedence over it
 
@@ -140,6 +143,10 @@ viper.BindPFlag("keybindings.workspace_modifier",
 | `cancel_key`
 | `Escape`
 | Key to cancel selection and close switcher
+
+| `layout_toggle`
+| `q`
+| Key that toggles the carousel and the grid while the switcher is shown; empty: none
 |===
 
 .Proposed CLI flags
@@ -159,6 +166,7 @@ keybindings:
   backward: Shift
   workspace_modifier: Ctrl  # Filter to current workspace when held
   cancel: Escape
+  layout_toggle: q          # Toggles the carousel and the grid; "" for none
 ----
 
 === Appearance — Carousel
@@ -203,7 +211,7 @@ fontPaths = []string{
 }
 ----
 
-Шрифты загружаются с поддержкой автоматического fallback на уровне глифов — если символ отсутствует в основном шрифте, используется следующий шрифт в цепочке.
+Fonts are loaded with automatic glyph-level fallback — if a character is missing from the primary font, the next font in the chain is used.
 
 .Configuration example
 [source,yaml]
@@ -314,6 +322,7 @@ keybindings:
   backward: Shift
   workspace_modifier: Ctrl
   cancel: Escape
+  layout_toggle: q
 
 appearance:
   thumbnail:
@@ -396,6 +405,13 @@ log:
 | `Escape`
 | Key to cancel selection
 
+| `keybindings.layout_toggle`
+| `--keybindings-layout-toggle`
+| `QWS_KEYBINDINGS_LAYOUT_TOGGLE`
+| `string`
+| `q`
+| Key that toggles the carousel and the grid while the switcher is shown, without the workspace modifier, as `c` (carousel) and `g` (grid) choose one; the next activation opens in `appearance.layout` again. A key name as for `keybindings.key`. With the header shown, its top right says what the key does now: `Q — grid` in the carousel, `Q — carousel` in the grid (a name of one letter upper-cased, any other as written). Empty: no toggle and no hint; set it so in the file or with the flag, since an empty environment variable counts as unset. A name qws does not know is reported, and there is no toggle. A key the switcher already uses — Enter, the cancel and main keys, `c`, `g`, the arrows — keeps its meaning: then there is no toggle and no hint, which is reported (specification `026-layout-keys`)
+
 | `appearance.renderer`
 | `--appearance-renderer` / `-r`
 | `QWS_APPEARANCE_RENDERER`
@@ -416,6 +432,20 @@ log:
 | `int`
 | `256`
 | Thumbnail height in pixels
+
+| `appearance.thumbnail.live`
+| `--appearance-thumbnail-live`
+| `QWS_APPEARANCE_THUMBNAIL_LIVE`
+| `bool`
+| `true`
+| Live thumbnails of the `glx` renderer: while the switcher is shown, a visible window that changes is averaged again on the GPU and its card or tile follows it; `false`: the snapshots taken before the switcher appeared, as in 1.3.3. No effect under `cpu`, nor where the GPU cannot share the thumbnails with the switcher, which the log says once (specification `020-live-thumbnails`)
+
+| `appearance.thumbnail.live_interval`
+| `--appearance-thumbnail-live-interval`
+| `QWS_APPEARANCE_THUMBNAIL_LIVE_INTERVAL`
+| `duration`
+| `50ms`
+| How often, at most, a shown window that changed is averaged again; `0`: once a refresh of the monitor the switcher is on. A negative interval is reported and the default used
 
 | `appearance.spacing`
 | `--appearance-spacing`
@@ -536,6 +566,13 @@ log:
 | `#cccccc`
 | Light theme inactive frame color
 
+| `appearance.header.enabled`
+| `--appearance-header-enabled`
+| `QWS_APPEARANCE_HEADER_ENABLED`
+| `bool`
+| `true`
+| The header: the hostname in large letters and the qws version at the top left of the switcher; `false`: none, and the grid takes the whole window (specification `014-appearance-keys`)
+
 | `appearance.animation.enabled`
 | `--appearance-animation-enabled`
 | `QWS_APPEARANCE_ANIMATION_ENABLED`
@@ -548,7 +585,7 @@ log:
 | `QWS_APPEARANCE_ANIMATION_DURATION`
 | `duration`
 | `150ms`
-| Time of every animation, along ease-out cubic; `0` is as `enabled: false`
+| Time of every animation, along ease-out cubic — of the hover too, unless `hover_duration` is set; `0` is as `enabled: false`
 
 | `appearance.animation.step`
 | `--appearance-animation-step`
@@ -562,7 +599,7 @@ log:
 | `QWS_APPEARANCE_ANIMATION_SHOW`
 | `[]string`
 | `[fade, zoom]`
-| How the switcher appears: `fade` (alpha from 0), `zoom` (from 0.92 of its size), both, or `none` / `[]` at once. A YAML list, one name, or names joined by commas
+| How the switcher appears: `fade` (alpha from 0), `zoom` (from `overlay_zoom` of its size), both, or `none` / `[]` at once. A YAML list, one name, or names joined by commas
 
 | `appearance.animation.hide`
 | `--appearance-animation-hide`
@@ -576,14 +613,49 @@ log:
 | `QWS_APPEARANCE_ANIMATION_HOVER`
 | `[]string`
 | `[fade, zoom]`
-| How the hover frame comes to the tile or card under the pointer and goes from the one it left: `fade`, `zoom` (closing in from 1.05 of its size), both, or none — at once
+| How the hover frame comes to the tile or card under the pointer and goes from the one it left: `fade`, `zoom` (closing in from `hover_zoom` of its size), both, or none — at once
+
+| `appearance.animation.hover_duration`
+| `--appearance-animation-hover-duration`
+| `QWS_APPEARANCE_ANIMATION_HOVER_DURATION`
+| `duration`
+| `0s`
+| Time of the hover animation; `0`: that of `duration`. The hover at once is `hover: none` (specification `014-appearance-keys`)
+
+| `appearance.animation.overlay_zoom`
+| `--appearance-animation-overlay-zoom`
+| `QWS_APPEARANCE_ANIMATION_OVERLAY_ZOOM`
+| `float`
+| `0.92`
+| Scale of its size the switcher zooms from as it appears and to as it disappears, with `zoom` in `show` or `hide`; above 1 it closes in. A positive number; anything else is reported and the default used
+
+| `appearance.animation.hover_zoom`
+| `--appearance-animation-hover-zoom`
+| `QWS_APPEARANCE_ANIMATION_HOVER_ZOOM`
+| `float`
+| `1.05`
+| Scale of its size the hover frame zooms from as it comes and to as it goes, with `zoom` in `hover`; below 1 it grows out of the tile. A positive number; anything else is reported and the default used
+
+| `appearance.animation.locate_duration`
+| `--appearance-animation-locate-duration`
+| `QWS_APPEARANCE_ANIMATION_LOCATE_DURATION`
+| `duration`
+| `400ms`
+| Time in which, after a switch from the carousel to the grid by the layout key or `g`, the selection frame and the shadow of the selected tile converge onto it along ease-out cubic: from `locate_zoom` of their size about the tile's centre and transparent, to the tile and opaque. `0`: none. Not when an activation opens in the grid, nor after a switch to the carousel, nor with `enabled: false`; a step ends it, the hover does not. The layers of the layout not shown are drawn ahead, so that a switch shows it in the next frame. A negative time is reported and is `0` (specification `028-grid-locate`)
+
+| `appearance.animation.locate_zoom`
+| `--appearance-animation-locate-zoom`
+| `QWS_APPEARANCE_ANIMATION_LOCATE_ZOOM`
+| `float`
+| `1.6`
+| Scale of their size the selection frame and the shadow of the selected tile converge from onto the tile after a switch to the grid. A number above 1; anything else is reported and the default used
 
 | `behavior.snapshot_interval`
 | `--behavior-snapshot-interval`
 | `QWS_BEHAVIOR_SNAPSHOT_INTERVAL`
 | `duration`
 | `1s`
-| How often, at most, a visible window that changed is captured again for its thumbnail
+| How often, at most, a visible window that changed is captured again for its thumbnail. No window is captured on change while the switcher of any qws instance on the display is shown
 
 | `behavior.show_delay`
 | `--behavior-show-delay`
@@ -864,6 +936,10 @@ qws --keybindings-backward=Control
 
 # Change cancel key (default is Escape)
 qws --keybindings-cancel=q
+
+# Toggle the carousel and the grid with F2 instead of q, or with no key
+qws --keybindings-layout-toggle=F2
+qws --keybindings-layout-toggle=
 ----
 
 .Configuration file example
@@ -875,6 +951,7 @@ keybindings:
   backward: Shift         # Reverse direction
   workspace_modifier: Alt # Filter current workspace
   cancel: Escape          # Cancel selection
+  layout_toggle: q        # Toggle the carousel and the grid
 ----
 
 [[phase-3-status]]

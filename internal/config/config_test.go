@@ -90,13 +90,15 @@ func TestTagNames(t *testing.T) {
 	})
 }
 
-// TestJoinedKeys checks K4: a file written with joined names, as config init
-// wrote it, is read with a warning per joined key, and a key with
-// underscores wins over its joined form
+// TestJoinedKeys checks K4 of specs/002-config-names as specs/015-no-joined-keys
+// changes it (K1, K2): a file written with joined names, as config init
+// wrote it, has its joined keys not read — the keys they stand for keep their
+// defaults — with a warning per joined key naming the key to use, and a key
+// with underscores wins over its joined form
 func TestJoinedKeys(t *testing.T) {
 	clearEnvironment(t)
-	want := changedConfig(t)
-	data, err := yaml.Marshal(joined(reflect.ValueOf(*want)))
+	written := changedConfig(t)
+	data, err := yaml.Marshal(joined(reflect.ValueOf(*written)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,16 +107,36 @@ func TestJoinedKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("read\n%+v\nwritten\n%+v", got, want)
+	// Every field differs from its default: a joined one read would show
+	want := *written
+	unjoined(reflect.ValueOf(&want).Elem(), reflect.ValueOf(*Default()))
+	if !reflect.DeepEqual(*got, want) {
+		t.Errorf("read\n%+v\nwant\n%+v", *got, want)
 	}
-	if n := len(joinedKeys()); len(warnings) != n {
-		t.Errorf("%d warnings, want %d: %v", len(warnings), n, warnings)
+	keys := joinedKeys()
+	if len(warnings) != len(keys) {
+		t.Errorf("%d warnings, want %d: %v", len(warnings), len(keys), warnings)
 	}
 	for _, w := range warnings {
-		if !strings.Contains(w, "rename it") {
-			t.Errorf("warning %q does not say what to do", w)
+		named := false
+		for k, key := range keys {
+			named = named || strings.Contains(w, "key "+k+" ") && strings.HasSuffix(w, "rename it to "+key)
 		}
+		if !strings.Contains(w, "no longer read") || !named {
+			t.Errorf("warning %q does not say the key is not read and which to use", w)
+		}
+	}
+
+	got, warnings, err = Load(writeFile(t, "behavior:\n  snapshotinterval: 7s\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Behavior.SnapshotInterval != Default().Behavior.SnapshotInterval {
+		t.Errorf("snapshot interval %v, want the default %v", got.Behavior.SnapshotInterval, Default().Behavior.SnapshotInterval)
+	}
+	if len(warnings) != 1 || warnings[0] !=
+		"configuration key behavior.snapshotinterval is no longer read: rename it to behavior.snapshot_interval" {
+		t.Errorf("warnings %q, want one naming behavior.snapshot_interval", warnings)
 	}
 
 	got, warnings, err = Load(writeFile(t, "behavior:\n  snapshot_interval: 2s\n  snapshotinterval: 7s\n"))
@@ -131,11 +153,13 @@ func TestJoinedKeys(t *testing.T) {
 
 // Criteria of specs/010-animation-options
 
-// TestAnimationDefaults checks K1: the defaults the author chose
+// TestAnimationDefaults checks K1: the defaults the author chose, and those
+// of the keys of specs/014-appearance-keys
 func TestAnimationDefaults(t *testing.T) {
 	want := Animation{
 		Enabled: true, Duration: 150 * time.Millisecond, Step: true,
 		Show: []string{"fade", "zoom"}, Hide: []string{"fade", "zoom"}, Hover: []string{"fade", "zoom"},
+		OverlayZoom: 0.92, HoverZoom: 1.05, LocateDuration: 400 * time.Millisecond, LocateZoom: 1.6,
 	}
 	if got := Default().Appearance.Animation; !reflect.DeepEqual(got, want) {
 		t.Errorf("defaults %+v, want %+v", got, want)
@@ -165,6 +189,7 @@ func TestAnimationSources(t *testing.T) {
 	want := Animation{
 		Enabled: false, Duration: 80 * time.Millisecond, Step: false,
 		Show: []string{"fade", "zoom"}, Hide: []string{"zoom"}, Hover: []string{"fade", "zoom"},
+		OverlayZoom: 0.92, HoverZoom: 1.05, LocateDuration: 400 * time.Millisecond, LocateZoom: 1.6,
 	}
 	if got := cfg.Appearance.Animation; !reflect.DeepEqual(got, want) {
 		t.Errorf("file: %+v, want %+v", got, want)
@@ -183,9 +208,204 @@ func TestAnimationSources(t *testing.T) {
 	want = Animation{
 		Enabled: true, Duration: 300 * time.Millisecond, Step: true,
 		Show: []string{"zoom"}, Hide: []string{"fade", "zoom"}, Hover: []string{"none"},
+		OverlayZoom: 0.92, HoverZoom: 1.05, LocateDuration: 400 * time.Millisecond, LocateZoom: 1.6,
 	}
 	if got := cfg.Appearance.Animation; !reflect.DeepEqual(got, want) {
 		t.Errorf("environment: %+v, want %+v", got, want)
+	}
+}
+
+// Criteria of specs/014-appearance-keys
+
+// TestAppearanceKeys checks K5: the defaults of the header, the hover
+// duration and the zoom factors keep the picture and the animations of 1.2.0;
+// each key is read from a file, and from its QWS_ variable over the file
+func TestAppearanceKeys(t *testing.T) {
+	def := Default().Appearance
+	if !def.Header.Enabled || def.Animation.HoverDuration != 0 ||
+		def.Animation.OverlayZoom != 0.92 || def.Animation.HoverZoom != 1.05 {
+		t.Errorf("defaults: header %+v, hover duration %v, zooms %v, %v; want shown, 0, 0.92, 1.05",
+			def.Header, def.Animation.HoverDuration, def.Animation.OverlayZoom, def.Animation.HoverZoom)
+	}
+
+	clearEnvironment(t)
+	file := writeFile(t, "appearance:\n  header:\n    enabled: false\n  animation:\n"+
+		"    hover_duration: 90ms\n    overlay_zoom: 0.8\n    hover_zoom: 1.2\n")
+	cfg, warnings, err := Load(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := cfg.Appearance.Animation
+	if cfg.Appearance.Header.Enabled || a.HoverDuration != 90*time.Millisecond || a.OverlayZoom != 0.8 || a.HoverZoom != 1.2 {
+		t.Errorf("file: header %+v, hover duration %v, zooms %v, %v; want hidden, 90ms, 0.8, 1.2",
+			cfg.Appearance.Header, a.HoverDuration, a.OverlayZoom, a.HoverZoom)
+	}
+	if len(warnings) != 0 {
+		t.Errorf("warnings %v, want none", warnings)
+	}
+
+	t.Setenv("QWS_APPEARANCE_HEADER_ENABLED", "true")
+	t.Setenv("QWS_APPEARANCE_ANIMATION_HOVER_DURATION", "40ms")
+	t.Setenv("QWS_APPEARANCE_ANIMATION_OVERLAY_ZOOM", "0.5")
+	t.Setenv("QWS_APPEARANCE_ANIMATION_HOVER_ZOOM", "1.5")
+	if cfg, _, err = Load(file); err != nil {
+		t.Fatal(err)
+	}
+	a = cfg.Appearance.Animation
+	if !cfg.Appearance.Header.Enabled || a.HoverDuration != 40*time.Millisecond || a.OverlayZoom != 0.5 || a.HoverZoom != 1.5 {
+		t.Errorf("environment: header %+v, hover duration %v, zooms %v, %v; want shown, 40ms, 0.5, 1.5",
+			cfg.Appearance.Header, a.HoverDuration, a.OverlayZoom, a.HoverZoom)
+	}
+}
+
+// Criteria of specs/020-live-thumbnails
+
+// TestThumbnailKeys checks K10: the live thumbnails are on by default, a
+// window averaged again at most every 50 ms; the keys are read from a file,
+// and from their QWS_ variables over the file; a negative interval is
+// reported and the default used, 0 kept
+func TestThumbnailKeys(t *testing.T) {
+	def := Default().Appearance.Thumbnail
+	if !def.Live || def.LiveInterval != 50*time.Millisecond {
+		t.Errorf("defaults: live %v, interval %v; want true, 50ms", def.Live, def.LiveInterval)
+	}
+
+	clearEnvironment(t)
+	cfg, _, err := Load(writeFile(t, "appearance:\n  layout: grid\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Appearance.Thumbnail; got.Live != def.Live || got.LiveInterval != def.LiveInterval {
+		t.Errorf("a file without the keys reads live %v, interval %v", got.Live, got.LiveInterval)
+	}
+
+	file := writeFile(t, "appearance:\n  thumbnail:\n    live: false\n    live_interval: 100ms\n")
+	cfg, warnings, err := Load(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Appearance.Thumbnail; got.Live || got.LiveInterval != 100*time.Millisecond {
+		t.Errorf("file: live %v, interval %v; want false, 100ms", got.Live, got.LiveInterval)
+	}
+	if len(warnings) != 0 {
+		t.Errorf("warnings %v, want none", warnings)
+	}
+
+	t.Setenv("QWS_APPEARANCE_THUMBNAIL_LIVE", "true")
+	t.Setenv("QWS_APPEARANCE_THUMBNAIL_LIVE_INTERVAL", "0s")
+	if cfg, _, err = Load(file); err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Appearance.Thumbnail; !got.Live || got.LiveInterval != 0 {
+		t.Errorf("environment: live %v, interval %v; want true, 0", got.Live, got.LiveInterval)
+	}
+
+	for _, c := range []struct {
+		interval, want time.Duration
+		warns          bool
+	}{
+		{33 * time.Millisecond, 33 * time.Millisecond, false},
+		{0, 0, false},
+		{-time.Millisecond, def.LiveInterval, true},
+	} {
+		got, warning := Thumbnail{LiveInterval: c.interval}.LivePeriod()
+		if got != c.want || (warning != "") != c.warns {
+			t.Errorf("interval %v: %v, warning %q; want %v, a warning %v", c.interval, got, warning, c.want, c.warns)
+		}
+		if c.warns && !strings.Contains(warning, "appearance.thumbnail.live_interval") {
+			t.Errorf("interval %v: the warning %q does not name the key", c.interval, warning)
+		}
+	}
+}
+
+// Criteria of specs/026-layout-keys
+
+// TestLayoutToggle checks K3: the layout key is q by default, as config init
+// writes it and config show prints it, and in a file without it; it is read
+// from a file, an empty name too, and from its QWS_ variable over the file
+func TestLayoutToggle(t *testing.T) {
+	if got := Default().Keybindings.LayoutToggle; got != "q" {
+		t.Errorf("default %q, want q", got)
+	}
+	data, err := yaml.Marshal(Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "\n    layout_toggle: q\n") {
+		t.Errorf("config init writes no layout_toggle: q under keybindings:\n%s", data)
+	}
+
+	clearEnvironment(t)
+	for _, c := range []struct{ file, want string }{
+		{"keybindings:\n  cancel: Escape\n", "q"},
+		{"keybindings:\n  layout_toggle: F2\n", "F2"},
+		{"keybindings:\n  layout_toggle: \"\"\n", ""},
+	} {
+		cfg, warnings, err := Load(writeFile(t, c.file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Keybindings.LayoutToggle != c.want || len(warnings) != 0 {
+			t.Errorf("%q: %q, warnings %v; want %q, none", c.file, cfg.Keybindings.LayoutToggle, warnings, c.want)
+		}
+	}
+
+	t.Setenv("QWS_KEYBINDINGS_LAYOUT_TOGGLE", "g")
+	cfg, _, err := Load(writeFile(t, "keybindings:\n  layout_toggle: F2\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Keybindings.LayoutToggle != "g" {
+		t.Errorf("environment: %q, want g", cfg.Keybindings.LayoutToggle)
+	}
+}
+
+// Criteria of specs/028-grid-locate
+
+// TestLocateKeys checks K5: the selection frame converges in 400 ms from 1.6
+// by default, as config init writes it and config show prints it, and in a
+// file without the keys; the keys are read from a file, and from their QWS_
+// variables over the file
+func TestLocateKeys(t *testing.T) {
+	def := Default().Appearance.Animation
+	if def.LocateDuration != 400*time.Millisecond || def.LocateZoom != 1.6 {
+		t.Errorf("defaults %v, %v; want 400ms, 1.6", def.LocateDuration, def.LocateZoom)
+	}
+	data, err := yaml.Marshal(Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "\n        locate_duration: 400ms\n        locate_zoom: 1.6\n") {
+		t.Errorf("config init writes no locate_duration: 400ms and locate_zoom: 1.6 under animation:\n%s", data)
+	}
+
+	clearEnvironment(t)
+	for _, c := range []struct {
+		file string
+		d    time.Duration
+		zoom float64
+	}{
+		{"appearance:\n  layout: grid\n", 400 * time.Millisecond, 1.6},
+		{"appearance:\n  animation:\n    locate_duration: 600ms\n    locate_zoom: 2\n", 600 * time.Millisecond, 2},
+		{"appearance:\n  animation:\n    locate_duration: 0s\n", 0, 1.6},
+	} {
+		cfg, warnings, err := Load(writeFile(t, c.file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if a := cfg.Appearance.Animation; a.LocateDuration != c.d || a.LocateZoom != c.zoom || len(warnings) != 0 {
+			t.Errorf("%q: %v, %v, warnings %v; want %v, %v, none", c.file, a.LocateDuration, a.LocateZoom, warnings, c.d, c.zoom)
+		}
+	}
+
+	t.Setenv("QWS_APPEARANCE_ANIMATION_LOCATE_DURATION", "250ms")
+	t.Setenv("QWS_APPEARANCE_ANIMATION_LOCATE_ZOOM", "1.3")
+	cfg, _, err := Load(writeFile(t, "appearance:\n  animation:\n    locate_duration: 600ms\n    locate_zoom: 2\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := cfg.Appearance.Animation; a.LocateDuration != 250*time.Millisecond || a.LocateZoom != 1.3 {
+		t.Errorf("environment: %v, %v; want 250ms, 1.3", a.LocateDuration, a.LocateZoom)
 	}
 }
 
@@ -193,11 +413,11 @@ func TestAnimationSources(t *testing.T) {
 // default
 func changedConfig(t *testing.T) *Config {
 	cfg := &Config{
-		Keybindings: Keybindings{Modifier: "Super", Key: "grave", Backward: "Ctrl", WorkspaceModifier: "Shift", Cancel: "q"},
+		Keybindings: Keybindings{Modifier: "Super", Key: "grave", Backward: "Ctrl", WorkspaceModifier: "Shift", Cancel: "q", LayoutToggle: ""},
 		Appearance: Appearance{
 			Layout:      "grid",
 			Renderer:    "none", // neither default, cpu here or glx after 001
-			Thumbnail:   Thumbnail{Width: 300, Height: 200, ScalingAlgorithm: "nearest"},
+			Thumbnail:   Thumbnail{Width: 300, Height: 200, ScalingAlgorithm: "nearest", Live: false, LiveInterval: 75 * time.Millisecond},
 			Spacing:     450,
 			Perspective: 0.5,
 			Grid:        Grid{Columns: 4, Spacing: 12},
@@ -210,9 +430,12 @@ func changedConfig(t *testing.T) *Config {
 			},
 			WindowBackground: WindowBackground{Enabled: false, Opacity: 0.5, BorderRadius: 7},
 			WindowPadding:    WindowPadding{Horizontal: "5%", Vertical: "6%"},
+			Header:           Header{Enabled: false},
 			Animation: Animation{
 				Enabled: false, Duration: 300 * time.Millisecond, Step: false,
 				Show: []string{"zoom"}, Hide: []string{"fade"}, Hover: []string{},
+				HoverDuration: 70 * time.Millisecond, OverlayZoom: 0.8, HoverZoom: 1.2,
+				LocateDuration: 250 * time.Millisecond, LocateZoom: 2.2,
 			},
 		},
 		Behavior: Behavior{SnapshotInterval: 1500 * time.Millisecond, ShowDelay: 20 * time.Millisecond},
@@ -234,6 +457,19 @@ func changedConfig(t *testing.T) *Config {
 	}
 	same(reflect.ValueOf(*cfg), def, "Config")
 	return cfg
+}
+
+// unjoined sets every field of want under a multi-word name — one config
+// init wrote joined — to its value in def
+func unjoined(want, def reflect.Value) {
+	for i := 0; i < want.NumField(); i++ {
+		f := want.Type().Field(i)
+		if strings.ToLower(f.Name) != f.Tag.Get("mapstructure") {
+			want.Field(i).Set(def.Field(i))
+		} else if f.Type.Kind() == reflect.Struct {
+			unjoined(want.Field(i), def.Field(i))
+		}
+	}
 }
 
 // joined is v as yaml.v3 marshals it without tags: fields named by their

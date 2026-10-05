@@ -79,6 +79,7 @@ func (s *Selector) logFrame(drawStart, drawEnd, end time.Time) {
 	t := &s.timing
 	cause, start := t.cause, t.start
 	t.cause = ""
+	lag := s.takeLag()
 
 	e := log.Debug()
 	if !e.Enabled() {
@@ -86,6 +87,10 @@ func (s *Selector) logFrame(drawStart, drawEnd, end time.Time) {
 	}
 	if cause == "" {
 		cause, start = causeEvent, drawStart
+	}
+	if lag > 0 {
+		// L of specs/020-live-thumbnails
+		e = e.Dur("live_ms", lag)
 	}
 
 	e = e.Str("cause", cause).
@@ -111,8 +116,13 @@ func (s *Selector) logFrame(drawStart, drawEnd, end time.Time) {
 // target the time since that event, and for its last frame, at rest, its
 // duration (metrics A1–A3 of specs/007-animation)
 func (s *Selector) logAnimationFrame(a *animationLog, kind string, progress float64, atRest bool, drawStart, drawEnd, end time.Time) {
+	lag := s.takeLag()
 	e := log.Debug()
 	if e.Enabled() {
+		if lag > 0 {
+			// L of specs/020-live-thumbnails, in the first record of the frame
+			e = e.Dur("live_ms", lag)
+		}
 		e = e.Str("kind", kind).
 			Int("animation", a.id).
 			Int("activation", s.timing.activation).

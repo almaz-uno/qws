@@ -12,9 +12,30 @@
 # 58 % of its height, so that it crosses the tiles of the grid rather than the
 # gap between two rows — and is then put on the centre of the focused window,
 # so that focus, which follows the mouse on ws1, stays where it was.
+# With CHANGING=<output> it is session S5 of specs/020-live-thumbnails: before
+# the session a terminal printing a line every 20 ms is started, floating on
+# the workspace shown on that output — DP-4 on ws1 — viewable all along, and
+# focus goes back where it was; it is stopped with the instance. The terminal
+# is CHANGING_TERM: mate-terminal by default, a window of depth 32 under the
+# compositor of ws1, with a pixmap of its own, passed live on the GPU; or
+# xterm, of depth 24 and drawn in the pixmap of its frame, passed live by
+# RENDER from the frame (D2 of 020, A). meta has its window and depth. After
+# the warm-up it is focused once more, then the window focus was on: it is
+# second in the order of the switcher, the card selected first. With
+# LIVE=true or LIVE=false the instance runs with appearance.thumbnail.live so
+# (a build that knows the key); unset, as configured. With REST=<seconds>, the
+# rest variant of S5: after its steps each activation steps back as many to
+# the card selected first — the window of S5 — and holds the overlay still
+# for a second, for the frame at rest of the last step, then the seconds of
+# REST, whose lines of the log and times go to rest, so that the summary
+# counts the live passes a second at rest (K13 of 020); then it steps on
+# again to where it was. Each run
+# writes the CPU time of the instance over each activation, from the key press
+# to 0.3 s after the release, from /proc, to cpu — C of 020.
 #
 #   measure.sh run <renderer> <outdir>   one run of S1, renderer cpu or glx
 #   measure.sh summary <outdir>          summary of a finished run
+#   measure.sh pool <outdir>...          A1, L and C of finished runs together
 #   measure.sh k3 <outdir>               criterion K3 for cpu and glx
 #
 # The instance is the ./qws binary of the repository (make build), or $QWS,
@@ -35,6 +56,10 @@ HOLD=${HOLD:-0}
 SWEEP=${SWEEP:-0}
 REPEAT_DELAY=${REPEAT_DELAY:-500}
 REPEAT_RATE=${REPEAT_RATE:-33}
+CHANGING=${CHANGING:-}
+CHANGING_TERM=${CHANGING_TERM:-mate-terminal}
+LIVE=${LIVE:-}
+REST=${REST:-0}
 
 # Presses of the held key: the first, and the repeats after the delay
 held=0
@@ -59,9 +84,10 @@ focus_order() {
 		walk_focus'
 }
 
-# Number of frames logged so far
+# Number of frames logged so far; the frames at rest presented again for a
+# live thumbnail (specs/020-live-thumbnails) are no frames of a key
 frame_count() {
-	grep -c '"message":"Frame"' "$1" || true
+	grep '"message":"Frame"' "$1" | grep -vc '"cause":"live"' || true
 }
 
 # Waits until the log has at least $2 frames, for 5 s at most
@@ -118,10 +144,79 @@ warm_up() {
 	done
 }
 
+# The window of S5 of specs/020-live-thumbnails: a terminal printing a line
+# every 20 ms, floating on the workspace shown on output $1; focus goes back
+# to the window it was on. Its PID is in changing_pid, its window and depth in
+# changing_win and changing_depth.
+changing_pid=
+changing_win=
+changing_depth=
+start_changing() {
+	local output=$1 prev i loop='while :; do date +%T.%N; sleep 0.02; done'
+	prev=$(i3-msg -t get_tree | jq -r '.. | objects | select(.focused == true) | .window // empty')
+	case $CHANGING_TERM in
+	mate-terminal)
+		# A process of its own, not a window of the author's terminals
+		mate-terminal --disable-factory --class QwsS5 --geometry 100x30 -e "bash -c '$loop'" &
+		;;
+	xterm) xterm -class QwsS5 -geometry 100x30 -e bash -c "$loop" & ;;
+	*)
+		echo "CHANGING_TERM is mate-terminal or xterm, not $CHANGING_TERM" >&2
+		exit 2
+		;;
+	esac
+	changing_pid=$!
+	for ((i = 0; i < 500; i++)); do
+		changing_win=$(i3-msg -t get_tree |
+			jq -r 'first(.. | objects | select(.window_properties.class? == "QwsS5") | .window) // empty')
+		[[ -n $changing_win ]] && break
+		sleep 0.01
+	done
+	[[ -n $changing_win ]] || { echo "no window of class QwsS5" >&2; exit 1; }
+	changing_depth=$(xwininfo -id "$changing_win" | awk '/Depth:/ { print $2 }')
+	i3-msg -q '[class="QwsS5"] floating enable, move container to output '"$output"
+	if [[ -n $prev ]]; then
+		i3-msg -q "[id=$prev] focus"
+	fi
+	sleep 0.5
+}
+
+# The overlay of activation $3 back STEPS steps, on the card selected first,
+# held still for REST seconds after a second for the frame at rest of the
+# last step, then STEPS steps on again: the lines of the log $1 and the
+# times, in ms, around the rest go to $2/rest
+hold_still() {
+	local log=$1 out=$2 a=$3 l0 t0 s n
+	for ((s = 1; s <= STEPS; s++)); do
+		n=$(frame_count "$log")
+		xdotool key Left
+		wait_frames "$log" $((n + 1)) || true
+	done
+	sleep 1
+	l0=$(wc -l <"$log")
+	t0=$(date +%s%3N)
+	sleep "$REST"
+	echo "$a $l0 $(wc -l <"$log") $t0 $(date +%s%3N)" >>"$out/rest"
+	for ((s = 1; s <= STEPS; s++)); do
+		n=$(frame_count "$log")
+		xdotool key Right
+		wait_frames "$log" $((n + 1)) || true
+	done
+}
+
+# CPU time of the process $1 so far, in ms
+cpu_ms() {
+	awk -v hz="$(getconf CLK_TCK)" '{ print ($14 + $15) * 1000 / hz }' "/proc/$1/stat"
+}
+
 run() {
-	local renderer=$1 out=$2 log=$2/log.json pid a s n
+	local renderer=$1 out=$2 log=$2/log.json pid a s n c0 t0 cleanup first
 	[[ -x $qws ]] || { echo "no $qws, run make build" >&2; exit 1; }
 	mkdir -p "$out"
+	if [[ -n $CHANGING ]]; then
+		start_changing "$CHANGING"
+		trap 'kill '"$changing_pid"' 2>/dev/null || true' EXIT
+	fi
 	{
 		echo "date: $(date -Iseconds)"
 		echo "commit: $(git -C "$root" rev-parse --short HEAD)$(git -C "$root" diff --quiet HEAD || echo ' (dirty)')"
@@ -133,6 +228,9 @@ run() {
 		echo "held: ${HOLD}s, $held keys"
 		echo "sweep: $SWEEP"
 		echo "keys per activation: $((STEPS + held))"
+		echo "changing: ${CHANGING:-none}${CHANGING:+, $CHANGING_TERM, window $changing_win, depth $changing_depth}"
+		echo "live: ${LIVE:-configured}"
+		echo "rest: ${REST}s"
 	} >"$out/meta"
 	cp "$qws" "$out/qws"
 
@@ -140,17 +238,35 @@ run() {
 	# key replacer, the other what it reads with one (002-config-names)
 	env 'QWS_LOG.FORMAT=json' QWS_LOG_FORMAT=json "$out/qws" -v -r "$renderer" -m Alt -k "$KEY" \
 		--behavior-show-delay 0 ${LAYOUT:+--appearance-layout "$LAYOUT"} \
+		${LIVE:+--appearance-thumbnail-live="$LIVE"} \
 		--cpuprofile "$out/cpu.prof" --memprofile "$out/mem.prof" \
 		2>"$log" &
 	pid=$!
-	trap 'xdotool keyup alt; kill -INT '"$pid"' 2>/dev/null || true' EXIT
+	cleanup='xdotool keyup alt; kill -INT '"$pid"' 2>/dev/null || true'
+	if [[ -n $changing_pid ]]; then
+		cleanup+='; kill '"$changing_pid"' 2>/dev/null || true'
+	fi
+	trap "$cleanup" EXIT
 	sleep 1
 	kill -0 "$pid"
 
 	warm_up
+	if [[ -n $changing_win ]]; then
+		# The window of S5 second in the order of the switcher: in i3's order
+		# of focus, the warm-up's, the windows of the workspace of another
+		# output come after those of the focused one's — 29th of 33 on ws1 —
+		# and in the carousel the window of S5 was never in view
+		first=$(focus_order | head -n 1)
+		i3-msg -q "[id=$changing_win] focus" || true
+		sleep 0.35
+		i3-msg -q "[id=$first] focus" || true
+		sleep 0.35
+	fi
 
 	for ((a = 1; a <= ACTIVATIONS; a++)); do
 		n=$(frame_count "$log")
+		c0=$(cpu_ms "$pid")
+		t0=$(date +%s%3N)
 		xdotool keydown alt key "$KEY"
 		wait_ready "$log" $((n + 2)) "$a" || true
 		for ((s = 1; s <= STEPS; s++)); do
@@ -160,6 +276,9 @@ run() {
 		done
 		if ((SWEEP > 0)); then
 			sweep "$log"
+		fi
+		if ((REST > 0)); then
+			hold_still "$log" "$out" "$a"
 		fi
 		if ((held > 0)); then
 			xdotool key Right
@@ -172,11 +291,13 @@ run() {
 			# the first frame (K5 of specs/007-animation): in 150 ms, but its
 			# frame at rest comes when drawn — some 500 ms for the grid. Only
 			# on that window does the run step back and release the modifier;
-			# else Escape, so that no other window is activated.
+			# else Escape, so that no other window is activated. A frame
+			# answering an Expose has no selection: such frames are left out,
+			# or the last one makes sel "null", which set -u fails on.
 			want=-1
 			for ((i = 0; i < 500; i++)); do
 				read -r first sel n < <(jq -rs --argjson a "$a" '
-					map(select(.message == "Frame" and .activation == $a))
+					map(select(.message == "Frame" and .activation == $a and .selected != null))
 					| "\(first | .selected) \(last | .selected) \(last | .windows)"' "$log")
 				want=$(((first + STEPS + held) % n))
 				((sel == want)) && break
@@ -199,10 +320,14 @@ run() {
 		fi
 		sleep 0.3
 		kill -0 "$pid"
+		echo "$a $c0 $(cpu_ms "$pid") $t0 $(date +%s%3N)" >>"$out/cpu"
 	done
 
 	kill -INT "$pid"
 	wait "$pid" || true
+	if [[ -n $changing_pid ]]; then
+		kill "$changing_pid" 2>/dev/null || true
+	fi
 	trap - EXIT
 	summary "$out" | tee "$out/summary"
 }
@@ -299,6 +424,7 @@ summary() {
 	fi
 
 	grep -q '"message":"Animation frame"' "$out/log.json" && animations "$out"
+	live "$out"
 	return 0
 }
 
@@ -340,9 +466,75 @@ animations() {
 	fi
 }
 
+# Metrics L and C of specs/020-live-thumbnails over the runs given, and the
+# live passes of their snapshotters. qws counts L for the cards and tiles in
+# view only, from the change or from when the card came into view if later.
+live() {
+	local d logs=("${@/%//log.json}")
+	if grep -q -e '"live_ms"' -e '"message":"Live"' "${logs[@]}"; then
+		printf 'L live_ms in view  '
+		cat "${logs[@]}" | jq -r 'select(.live_ms) | .live_ms' | pct
+		printf 'S live pass_ms     '
+		cat "${logs[@]}" | jq -r 'select(.message == "Live") | .ms' | pct
+		printf 'S live done_ms     '
+		cat "${logs[@]}" | jq -r 'select(.message == "Live") | .done_ms' | pct
+	fi
+	# The rest variant: the passes of every window and the frames of cause
+	# live while the overlay is held still, and the activation with the
+	# fewest passes a second
+	for d in "$@"; do
+		[[ -f $d/rest ]] || continue
+		while read -r a l0 l1 t0 t1; do
+			sed -n "$((l0 + 1)),${l1}p" "$d/log.json" |
+				awk -v ms=$((t1 - t0)) '/"message":"Live"/ { p++ }
+					/"message":"Frame"/ && /"cause":"live"/ { f++ }
+					END { print p + 0, f + 0, ms }'
+		done <"$d/rest"
+	done | awk 'NF == 3 && $3 > 0 { p += $1; f += $2; ms += $3; n++; r = $1 * 1000 / $3; if (n == 1 || r < low) low = r }
+		END { if (n) printf "R at rest          %d passes, %d frames of cause live in %.1f s of %d activations: %.1f passes a second, the fewest %.1f\n",
+			p, f, ms / 1000, n, p * 1000 / ms, low }'
+	for d in "$@"; do
+		if [[ -f $d/cpu ]]; then
+			cat "$d/cpu"
+		fi
+	done | awk 'NF == 5 { cpu += $3 - $2; wall += $5 - $4; n++ }
+		END { if (n) printf "C shown            %.0f ms of CPU in %.0f ms of %d activations: %.2f %% of a CPU\n",
+			cpu, wall, n, 100 * cpu / wall }'
+	# glFinish runs only while timings are logged, and NVIDIA busy-waits in
+	# it: the share of C it takes, from the profiles of the whole runs
+	for d in "$@"; do
+		if [[ -f $d/cpu.prof && -f $d/qws ]]; then
+			echo "$(go tool pprof -top -unit=ms "$d/qws" "$d/cpu.prof" 2>/dev/null |
+				sed -n 's/.*Total samples = \([0-9.]*\)ms.*/\1/p') $(go tool pprof -top -unit=ms \
+				-focus='_Cfunc_glowFinish' "$d/qws" "$d/cpu.prof" 2>/dev/null |
+				sed -n 's/^Showing nodes accounting for \([0-9.]*\)ms.*/\1/p')"
+		fi
+	done | awk 'NF >= 1 { t += $1; f += $2; n++ }
+		END { if (n) printf "C profile          %.0f ms of CPU in %d runs, %.0f ms of it in glFinish\n", t, n, f }'
+}
+
+# A1 of each kind of animation, L and C of finished runs taken together —
+# criteria K7–K9 of specs/020-live-thumbnails, runs of one build and setting
+pool() {
+	local kind logs=("${@/%//log.json}")
+	echo "runs: $*"
+	for kind in $(cat "${logs[@]}" | jq -r 'select(.message == "Animation frame") | .kind' | sort -u); do
+		printf 'A1 %-8s interval ' "$kind"
+		cat "${logs[@]}" | jq -r --arg k "$kind" \
+			'select(.message == "Animation frame" and .kind == $k and .interval_ms) | .interval_ms' | pct
+		printf 'A1 %-8s missed   ' "$kind"
+		cat "${logs[@]}" | jq -r --arg k "$kind" \
+			'select(.message == "Animation frame" and .kind == $k and .interval_ms) | .interval_ms > 1.5 * .period_ms' |
+			awk '{ n++; m += ($1 == "true") }
+				END { printf "%d of %d intervals above 1.5 periods (%.2f %%)\n", m, n, n ? 100 * m / n : 0 }'
+	done
+	live "$@"
+}
+
 case ${1:-} in
 run) run "$2" "$3" ;;
 summary) summary "$2" ;;
+pool) shift; pool "$@" ;;
 k3) k3 "$2" ;;
-*) sed -n '2,21p' "$0" >&2; exit 2 ;;
+*) sed -n '2,30p' "$0" >&2; exit 2 ;;
 esac

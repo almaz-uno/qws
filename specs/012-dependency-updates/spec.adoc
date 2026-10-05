@@ -143,7 +143,17 @@ its own from the same branch.
   check is not vacuous. GitHub validates the file on the pull request too:
   check "Dependabot config file validation" at `162b718`, "All changes look
   good".
-| K2 | After the merge, by a pull request of its own.
+| K2 | Merged as `a02511c` at 19:23:51 UTC. Runs of "Dependabot Updates"
+  36913985114 (`go_modules`) and 36913984776 (`github_actions`), started
+  5–6 s later, passed. `github_actions` opened nothing: `@v7` is current.
+  `go_modules` opened #38 into `develop`, labels `dependencies` and `go`,
+  with four of the five updates of section "What and why" — all but
+  `github.com/go-gl/gl`, pinned by a pseudo-version; workflow `test` passed
+  on it (runs 36914100167 and 36914108196). Its title is `⬆️ build(deps):
+  Bump the go group with 4 updates` — "Bump" capitalized — and its commit
+  message spells the gitmoji as the shortcode, `:arrow_up: build(deps): Bump
+  …`, not the character the history uses; GitHub shows the shortcode as the
+  emoji, `git log` as text.
 | K3 | After `gh api -X PUT` of both on 2026-10-01: `vulnerability-alerts`
   answers 204, `automated-security-fixes` answers
   `{"enabled":true,"paused":false}`.
@@ -158,6 +168,13 @@ Found along the way: this specification was 011 when it was committed
 pushed minutes earlier. Work on #30 started first, so the number is its; this
 one became 012 (`162b718`).
 
+Found after the merge: alerts #1 and #2 for `golang.org/x/image` v0.34.0,
+medium and high, fixed in v0.38.0 and v0.41.0, appeared as soon as the alerts
+were turned on, and Dependabot opened security update #36 (v0.41.0) at
+19:04 UTC — before the file reached `develop`, so its message is Dependabot's
+default `build(deps): bump …`. #38 brings the module to v0.46.0, which covers
+both.
+
 == Open decisions
 
 * *A cooldown.* Option `cooldown` (`default-days` for `gomod` and
@@ -165,3 +182,8 @@ one became 012 (`162b718`).
   old, so that a compromised release is more likely withdrawn before it is
   proposed. Not set: a monthly check already proposes most versions weeks
   after their release, and a security update ignores it.
+* *The gitmoji of Dependabot's commits.* With prefix `⬆️ build` Dependabot
+  writes `:arrow_up: build(deps): Bump …` (K2): a gitmoji still, in the form
+  of its shortcode, which `git log` shows as text, while the history uses the
+  character. Accepted as is for now; the alternative is prefix `build`, as in
+  siphon, which gives `build(deps): bump …` without a gitmoji.
