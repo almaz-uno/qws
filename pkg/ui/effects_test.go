@@ -19,6 +19,7 @@ func TestParseAnimation(t *testing.T) {
 	want := animationOptions{
 		duration: 150 * time.Millisecond, step: 150 * time.Millisecond, hoverDuration: 150 * time.Millisecond,
 		show: both, hide: both, hover: both, overlayZoom: 0.92, hoverZoom: 1.05,
+		locate: 400 * time.Millisecond, locateZoom: 1.6,
 	}
 	if o != want || len(warnings) != 0 {
 		t.Errorf("defaults: %+v, %v; want %+v, no warning", o, warnings, want)
@@ -32,7 +33,7 @@ func TestParseAnimation(t *testing.T) {
 	want = animationOptions{
 		duration: 150 * time.Millisecond, hoverDuration: 150 * time.Millisecond,
 		show: effects{fade: true, zoom: true}, hover: effects{zoom: true},
-		overlayZoom: 0.92, hoverZoom: 1.05,
+		overlayZoom: 0.92, hoverZoom: 1.05, locate: 400 * time.Millisecond, locateZoom: 1.6,
 	}
 	if o != want {
 		t.Errorf("options %+v, want %+v", o, want)
@@ -42,8 +43,8 @@ func TestParseAnimation(t *testing.T) {
 	}
 
 	for _, off := range []config.Animation{
-		{Enabled: false, Duration: 150 * time.Millisecond, Step: true, Show: []string{"fade"}, OverlayZoom: 0.92, HoverZoom: 1.05},
-		{Enabled: true, Duration: 0, Step: true, Show: []string{"fade"}, OverlayZoom: 0.92, HoverZoom: 1.05},
+		{Enabled: false, Duration: 150 * time.Millisecond, Step: true, Show: []string{"fade"}, OverlayZoom: 0.92, HoverZoom: 1.05, LocateDuration: time.Second, LocateZoom: 1.6},
+		{Enabled: true, Duration: 0, Step: true, Show: []string{"fade"}, OverlayZoom: 0.92, HoverZoom: 1.05, LocateDuration: time.Second, LocateZoom: 1.6},
 	} {
 		if o, warnings := parseAnimation(off); o != (animationOptions{}) || len(warnings) != 0 {
 			t.Errorf("%+v: %+v, %v; want nothing moving, no warning", off, o, warnings)
@@ -120,6 +121,40 @@ func TestHoverDuration(t *testing.T) {
 	s.setHover(now, true)
 	if m := s.hover.levels[2]; m.d != 80*time.Millisecond || !m.moving(now.Add(79*time.Millisecond)) || m.moving(now.Add(80*time.Millisecond)) {
 		t.Errorf("level of the hovered: %+v, want a motion of 80ms", m)
+	}
+}
+
+// Criteria of specs/028-grid-locate
+
+// TestLocateOptions checks K5: the selection frame converges in
+// locate_duration from locate_zoom; a factor not above 1 gives a warning and
+// is its default; a negative duration gives a warning and is none, as 0;
+// with the animation off, none
+func TestLocateOptions(t *testing.T) {
+	a := config.Default().Appearance.Animation
+	a.LocateDuration, a.LocateZoom = 250*time.Millisecond, 2.5
+	if o, warnings := parseAnimation(a); o.locate != 250*time.Millisecond || o.locateZoom != 2.5 || len(warnings) != 0 {
+		t.Errorf("250ms, 2.5: %v, %v, warnings %v", o.locate, o.locateZoom, warnings)
+	}
+	for _, bad := range []float64{1, 0.9, 0, -2, math.NaN(), math.Inf(1)} {
+		a.LocateZoom = bad
+		o, warnings := parseAnimation(a)
+		if o.locateZoom != 1.6 || len(warnings) != 1 || !strings.Contains(warnings[0], "locate_zoom") || !strings.Contains(warnings[0], "above 1") {
+			t.Errorf("factor %v: %v, warnings %q; want 1.6 and one warning", bad, o.locateZoom, warnings)
+		}
+	}
+	a.LocateZoom = 1.6
+	for _, d := range []time.Duration{0, -time.Second} {
+		a.LocateDuration = d
+		o, warnings := parseAnimation(a)
+		if o.locate != 0 || o.step == 0 || len(warnings) != map[bool]int{true: 1, false: 0}[d < 0] {
+			t.Errorf("duration %v: %v, warnings %q; want none, the rest moving, a warning if negative", d, o.locate, warnings)
+		}
+	}
+	a = config.Default().Appearance.Animation
+	a.Enabled = false
+	if o, warnings := parseAnimation(a); o.locate != 0 || len(warnings) != 0 {
+		t.Errorf("the animations off: %v, warnings %v; want none", o.locate, warnings)
 	}
 }
 

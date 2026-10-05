@@ -113,6 +113,8 @@ func init() {
 	rootCmd.PersistentFlags().Duration("appearance-animation-hover-duration", defaultCfg.Appearance.Animation.HoverDuration, "duration of the hover animation (0 = that of --appearance-animation-duration)")
 	rootCmd.PersistentFlags().Float64("appearance-animation-overlay-zoom", defaultCfg.Appearance.Animation.OverlayZoom, "scale the switcher zooms from as it appears and to as it disappears")
 	rootCmd.PersistentFlags().Float64("appearance-animation-hover-zoom", defaultCfg.Appearance.Animation.HoverZoom, "scale the hover frame zooms from as it comes and to as it goes")
+	rootCmd.PersistentFlags().Duration("appearance-animation-locate-duration", defaultCfg.Appearance.Animation.LocateDuration, "duration of the selection frame converging onto its tile after a switch to the grid (0 = none)")
+	rootCmd.PersistentFlags().Float64("appearance-animation-locate-zoom", defaultCfg.Appearance.Animation.LocateZoom, "scale, above 1, the selection frame converges from onto its tile after a switch to the grid")
 
 	// Behavior
 	rootCmd.PersistentFlags().Duration("behavior-snapshot-interval", defaultCfg.Behavior.SnapshotInterval, "background thumbnail refresh interval")
@@ -309,6 +311,12 @@ func applyFlags() {
 	}
 	if rootCmd.PersistentFlags().Changed("appearance-animation-hover-zoom") {
 		cfg.Appearance.Animation.HoverZoom, _ = rootCmd.PersistentFlags().GetFloat64("appearance-animation-hover-zoom")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-animation-locate-duration") {
+		cfg.Appearance.Animation.LocateDuration, _ = rootCmd.PersistentFlags().GetDuration("appearance-animation-locate-duration")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-animation-locate-zoom") {
+		cfg.Appearance.Animation.LocateZoom, _ = rootCmd.PersistentFlags().GetFloat64("appearance-animation-locate-zoom")
 	}
 
 	// Behavior

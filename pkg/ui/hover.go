@@ -71,7 +71,7 @@ func (s *Selector) beginHover(now time.Time) {
 	s.animations++
 	s.hover.begin(s.animations, s.timing.start)
 	s.hover.active = true
-	if !s.step.active && !s.fade.active {
+	if !s.step.active && !s.fade.active && !s.locate.active {
 		s.frameDue = time.Time{}
 	}
 }

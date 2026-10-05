@@ -80,7 +80,7 @@ with a 32-bit ARGB visual; without one qws says so and draws with the CPU.
 | `Esc` | close, the focus where it was |
 | `←` `→` | previous, next — in the grid row after row |
 | `↑` `↓` | in the grid: a row up or down within the column, around it |
-| `q` | toggle the carousel and the grid; the top right of the header says what it does now |
+| `q` | toggle the carousel and the grid, in the next frame; in the grid the selection frame converges onto the selected tile; the top right of the header says what `q` does now |
 | `c`, `g` | the carousel, the grid |
 | `Ctrl` | only the current workspace, or all of them, against `windows.workspace` |
 | mouse | hover to highlight, click to switch |
@@ -108,7 +108,9 @@ The modifier, the key, `q` and the rest are configurable
   only while nothing moves (`appearance.thumbnail.live`, `live_interval`).
 - **Animation** of every change — the step, the selection frame of the
   grid, the hover, the switcher appearing and going — with fades and zooms
-  to taste (`appearance.animation`), or none.
+  to taste (`appearance.animation`), or none. After a switch to the grid the
+  selection frame comes in larger and shrinks onto the selected tile, so the
+  eye finds it at once ([028](specs/028-grid-locate/spec.adoc)).
 - **Workspaces:** all windows, the current workspace's, or all but it;
   `Ctrl` inverts the choice while the switcher is shown.
 - **The monitor under the pointer** gets the switcher.
@@ -147,6 +149,11 @@ So qws does not:
 - **The grid in a ninth of the time,** the same bytes: the tiles drawn in
   parallel, a title cut in one pass over its runes — 43–48 ms instead of
   383–390 ([019](specs/019-grid-speed/spec.adoc)).
+- **Both layouts ready.** While one layout is shown, the other's layers are
+  drawn in the background: a switch shows it in the next frame, 0.4–2.4 ms
+  after the key on the author's second machine at 165 Hz — the first of an
+  activation some 38 ms, the GPU's first use of the textures — instead of
+  76–97 ms for a frame of the CPU ([028](specs/028-grid-locate/spec.adoc)).
 - **Live thumbnails out of the way:** no pass while frames come, one 30 ms
   after they stop; a window in a frame passed with 6 requests to the X
   server instead of 28 ([020](specs/020-live-thumbnails/spec.adoc),
@@ -179,6 +186,8 @@ appearance:
     duration: 150ms
     show: [fade, zoom]      # fade, zoom, both, or none
     hide: [fade, zoom]
+    locate_duration: 400ms  # the selection frame converging after a switch to the grid; 0s: none
+    locate_zoom: 1.6        # the scale it converges from
 
 windows:
   workspace: all            # all, current, all-except-current

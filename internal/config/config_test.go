@@ -159,7 +159,7 @@ func TestAnimationDefaults(t *testing.T) {
 	want := Animation{
 		Enabled: true, Duration: 150 * time.Millisecond, Step: true,
 		Show: []string{"fade", "zoom"}, Hide: []string{"fade", "zoom"}, Hover: []string{"fade", "zoom"},
-		OverlayZoom: 0.92, HoverZoom: 1.05,
+		OverlayZoom: 0.92, HoverZoom: 1.05, LocateDuration: 400 * time.Millisecond, LocateZoom: 1.6,
 	}
 	if got := Default().Appearance.Animation; !reflect.DeepEqual(got, want) {
 		t.Errorf("defaults %+v, want %+v", got, want)
@@ -189,7 +189,7 @@ func TestAnimationSources(t *testing.T) {
 	want := Animation{
 		Enabled: false, Duration: 80 * time.Millisecond, Step: false,
 		Show: []string{"fade", "zoom"}, Hide: []string{"zoom"}, Hover: []string{"fade", "zoom"},
-		OverlayZoom: 0.92, HoverZoom: 1.05,
+		OverlayZoom: 0.92, HoverZoom: 1.05, LocateDuration: 400 * time.Millisecond, LocateZoom: 1.6,
 	}
 	if got := cfg.Appearance.Animation; !reflect.DeepEqual(got, want) {
 		t.Errorf("file: %+v, want %+v", got, want)
@@ -208,7 +208,7 @@ func TestAnimationSources(t *testing.T) {
 	want = Animation{
 		Enabled: true, Duration: 300 * time.Millisecond, Step: true,
 		Show: []string{"zoom"}, Hide: []string{"fade", "zoom"}, Hover: []string{"none"},
-		OverlayZoom: 0.92, HoverZoom: 1.05,
+		OverlayZoom: 0.92, HoverZoom: 1.05, LocateDuration: 400 * time.Millisecond, LocateZoom: 1.6,
 	}
 	if got := cfg.Appearance.Animation; !reflect.DeepEqual(got, want) {
 		t.Errorf("environment: %+v, want %+v", got, want)
@@ -360,6 +360,55 @@ func TestLayoutToggle(t *testing.T) {
 	}
 }
 
+// Criteria of specs/028-grid-locate
+
+// TestLocateKeys checks K5: the selection frame converges in 400 ms from 1.6
+// by default, as config init writes it and config show prints it, and in a
+// file without the keys; the keys are read from a file, and from their QWS_
+// variables over the file
+func TestLocateKeys(t *testing.T) {
+	def := Default().Appearance.Animation
+	if def.LocateDuration != 400*time.Millisecond || def.LocateZoom != 1.6 {
+		t.Errorf("defaults %v, %v; want 400ms, 1.6", def.LocateDuration, def.LocateZoom)
+	}
+	data, err := yaml.Marshal(Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "\n        locate_duration: 400ms\n        locate_zoom: 1.6\n") {
+		t.Errorf("config init writes no locate_duration: 400ms and locate_zoom: 1.6 under animation:\n%s", data)
+	}
+
+	clearEnvironment(t)
+	for _, c := range []struct {
+		file string
+		d    time.Duration
+		zoom float64
+	}{
+		{"appearance:\n  layout: grid\n", 400 * time.Millisecond, 1.6},
+		{"appearance:\n  animation:\n    locate_duration: 600ms\n    locate_zoom: 2\n", 600 * time.Millisecond, 2},
+		{"appearance:\n  animation:\n    locate_duration: 0s\n", 0, 1.6},
+	} {
+		cfg, warnings, err := Load(writeFile(t, c.file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if a := cfg.Appearance.Animation; a.LocateDuration != c.d || a.LocateZoom != c.zoom || len(warnings) != 0 {
+			t.Errorf("%q: %v, %v, warnings %v; want %v, %v, none", c.file, a.LocateDuration, a.LocateZoom, warnings, c.d, c.zoom)
+		}
+	}
+
+	t.Setenv("QWS_APPEARANCE_ANIMATION_LOCATE_DURATION", "250ms")
+	t.Setenv("QWS_APPEARANCE_ANIMATION_LOCATE_ZOOM", "1.3")
+	cfg, _, err := Load(writeFile(t, "appearance:\n  animation:\n    locate_duration: 600ms\n    locate_zoom: 2\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := cfg.Appearance.Animation; a.LocateDuration != 250*time.Millisecond || a.LocateZoom != 1.3 {
+		t.Errorf("environment: %v, %v; want 250ms, 1.3", a.LocateDuration, a.LocateZoom)
+	}
+}
+
 // changedConfig is a configuration with every field different from its
 // default
 func changedConfig(t *testing.T) *Config {
@@ -386,6 +435,7 @@ func changedConfig(t *testing.T) *Config {
 				Enabled: false, Duration: 300 * time.Millisecond, Step: false,
 				Show: []string{"zoom"}, Hide: []string{"fade"}, Hover: []string{},
 				HoverDuration: 70 * time.Millisecond, OverlayZoom: 0.8, HoverZoom: 1.2,
+				LocateDuration: 250 * time.Millisecond, LocateZoom: 2.2,
 			},
 		},
 		Behavior: Behavior{SnapshotInterval: 1500 * time.Millisecond, ShowDelay: 20 * time.Millisecond},

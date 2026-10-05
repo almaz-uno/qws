@@ -162,9 +162,10 @@ func press(t *testing.T, s *Selector, keysym uint32, state uint16) {
 
 // TestLayoutKeys checks K1, K7 and K8 of specs/026-layout-keys: the layout
 // key toggles the carousel and the grid, with Shift too, not with the
-// workspace modifier; c and g as before; each switch drops the layers and
-// draws the other layout with the hint of what the key does in it; the
-// activation ends in appearance.layout again (D2). No toggle and no hint
+// workspace modifier; c and g as before; each switch draws the other layout
+// with the hint of what the key does in it, and keeps the layers
+// (specs/028-grid-locate); the activation ends in appearance.layout again
+// (D2). No toggle and no hint
 // without the key, no hint without the header. Up and Down move the
 // selection of the grid by a row within its column, around it, and do
 // nothing in the carousel. The live thumbnails of a layout switched to are
@@ -193,8 +194,8 @@ func TestLayoutKeys(t *testing.T) {
 	gen := s.layers.gen
 	press(t, s, q, 0)
 	shows("q in the carousel", "grid", "Q — carousel", 1)
-	if s.layers.gen == gen {
-		t.Error("the layers of the carousel kept in the grid")
+	if s.layers.gen != gen {
+		t.Error("the layers dropped by a switch")
 	}
 	press(t, s, q, shift)
 	shows("Shift+q in the grid", "carousel", "Q — grid", 2)
@@ -435,7 +436,7 @@ func TestRowSlide(t *testing.T) {
 	s.anim = animationOptions{step: 150 * time.Millisecond}
 	s.step.pos.d, s.step.gx.d, s.step.gy.d = s.anim.step, s.anim.step, s.anim.step
 	s.dropLayers()
-	s.layers.base = true
+	s.layers.cards[baseKey("grid")] = cardLayer{id: 1}
 	for k, key := range gridLayers {
 		s.layers.cards[key] = cardLayer{id: carousel.LayerID(2 + k)}
 	}

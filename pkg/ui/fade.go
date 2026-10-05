@@ -119,9 +119,11 @@ func (s *Selector) ChosenAt() time.Time {
 	return s.chosenAt
 }
 
-// hide unmaps the overlay, and ends its live thumbnails
+// hide unmaps the overlay, ends its live thumbnails and restores the layout
+// of appearance.layout for the next activation
 func (s *Selector) hide() {
 	s.window.Hide()
 	s.mapped = false
 	s.setLive(false)
+	s.restoreInitialLayoutMode()
 }

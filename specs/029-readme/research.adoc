@@ -4,7 +4,7 @@
 :revdate: 2026-10-05
 
 The claims of the new `README.md` and where each holds (K1). `develop` at
-`c3c598e` (1.4.1); E1 is the author's ws1, 2560×1440 at 144 Hz.
+`37606c6` (1.5.0); E1 is the author's ws1, 2560×1440 at 144 Hz.
 
 == The figures
 
@@ -23,6 +23,7 @@ The claims of the new `README.md` and where each holds (K1). `develop` at
 | Sleep until 3 ms before a frame, spin the rest; a sleep up to half a millisecond late | 007, research, "Frames on time", rows 1 and 7 and "Wake-ups"
 | A collector stop of 5.7 ms from a `memmove` of 14 MB; pauses 0.2–0.7 ms after | 007, research, "Frames on time", "The collector"
 | No live pass while frames come, one 30 ms after; 6 requests instead of 28 | 020, K5 and D6; 023, Results, K3
+| A switch in the next frame, 0.4–2.4 ms, the first of an activation some 38 ms, against 76–97 ms; ws2 at 165 Hz | 028, Results, K4 and K6; 028, research
 | The author's machine: 2560×1440 at 144 Hz, RTX 4080 SUPER, i3, picom | E1 of 001 and 007
 |===
 
@@ -41,6 +42,7 @@ The claims of the new `README.md` and where each holds (K1). `develop` at
 | Alt+Tab, Shift backward, release or Enter to switch, Esc to close | `internal/config` defaults; `pkg/ui/selector.go`, `handleEventsSync`, `handleKeyPressSimple`
 | ← → row after row, around the list; ↑ ↓ within the column, around it | `selectNext`, `selectPrevious`, `selectRow`, `columnStep`; 026, K7
 | `q` toggles, the hint at the top right; `c`, `g`; the next activation in `appearance.layout` | 026, K1, K2, K4
+| After a switch to the grid the selection frame converges onto the tile; `locate_duration` 400 ms, `locate_zoom` 1.6 | 028, D1, D4, Results, K1, K2, K5, K9
 | `Ctrl` inverts the workspace filter | `pkg/ui/selector.go`, the workspace modifier; `doc/configuration.asciidoc`, `windows.workspace`
 | Mouse: hover highlights, a click switches | `pkg/ui/selector.go`, `MotionNotify`, `ButtonPressEvent`; 027
 | MRU order | `pkg/mru`
