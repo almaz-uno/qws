@@ -3,7 +3,7 @@
 :toc-title: Contents
 :sectnums:
 :revdate: 2026-10-05
-:status: draft
+:status: implemented
 :issue: 85
 
 == What and why
@@ -96,6 +96,39 @@ D5. *English,* as every document of the repository (017).
   plays, the page reads as the author wants it.
 |===
 
+== Results
+
+2026-10-05. The README, `research.adoc` and the pictures on the branch,
+`develop` at `37606c6` (1.5.0) merged in, with 028's additions to the old
+README carried into the new one.
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | Met. `research.adoc`: every claim and figure of `README.md` with its
+  source — 13 figures and 26 claims of what qws does; none without one. The
+  switch of 028 is quoted with the first of an activation, 38 ms on ws2, as
+  its K6 records it.
+| K2 | Met. `make readme-images` in a worktree of its own gives the
+  committed `doc/images/` byte for byte, before the merge and after it;
+  `qws.webp` 1 965 842 bytes, 35 frames, 6.36 s; the frames in motion
+  composed of the layers of `pkg/carousel`, those at rest of `cpu`; twelve
+  synthetic windows, nothing of the author's screen.
+| K3 | Met. Every relative link of `README.md` — 18 paths, the pictures and
+  `console/readme-demo` among them — resolves.
+| K4 | Met. `go build`, `gofmt -l`, `go vet`, `make check-specs`, `go test
+  ./...` on every commit and on the merge, each in a worktree of its own.
+| K5 | Met. The author on the page of the pull request, 2026-10-05: "README.md
+  выглядит замечательно".
+|===
+
 == Open decisions
 
-None.
+. The picture shows no convergence of the selection frame of 028: it was
+  made before; `console/readme-demo` could draw it from the same layers.
+. `specs/constitution.adoc` lists the programs of `console/` and the
+  targets of the build without `readme-demo` and `make readme-images`: an
+  amendment, a change of its own.
+. `doc/configuration.asciidoc` gives `current` as the default of
+  `windows.workspace`, the code `all` (research).
