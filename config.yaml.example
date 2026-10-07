@@ -95,7 +95,7 @@ appearance:
   # Animations of the "glx" renderer; "cpu" changes its picture at once.
   # An effect list is fade, zoom, both ([fade, zoom] or fade,zoom), or none.
   animation:
-    enabled: true       # false: every change shows at once
+    enabled: auto       # true, false (every change at once), or auto: still while a VNC viewer is connected or the frames slip
     duration: 150ms     # Time of every animation (0 = at once)
     step: true          # The selection moves to the next card or tile
     show: [fade, zoom]  # How the switcher appears; zoom grows it from overlay_zoom
@@ -106,6 +106,7 @@ appearance:
     hover_zoom: 1.05    # Scale of its size the hover frame zooms from and to
     locate_duration: 400ms # After a switch to the grid, the selection frame converges onto its tile (0 = none)
     locate_zoom: 1.6    # Scale of its size it converges from, above 1
+    vnc_ports: [5900]   # Under auto, a connection on one of these local ports is a VNC viewer; [] looks for none
 
 behavior:
   snapshot_interval: 1s   # a visible window that changed is captured again at most this often

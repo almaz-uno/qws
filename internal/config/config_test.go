@@ -157,9 +157,10 @@ func TestJoinedKeys(t *testing.T) {
 // of the keys of specs/014-appearance-keys
 func TestAnimationDefaults(t *testing.T) {
 	want := Animation{
-		Enabled: true, Duration: 150 * time.Millisecond, Step: true,
+		Enabled: "auto", Duration: 150 * time.Millisecond, Step: true,
 		Show: []string{"fade", "zoom"}, Hide: []string{"fade", "zoom"}, Hover: []string{"fade", "zoom"},
 		OverlayZoom: 0.92, HoverZoom: 1.05, LocateDuration: 400 * time.Millisecond, LocateZoom: 1.6,
+		VNCPorts: []int{5900},
 	}
 	if got := Default().Appearance.Animation; !reflect.DeepEqual(got, want) {
 		t.Errorf("defaults %+v, want %+v", got, want)
@@ -187,9 +188,10 @@ func TestAnimationSources(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := Animation{
-		Enabled: false, Duration: 80 * time.Millisecond, Step: false,
+		Enabled: "false", Duration: 80 * time.Millisecond, Step: false,
 		Show: []string{"fade", "zoom"}, Hide: []string{"zoom"}, Hover: []string{"fade", "zoom"},
 		OverlayZoom: 0.92, HoverZoom: 1.05, LocateDuration: 400 * time.Millisecond, LocateZoom: 1.6,
+		VNCPorts: []int{5900},
 	}
 	if got := cfg.Appearance.Animation; !reflect.DeepEqual(got, want) {
 		t.Errorf("file: %+v, want %+v", got, want)
@@ -206,9 +208,10 @@ func TestAnimationSources(t *testing.T) {
 		t.Fatal(err)
 	}
 	want = Animation{
-		Enabled: true, Duration: 300 * time.Millisecond, Step: true,
+		Enabled: "true", Duration: 300 * time.Millisecond, Step: true,
 		Show: []string{"zoom"}, Hide: []string{"fade", "zoom"}, Hover: []string{"none"},
 		OverlayZoom: 0.92, HoverZoom: 1.05, LocateDuration: 400 * time.Millisecond, LocateZoom: 1.6,
+		VNCPorts: []int{5900},
 	}
 	if got := cfg.Appearance.Animation; !reflect.DeepEqual(got, want) {
 		t.Errorf("environment: %+v, want %+v", got, want)
@@ -409,6 +412,136 @@ func TestLocateKeys(t *testing.T) {
 	}
 }
 
+// Criteria of specs/031-animation-auto
+
+// TestAnimationEnabled checks K1: appearance.animation.enabled is auto by
+// default, as config init writes it and config show prints it, and in a
+// file without it; a file reads auto, true, false, on and off — true and
+// false as the files of earlier versions say them, a YAML bool, printed
+// back as they are —, the variable too, over the file; Mode reads true and
+// false as the bool read them, and anything else as auto, with a warning
+// naming the key
+func TestAnimationEnabled(t *testing.T) {
+	if got := Default().Appearance.Animation.Enabled; got != "auto" {
+		t.Errorf("default %q, want auto", got)
+	}
+	data, err := yaml.Marshal(Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "\n    animation:\n        enabled: auto\n") {
+		t.Errorf("config init writes no enabled: auto under animation:\n%s", data)
+	}
+
+	clearEnvironment(t)
+	for _, c := range []struct {
+		file    string
+		enabled string
+		mode    AnimationMode
+	}{
+		{"appearance:\n  layout: grid\n", "auto", AnimationAuto},
+		{"appearance:\n  animation:\n    enabled: auto\n", "auto", AnimationAuto},
+		{"appearance:\n  animation:\n    enabled: true\n", "true", AnimationOn},
+		{"appearance:\n  animation:\n    enabled: false\n", "false", AnimationOff},
+		{"appearance:\n  animation:\n    enabled: False\n", "false", AnimationOff},
+		{"appearance:\n  animation:\n    enabled: \"true\"\n", "true", AnimationOn},
+		{"appearance:\n  animation:\n    enabled: on\n", "on", AnimationOn},
+		{"appearance:\n  animation:\n    enabled: off\n", "off", AnimationOff},
+		{"appearance:\n  animation:\n    enabled: sometimes\n", "sometimes", AnimationAuto},
+	} {
+		cfg, warnings, err := Load(writeFile(t, c.file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		mode, _ := cfg.Appearance.Animation.Mode()
+		if cfg.Appearance.Animation.Enabled != c.enabled || mode != c.mode || len(warnings) != 0 {
+			t.Errorf("%q: %q, %v, warnings %v; want %q, %v, none", c.file, cfg.Appearance.Animation.Enabled, mode, warnings, c.enabled, c.mode)
+		}
+		if out, err := yaml.Marshal(cfg.Appearance.Animation); err != nil || !strings.Contains(string(out), "enabled: "+c.enabled+"\n") &&
+			!strings.Contains(string(out), "enabled: \""+c.enabled+"\"\n") {
+			t.Errorf("%q: config show prints %q", c.file, out)
+		}
+	}
+
+	for _, env := range []struct {
+		value string
+		mode  AnimationMode
+	}{{"off", AnimationOff}, {"1", AnimationOn}, {"auto", AnimationAuto}, {"FALSE", AnimationOff}} {
+		t.Setenv("QWS_APPEARANCE_ANIMATION_ENABLED", env.value)
+		cfg, _, err := Load(writeFile(t, "appearance:\n  animation:\n    enabled: true\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if mode, _ := cfg.Appearance.Animation.Mode(); cfg.Appearance.Animation.Enabled != env.value || mode != env.mode {
+			t.Errorf("variable %q: %q, %v; want %v", env.value, cfg.Appearance.Animation.Enabled, mode, env.mode)
+		}
+	}
+
+	for _, c := range []struct {
+		enabled string
+		mode    AnimationMode
+		warns   bool
+	}{
+		{"auto", AnimationAuto, false}, {" Auto ", AnimationAuto, false},
+		{"true", AnimationOn, false}, {"on", AnimationOn, false}, {"ON", AnimationOn, false},
+		{"1", AnimationOn, false}, {"t", AnimationOn, false}, {"TRUE", AnimationOn, false},
+		{"false", AnimationOff, false}, {"off", AnimationOff, false}, {"0", AnimationOff, false}, {"F", AnimationOff, false},
+		{"yes", AnimationAuto, true}, {"sometimes", AnimationAuto, true}, {"", AnimationAuto, true},
+	} {
+		mode, warning := Animation{Enabled: c.enabled}.Mode()
+		if mode != c.mode || (warning != "") != c.warns {
+			t.Errorf("%q: %v, warning %q; want %v, a warning %v", c.enabled, mode, warning, c.mode, c.warns)
+		}
+		if c.warns && !strings.Contains(warning, "appearance.animation.enabled") {
+			t.Errorf("%q: the warning %q does not name the key", c.enabled, warning)
+		}
+	}
+}
+
+// TestVNCPorts checks the key of D4: 5900 by default, as config init writes
+// it, and in a file without it; a list, a single port and an empty list from
+// a file; ports joined by commas from the variable, over the file
+func TestVNCPorts(t *testing.T) {
+	if got := Default().Appearance.Animation.VNCPorts; !reflect.DeepEqual(got, []int{5900}) {
+		t.Errorf("default %v, want [5900]", got)
+	}
+	data, err := yaml.Marshal(Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "\n        vnc_ports:\n            - 5900\n") {
+		t.Errorf("config init writes no vnc_ports: [5900] under animation:\n%s", data)
+	}
+
+	clearEnvironment(t)
+	for _, c := range []struct {
+		file string
+		want []int
+	}{
+		{"appearance:\n  layout: grid\n", []int{5900}},
+		{"appearance:\n  animation:\n    vnc_ports: [5900, 5901]\n", []int{5900, 5901}},
+		{"appearance:\n  animation:\n    vnc_ports: 5902\n", []int{5902}},
+		{"appearance:\n  animation:\n    vnc_ports: []\n", []int{}},
+	} {
+		cfg, warnings, err := Load(writeFile(t, c.file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := cfg.Appearance.Animation.VNCPorts; !reflect.DeepEqual(got, c.want) || len(warnings) != 0 {
+			t.Errorf("%q: %#v, warnings %v; want %#v, none", c.file, got, warnings, c.want)
+		}
+	}
+
+	t.Setenv("QWS_APPEARANCE_ANIMATION_VNC_PORTS", "5903,5904")
+	cfg, _, err := Load(writeFile(t, "appearance:\n  animation:\n    vnc_ports: [5900]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Appearance.Animation.VNCPorts; !reflect.DeepEqual(got, []int{5903, 5904}) {
+		t.Errorf("variable: %v, want [5903 5904]", got)
+	}
+}
+
 // changedConfig is a configuration with every field different from its
 // default
 func changedConfig(t *testing.T) *Config {
@@ -432,10 +565,11 @@ func changedConfig(t *testing.T) *Config {
 			WindowPadding:    WindowPadding{Horizontal: "5%", Vertical: "6%"},
 			Header:           Header{Enabled: false},
 			Animation: Animation{
-				Enabled: false, Duration: 300 * time.Millisecond, Step: false,
+				Enabled: "false", Duration: 300 * time.Millisecond, Step: false,
 				Show: []string{"zoom"}, Hide: []string{"fade"}, Hover: []string{},
 				HoverDuration: 70 * time.Millisecond, OverlayZoom: 0.8, HoverZoom: 1.2,
 				LocateDuration: 250 * time.Millisecond, LocateZoom: 2.2,
+				VNCPorts: []int{5901, 5902},
 			},
 		},
 		Behavior: Behavior{SnapshotInterval: 1500 * time.Millisecond, ShowDelay: 20 * time.Millisecond},

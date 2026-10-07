@@ -43,8 +43,8 @@ func TestParseAnimation(t *testing.T) {
 	}
 
 	for _, off := range []config.Animation{
-		{Enabled: false, Duration: 150 * time.Millisecond, Step: true, Show: []string{"fade"}, OverlayZoom: 0.92, HoverZoom: 1.05, LocateDuration: time.Second, LocateZoom: 1.6},
-		{Enabled: true, Duration: 0, Step: true, Show: []string{"fade"}, OverlayZoom: 0.92, HoverZoom: 1.05, LocateDuration: time.Second, LocateZoom: 1.6},
+		{Enabled: "false", Duration: 150 * time.Millisecond, Step: true, Show: []string{"fade"}, OverlayZoom: 0.92, HoverZoom: 1.05, LocateDuration: time.Second, LocateZoom: 1.6},
+		{Enabled: "true", Duration: 0, Step: true, Show: []string{"fade"}, OverlayZoom: 0.92, HoverZoom: 1.05, LocateDuration: time.Second, LocateZoom: 1.6},
 	} {
 		if o, warnings := parseAnimation(off); o != (animationOptions{}) || len(warnings) != 0 {
 			t.Errorf("%+v: %+v, %v; want nothing moving, no warning", off, o, warnings)
@@ -105,7 +105,7 @@ func TestHoverDuration(t *testing.T) {
 
 	a.HoverDuration = 80 * time.Millisecond
 	for _, off := range []func(*config.Animation){
-		func(a *config.Animation) { a.Enabled = false },
+		func(a *config.Animation) { a.Enabled = "false" },
 		func(a *config.Animation) { a.Duration = 0 },
 	} {
 		b := a
@@ -152,7 +152,7 @@ func TestLocateOptions(t *testing.T) {
 		}
 	}
 	a = config.Default().Appearance.Animation
-	a.Enabled = false
+	a.Enabled = "false"
 	if o, warnings := parseAnimation(a); o.locate != 0 || len(warnings) != 0 {
 		t.Errorf("the animations off: %v, warnings %v; want none", o.locate, warnings)
 	}

@@ -576,9 +576,9 @@ log:
 | `appearance.animation.enabled`
 | `--appearance-animation-enabled`
 | `QWS_APPEARANCE_ANIMATION_ENABLED`
-| `bool`
-| `true`
-| Animations of the `glx` renderer; `false`: every change shows at once. `cpu` changes its picture at once whatever these keys say (specification `010-animation-options`)
+| `string`
+| `auto`
+| Animations of the `glx` renderer: `true`, always; `false`, never — every change shows at once; `auto`, as `true`, but still — every change at once, no live thumbnails — while a VNC viewer is connected on a port of `vnc_ports`, looked for as each activation starts, and once 3 of the last 60 frames of the steps, the hover and the convergence of the grid's selection frame have come later than 1.25 refresh periods — in the middle of a step too, which then ends at its target —; five minutes after, an activation is animated again, and still again if its frames slip. Each change of `auto` is logged at info level: "Animation still: a VNC viewer connected", "Animation still: the frames slip", "Animation back". `on` and `off` are `true` and `false`, and so are the words a bool took — `1`, `0`, `t`, `FALSE`; a file of earlier versions with `true` or `false` means what it meant; anything else is reported and is `auto`. The flag alone is `true`. `cpu` changes its picture at once whatever these keys say (specifications `010-animation-options`, `031-animation-auto`)
 
 | `appearance.animation.duration`
 | `--appearance-animation-duration`
@@ -649,6 +649,13 @@ log:
 | `float`
 | `1.6`
 | Scale of their size the selection frame and the shadow of the selected tile converge from onto the tile after a switch to the grid. A number above 1; anything else is reported and the default used
+
+| `appearance.animation.vnc_ports`
+| `--appearance-animation-vnc-ports`
+| `QWS_APPEARANCE_ANIMATION_VNC_PORTS`
+| `[]int`
+| `[5900]`
+| Local ports of a VNC server of the display, for `enabled: auto`: a TCP connection established on one of them — a line of `/proc/net/tcp` or `/proc/net/tcp6` — is a viewer connected. The variable and the flag take ports joined by commas; `[]` in the file looks for none, and the frames alone decide. Any connection on such a port counts, a VNC server's or not: an ssh tunnel listening there to another machine's VNC server too. A port outside 1–65535 is reported and left out (specification `031-animation-auto`)
 
 | `behavior.snapshot_interval`
 | `--behavior-snapshot-interval`

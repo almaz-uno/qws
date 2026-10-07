@@ -758,12 +758,20 @@ func (s *Selector) frame() {
 	}
 	end := time.Now()
 	s.liveEnd(end)
+	// The frame is counted once for the setting auto, at the longest interval
+	// of its records of the kinds counted (specs/031-animation-auto, D5)
+	var slip time.Duration
+	counts := func(kind string, interval time.Duration) {
+		if countsSlips(kind) {
+			slip = max(slip, interval)
+		}
+	}
 	if stepped {
-		s.logAnimationFrame(&s.step.animationLog, s.config.LayoutMode, s.step.pos.progress(now), atRest, drawStart, drawEnd, end)
+		counts(s.config.LayoutMode, s.logAnimationFrame(&s.step.animationLog, s.config.LayoutMode, s.step.pos.progress(now), atRest, drawStart, drawEnd, end))
 	}
 	if s.fade.active {
 		done := !s.fade.level.moving(now)
-		s.logAnimationFrame(&s.fade.animationLog, s.fade.kind(), s.fade.level.progress(now), done, drawStart, drawEnd, end)
+		counts(s.fade.kind(), s.logAnimationFrame(&s.fade.animationLog, s.fade.kind(), s.fade.level.progress(now), done, drawStart, drawEnd, end))
 		s.fade.active = !done
 		if done && !s.fade.out {
 			// Shown in full
@@ -773,14 +781,14 @@ func (s *Selector) frame() {
 	if s.hover.active {
 		// The frame after the last that moved is at rest: the frame at rest, or
 		// the scene of the levels at their targets
-		s.logAnimationFrame(&s.hover.animationLog, "hover", s.hoverProgress(now), !hovering, drawStart, drawEnd, end)
+		counts("hover", s.logAnimationFrame(&s.hover.animationLog, "hover", s.hoverProgress(now), !hovering, drawStart, drawEnd, end))
 		s.hover.active = hovering
 		s.pruneHover(now)
 	}
 	if s.locate.active {
 		// As the hover's: the frame after the last that moved is at rest (F of
 		// specs/028-grid-locate)
-		s.logAnimationFrame(&s.locate.animationLog, "locate", s.locate.level.progress(now), !locating, drawStart, drawEnd, end)
+		counts("locate", s.logAnimationFrame(&s.locate.animationLog, "locate", s.locate.level.progress(now), !locating, drawStart, drawEnd, end))
 		s.locate.active = locating
 	}
 
@@ -790,6 +798,11 @@ func (s *Selector) frame() {
 		s.frameDue = now
 	}
 	s.frameDue = s.frameDue.Add(s.period)
+
+	// The third late of the last 60: still from the next frame
+	if slip > 0 && s.auto.frame(slip, s.period) {
+		s.stillNow()
+	}
 }
 
 // sceneItems is the scene of the step at now, of the layout shown

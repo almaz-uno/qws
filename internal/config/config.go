@@ -59,7 +59,7 @@ type Header struct {
 // specs/010-animation-options, specs/014-appearance-keys); cpu changes its
 // picture at once
 type Animation struct {
-	Enabled       bool          `mapstructure:"enabled" yaml:"enabled"`               // false: every change at once
+	Enabled       string        `mapstructure:"enabled" yaml:"enabled"`               // auto, true or false: see Mode (specs/031-animation-auto)
 	Duration      time.Duration `mapstructure:"duration" yaml:"duration"`             // Of every animation, the hover's unless HoverDuration; 0: at once
 	Step          bool          `mapstructure:"step" yaml:"step"`                     // The selection moves to its target
 	Show          []string      `mapstructure:"show" yaml:"show"`                     // Effects of the appearance: fade, zoom
@@ -73,6 +73,43 @@ type Animation struct {
 	// to the grid (specs/028-grid-locate)
 	LocateDuration time.Duration `mapstructure:"locate_duration" yaml:"locate_duration"` // Its time; 0: none
 	LocateZoom     float64       `mapstructure:"locate_zoom" yaml:"locate_zoom"`         // Scale it converges from, above 1
+
+	// Under auto, the animation is still while a VNC viewer is connected on
+	// one of these local ports (specs/031-animation-auto)
+	VNCPorts []int `mapstructure:"vnc_ports" yaml:"vnc_ports"` // none: no viewer looked for
+}
+
+// AnimationMode is the setting of appearance.animation.enabled
+// (specs/031-animation-auto)
+type AnimationMode string
+
+const (
+	AnimationAuto AnimationMode = "auto"  // animated, but still while a VNC viewer is connected or the frames slip
+	AnimationOn   AnimationMode = "true"  // always animated
+	AnimationOff  AnimationMode = "false" // every change at once
+)
+
+// Mode reads Enabled: auto; true and false, on and off, and whatever
+// strconv.ParseBool reads — 1, t, TRUE —, the case aside, as true and false,
+// as the bool of earlier versions took them from a variable or a flag;
+// anything else is auto, with a warning
+func (a Animation) Mode() (AnimationMode, string) {
+	v := strings.ToLower(strings.TrimSpace(a.Enabled))
+	switch v {
+	case "auto":
+		return AnimationAuto, ""
+	case "on":
+		return AnimationOn, ""
+	case "off":
+		return AnimationOff, ""
+	}
+	if b, err := strconv.ParseBool(v); err == nil {
+		if b {
+			return AnimationOn, ""
+		}
+		return AnimationOff, ""
+	}
+	return AnimationAuto, fmt.Sprintf("appearance.animation.enabled %q is not auto, true or false: auto is used", a.Enabled)
 }
 
 // Thumbnail contains thumbnail size configuration, and the live thumbnails of
@@ -266,7 +303,7 @@ func Default() *Config {
 				Enabled: true,
 			},
 			Animation: Animation{
-				Enabled:       true,
+				Enabled:       string(AnimationAuto), // still over VNC and when the frames slip (specs/031-animation-auto)
 				Duration:      150 * time.Millisecond,
 				Step:          true,
 				Show:          []string{"fade", "zoom"},
@@ -279,6 +316,9 @@ func Default() *Config {
 				// After a switch to the grid (specs/028-grid-locate)
 				LocateDuration: 400 * time.Millisecond,
 				LocateZoom:     1.6, // the selection frame converges from it onto its tile
+
+				// The port of a VNC server of the display (specs/031-animation-auto)
+				VNCPorts: []int{5900},
 			},
 		},
 		Behavior: Behavior{
@@ -345,6 +385,12 @@ func Load(cfgFile string) (*Config, []string, error) {
 	// Unmarshal config
 	if err := v.Unmarshal(cfg); err != nil {
 		return nil, nil, fmt.Errorf("failed to unmarshal config: %w", err)
+	}
+	// A file that says enabled: true or false, as the files of earlier
+	// versions do, holds a YAML bool, which Unmarshal makes "1" or "0":
+	// written back as the file says it (specs/031-animation-auto, D2)
+	if b, ok := v.Get("appearance.animation.enabled").(bool); ok {
+		cfg.Appearance.Animation.Enabled = strconv.FormatBool(b)
 	}
 
 	// Ensure we have at least the defaults if nothing was configured
@@ -480,6 +526,7 @@ func setDefaults(v *viper.Viper, cfg *Config) {
 	v.SetDefault("appearance.animation.hover_zoom", cfg.Appearance.Animation.HoverZoom)
 	v.SetDefault("appearance.animation.locate_duration", cfg.Appearance.Animation.LocateDuration)
 	v.SetDefault("appearance.animation.locate_zoom", cfg.Appearance.Animation.LocateZoom)
+	v.SetDefault("appearance.animation.vnc_ports", cfg.Appearance.Animation.VNCPorts)
 
 	v.SetDefault("behavior.snapshot_interval", cfg.Behavior.SnapshotInterval)
 	v.SetDefault("behavior.show_delay", cfg.Behavior.ShowDelay)

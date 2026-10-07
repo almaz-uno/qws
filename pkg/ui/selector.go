@@ -70,7 +70,11 @@ type Selector struct {
 	period              time.Duration                   // Frame period of the monitor of the overlay
 	fade                fadeAnimation                   // The appearance or disappearance in progress
 	hover               hoverAnimation                  // The levels of the hover frames
-	anim                animationOptions                // The animations of the configuration (specs/010-animation-options)
+	anim                animationOptions                // The animations of the activation (specs/010-animation-options): animated, or none while still
+	animated            animationOptions                // The animations of the configuration
+	still               bool                            // The activation is still under auto: a VNC viewer connected, or the frames slipped (specs/031-animation-auto)
+	auto                autoAnimation                   // What decides it
+	deciding            bool                            // The first frame of the activation decides whether it is still
 	frameDue            time.Time                       // When the next frame of an animation is due
 	uploaded            int                             // Bytes uploaded in the pause before that frame
 	animations          int                             // Animations so far, for the frame records
@@ -241,26 +245,7 @@ func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, window
 		s.animator = a
 	}
 	s.initLive(snap, presenter)
-	anim, warnings := parseAnimation(appearance.Animation)
-	for _, w := range warnings {
-		log.Warn().Msg(w)
-	}
-	s.anim = anim
-	s.step.pos.d, s.step.gx.d, s.step.gy.d = anim.step, anim.step, anim.step
-	s.fade.level.d = anim.duration
-	log.Debug().
-		Bool("composes", s.animator != nil).
-		Dur("duration", anim.duration).
-		Dur("step", anim.step).
-		Dur("hover_duration", anim.hoverDuration).
-		Interface("show", anim.show).
-		Interface("hide", anim.hide).
-		Interface("hover", anim.hover).
-		Float64("overlay_zoom", anim.overlayZoom).
-		Float64("hover_zoom", anim.hoverZoom).
-		Dur("locate_duration", anim.locate).
-		Float64("locate_zoom", anim.locateZoom).
-		Msg("Animations")
+	s.initAnimations(appearance.Animation)
 
 	// Apply initial workspace filtering based on configuration
 	if initialWorkspaceOpt == "current" {
@@ -387,6 +372,9 @@ func (s *Selector) Show() (*x11.WindowInfo, error) {
 	if currentMonitor.Refresh > 0 {
 		s.period = time.Duration(float64(time.Second) / currentMonitor.Refresh)
 	}
+	// Animated or still, decided before its first frame is presented, the
+	// viewer looked for meanwhile (specs/031-animation-auto)
+	s.beginAnimation()
 
 	// Check if monitor has changed or window needs recreation
 	needRecreate := s.window == nil ||
@@ -506,15 +494,7 @@ func (s *Selector) Show() (*x11.WindowInfo, error) {
 		return nil, nil
 	}
 
-	// Initial render, shown by the effects of show when the presenter
-	// composes
-	s.fade.pending = s.animator != nil && s.anim.show.any()
-	s.render(thumbnails)
-	if !s.fade.active {
-		// Shown at once
-		s.setLive(true)
-	}
-	s.prefetch()
+	s.showFirst(thumbnails)
 
 	// Event loop - wait for user input
 	result := s.handleEventsSync(thumbnails)
@@ -529,6 +509,19 @@ func (s *Selector) Show() (*x11.WindowInfo, error) {
 	}
 
 	return result, nil
+}
+
+// showFirst presents the first frame of the activation, shown by the effects
+// of show when the presenter composes and the activation is animated, and
+// asks for the layers of the steps
+func (s *Selector) showFirst(thumbnails []image.Image) {
+	s.fade.pending = s.animator != nil
+	s.render(thumbnails)
+	if !s.fade.active {
+		// Shown at once
+		s.setLive(true)
+	}
+	s.prefetch()
 }
 
 // restoreInitialLayoutMode restores the initial layout mode as the overlay
@@ -853,9 +846,13 @@ func (s *Selector) render(thumbnails []image.Image) {
 	}
 	drawEnd := time.Now()
 
-	// The first frame of an activation starts its appearance; while a fade
-	// runs, a frame drawn in full is presented through it
-	appears := s.fade.pending
+	// The first frame of an activation starts its appearance, when the
+	// activation is animated — decided now, the viewer looked for while the
+	// frame was drawn (specs/031-animation-auto); while a fade runs, a frame
+	// drawn in full is presented through it
+	s.decideAnimation()
+	appears := s.fade.pending && s.anim.show.any()
+	s.fade.pending = false
 	if appears {
 		s.beginFade(false, drawEnd, s.timing.start)
 	}

@@ -1,0 +1,135 @@
+= 031 — plan
+:toc: left
+:toc-title: Contents
+:revdate: 2026-10-07
+
+== Approach
+
+*The key* (D2). `Animation.Enabled` becomes a string, `auto` in
+`Default()` — so `config init` writes `enabled: auto` — and in
+`setDefaults`. `Animation.Mode()` reads it: `auto`; `true` and `false`,
+`on` and `off`, and whatever `strconv.ParseBool` reads — `1`, `t`, `TRUE`
+— as `true` and `false`, the case aside, so that a variable or a flag
+that the bool took before means what it meant; anything else is `auto`,
+with a warning that `parseAnimation` reports with the others. A file that
+says `enabled: true` or `false` holds a YAML bool, which the weak decoding
+of viper's `Unmarshal` turns into `"1"` or `"0"`: `Load` writes it back as
+`true` or `false` when the value read is a bool, so that `config show`
+prints what the file says. The flag `--appearance-animation-enabled`
+becomes a string flag of default `auto` whose `NoOptDefVal` is `true`:
+alone it is `true`, as before, and `--appearance-animation-enabled=false`
+is `false`, as before. `QWS_APPEARANCE_ANIMATION_ENABLED` is read as the
+file is.
+
+`appearance.animation.vnc_ports`, a list of ports, `[5900]`: in
+`Default()` and `setDefaults` — its variable the ports joined by commas —
+and the flag `--appearance-animation-vnc-ports`. An empty list, which
+checks nothing, is written in the file, `vnc_ports: []`: an empty variable
+is unset to viper, and an int-slice flag takes no empty value. A port
+outside 1–65535 is reported and left out.
+
+*Animated or still* (D1, D3). The selector keeps the options of the
+configuration, `animated`, and those of the activation, `anim`: the same,
+or none — the zero `animationOptions`, which `enabled: false` gives now —
+while still. `setStill` sets them, with the durations of the motions of
+the step and of the fade, as `NewSelector` does now. `false`:
+`parseAnimation` gives none, as now; `true`: the options, always; `auto`:
+`autoAnimation` decides, on a presenter that composes — under `cpu`
+nothing moves and nothing is checked. While still, `setLive(true)` does
+nothing: no live pass.
+
+*The start of an activation* (D4, D6). `Show`, once it has read the
+refresh period, starts looking for a viewer — a line of `/proc/net/tcp` or
+`/proc/net/tcp6` in state `01` on a local port of `vnc_ports` — in the
+background: the two tables take some 5 ms to read on ws1 (research, "The
+look for a viewer"), and the first frame some 30–50 ms to draw. `render`,
+once it has drawn the first frame — of a quick press too — and before it
+presents it, asks `autoAnimation.begin`, which waits for the look. A
+viewer makes the activation still. Else the frames: still within five
+minutes of the time they slipped; past five minutes the activation is
+animated and its count starts anew — the probe, which a connected viewer
+defers: it says when it is gone. The fade-in of the first frame follows
+from `anim` as set (`showFirst`, out of `Show`, for the tests). The clock
+of the probe is a function of `autoAnimation`, which the tests replace; so
+is the look for a viewer.
+
+*The count* (D5, O1). `logAnimationFrame` returns the interval it logs, 0
+for the first frame of an animation. `frame`, after a frame presented,
+takes the intervals of its records of a step, of the hover and of the
+convergence, and counts the frame once, at the longest; not the fades
+(D5, O1); not the frame at rest that `uploadIdle` presents after its step
+has ended, whose interval is the time of its drawing, not a refresh the
+display missed. A frame is late above 1.25 refresh periods; a ring of the
+last 60 frames counted runs on across activations; the third late in it
+makes it still at once: `stillNow` — the options none; the motions of the
+step, of the hover levels and of the convergence, and a fade-in, at their
+targets in the next frame, their duration 0; a fade-out ended there, the
+overlay unmapped; the live passes off. While still, under `true` and under
+`false` nothing is counted. `countsSlips` names the kinds counted, for
+`frame` and for the replay of the batches.
+
+*The records* (D7). `autoAnimation` keeps why the activation is still — a
+viewer, the frames, or not — and logs at info level when that changes:
+"Animation still: a VNC viewer connected" with the port, "Animation
+still: the frames slip" with the late frames and the frames counted,
+"Animation back". The check for a viewer is a debug record with its time.
+
+*The batches* (K2). The records "Animation frame" of `vnc-A.txt` and
+`vnc-B.txt` reduced to what the count needs — the activation, the kind and
+the interval of each record that has one — in `pkg/ui/testdata`, by a
+command written in the research; `TestSlipReplay` replays them into
+`autoAnimation` as `frame` would.
+
+== Files
+
+[cols="2,5"]
+|===
+| File | What changes
+
+| `internal/config/config.go`
+| `Enabled` a string, `auto`; `VNCPorts` at the end of `Animation`; `Mode`;
+  the YAML bool written back in `Load`; `setDefaults`.
+
+| `cmd/qws/root.go`
+| `--appearance-animation-enabled` a string flag, alone `true`;
+  `--appearance-animation-vnc-ports`; `applyFlags`.
+
+| `pkg/ui/effects.go`
+| `parseAnimation` by `Mode`, its warning.
+
+| `pkg/ui/auto.go`
+| New: `autoAnimation` — the start of an activation, the count, the probe,
+  the records —, `countsSlips`, the ports read; the selector's
+  `initAnimations`, `beginAnimation`, `setStill` and `stillNow`.
+
+| `pkg/ui/viewer.go`
+| New: the connections established on the ports, from `/proc/net/tcp` and
+  `/proc/net/tcp6`.
+
+| `pkg/ui/selector.go`
+| `animated`, `still`, `auto`, `deciding`; `initAnimations` in
+  `NewSelector`, with the keys in the record "Animations"; `beginAnimation`
+  and `showFirst` in `Show`; the decision in `render`, before the first
+  frame is presented.
+
+| `pkg/ui/animation.go`, `pkg/ui/timing.go`, `pkg/ui/live.go`
+| The frames counted in `frame`; the interval returned by
+  `logAnimationFrame`; no live pass while still.
+
+| `pkg/ui/auto_test.go`, `pkg/ui/viewer_test.go`, `pkg/ui/testdata/`
+| K2–K4; the batches.
+
+| `internal/config/config_test.go`, `cmd/qws/root_test.go`,
+  `pkg/ui/effects_test.go`
+| K1; the tests of 010 and 028 with the string.
+
+| `doc/configuration.asciidoc`, `config.yaml.example`, `README.md`
+| The key, its values and `vnc_ports`; auto.
+|===
+
+What must stay: `pkg/carousel` as it is — the frames at rest of both
+layouts and renderers, `TestScenes` with `testdata/scenes.json`,
+`TestGLXPresenterMatchesCPU`, `TestLayers`; the animations when they run,
+frame for frame, and their records; `enabled: false` and `true` as now;
+the live thumbnails while animated; the switch of the layout from the
+layers (028, D7), still or not.

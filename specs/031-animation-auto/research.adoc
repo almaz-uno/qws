@@ -1,0 +1,156 @@
+= 031 — research
+:toc: left
+:toc-title: Contents
+:revdate: 2026-10-07
+
+The measurement the specification rests on, and how the animation is
+turned off now. `develop` at `4af8412` (1.5.1).
+
+== The frames over VNC
+
+ws2, 2026-10-07: 2560×1440 at 165 Hz (a period of 6.07 ms), RTX 5060 Ti;
+`X0tigervnc -display :0 -rfbport 5900 -localhost=1` serving the display,
+the viewer on ws1 through an ssh tunnel. A qws of the build of 030
+(`v1.5.1-9-ge8d2c79`) beside the service on Alt+F11, `--log-level debug`;
+`~/.cache/qws-vnc/batch.sh` on ws2 drove 15 activations by `xdotool`:
+Alt+F11, three steps by F11, Right, Escape, the modifier released. Batch A
+with the viewer connected, batch B after the author disconnected it, the
+same script; the records "Animation frame" read by kind
+(`~/.cache/qws-diag/vnc-A.txt`, `vnc-B.txt` on ws1).
+
+[cols="2,1,1,1,1,1",options="header"]
+|===
+| Kind, batch | Intervals | Above 1.5 periods | Above 1.25 periods | p95 interval, ms | Presenting above 1 ms
+| steps of the carousel, A | 1495 | 2.3 % | 9.8 % | 8.27 | 15.2 %
+| steps of the carousel, B | 1499 | 0.1 % | 0.5 % | 6.46 | 2.9 %
+| fade-out, A | 360 | 2.8 % | 8.9 % | 8.44 | 12.5 %
+| fade-out, B | 359 | 1.7 % | 2.5 % | 6.21 | 2.7 %
+| fade-in, A | 354 | 12.1 % | — | 12.34 | —
+| fade-in, B | 361 | 7.5 % | — | 11.81 | —
+|===
+
+The steps missed at least one interval in each of the 15 activations of A
+(1–4 of some 100), once in all of B. The fade-in misses without a viewer
+too: the first frame of an activation uploads a whole frame (007).
+
+Of a window of 60 frames of steps: intervals above 1.25 periods some 5.9
+with a viewer, 0.3 without. A threshold of 3: with Poisson counts,
+P(≥3 | 0.3) ≈ 0.4 %, P(≥3 | 5.9) ≈ 93 %.
+
+== The animation off now
+
+`appearance.animation.enabled: false` reaches `parseAnimation`
+(`pkg/ui/effects.go`), which leaves every duration 0: a step at once, no
+fade, no hover animation, no convergence of 028. The animator — the
+presenter that composes — stays: the layers are drawn, a switch of the
+layout is shown from them (028, D7). The key is a bool, its flag
+`--appearance-animation-enabled` a bool flag, default `true`. None of the
+configuration files of ws1, ws2 and ws3 sets it.
+
+== A VNC viewer
+
+A connected viewer is a TCP connection in the state ESTABLISHED on the
+local port the VNC server listens on: in `/proc/net/tcp` and
+`/proc/net/tcp6` a line of local port `170C` (5900) and state `01`. On ws2
+on 2026-10-07: `[::1]:5900 ← [::1]:47302`, `X0tigervnc`, the viewer through
+an ssh tunnel. ws2 also runs `Xvnc :1 -rfbport 15900`, a display of its
+own, which qws's service on `:0` does not serve.
+
+== The count replayed
+
+The rule of D5 over the records "Animation frame" of the two logs, in their
+order. A record with `interval_ms` — a frame of an animation but its first
+— of a kind counted is a frame counted, late when its interval is above
+1.25 × 6.066679 ms, the period of every record; a window of the last 60
+frames counted runs on across the activations, and the third late in it
+trips the count. No frame of either batch carries the records of two
+animations counted; four frames of activation 1 of B carry a step's and
+the fade-in's. The test that replays them, `TestSlipReplay`, reads the
+extract of the next section.
+
+[cols="3,2,3,2,3",options="header"]
+|===
+| Counted | A: frames, late | A: tripped | B: frames, late | B: most late of 60
+| steps and fade-out (D5 as first written) | 1855, 172
+| activation 1, its 30th frame counted: its second step, at 0.28
+| 1858, 13
+| 3: tripped in activation 4, its 17th frame counted: its first step
+| steps (D5 amended, O1) | 1495, 141 | the same | 1499, 4 | 2
+|===
+
+The late frames of B: the last frames of the fade-out — at 0.89 to 0.93
+of it — in activations 3, 4, 5, 6, 7, 10, 11, 14 and 15, 7.7 to 18.7 ms;
+and four of the steps, in activations 1, 4 (two) and 10. The window that
+reaches 3: the fade-out of activation 3 at 12.6 ms, then the first step of
+activation 4 at 7.7 ms — 1.5 MB of layers uploaded in the pause before it
+— and at 10.4 ms, within 19 frames counted. The batch ended each
+activation with Escape: no window was activated before the fade-out, and
+what delays its last frames is not established.
+
+Of the steps alone the replay counts 141 late in A (9.4 %) and 4 in B
+(0.3 %), a little below the 9.8 % and 0.5 % of the table above, which this
+count does not reproduce; above 1.5 periods it does, 2.3 % and 0.1 %.
+
+Other ways to keep B from tripping, each against a word of D5, the
+fade-out counted: a window started anew at each activation — B 2 at most,
+A tripped where it is; 1.5 periods — B 2, A tripped only in activation 3,
+its 114th frame counted; no frame counted after a pause that uploaded more
+than 1 MB — B 2, A at its 28th frame, but of such frames 1 of 416 is late
+in B and 32 of 417 in A, no more than of the others: the uploads do not
+make the frames late.
+
+== The look for a viewer
+
+`BenchmarkViewerConnected` (`pkg/ui/viewer_test.go`) reads the two tables
+as the switcher does, for a port no connection is on: on ws1 — 24 CPUs,
+249 lines in `/proc/net/tcp` and 37 in `/proc/net/tcp6` —, 5.3 ms a look,
+1000 looks, 2026-10-07. Benchmarks of the same reads, not kept: a table
+read whole in one call of 1 MB takes as long as through a `bufio.Scanner`,
+and the tables apart 2.8 ms the first, 2.4 ms the second, for seven times
+fewer lines. The time is the kernel's: for each table it walks
+its hash of connections, of a size by the memory of the machine, not by
+the connections in it. Not the 0.1 ms that D4 first said: a look made
+before the first frame would delay it by as much, so it is made while the
+frame is drawn — 27–52 ms on ws2 in the batches of the research — and
+waited for before it is presented.
+
+== The batches as test data
+
+`pkg/ui/testdata/vnc-a.txt` and `vnc-b.txt` hold of the two logs what the
+count needs and nothing else: of each record "Animation frame" with an
+interval, its activation, its kind and its interval in microseconds — a
+line a run of records of one kind in one activation, in their order —, and
+the period in a comment. No intervals lie within 2 µs of 1.25 periods,
+7583.35 µs: the rounding to the microsecond changes no frame's lateness.
+Made on ws1 from the logs of the research, the colours of the console
+writer stripped:
+
+[source,sh]
+----
+for b in A B; do
+  l=$(echo $b | tr AB ab)
+  {
+    printf '# The frames of batch %s of specs/031-animation-auto, research: ws2, 165 Hz,\n' $b
+    printf '# the records "Animation frame" with an interval, in their order. A line\n'
+    printf '# is a run of records of one kind in one activation: the activation, the\n'
+    printf '# kind, the intervals in microseconds.\n'
+    printf '# period_us 6066.679\n'
+    sed 's/\x1b\[[0-9;]*m//g' ~/.cache/qws-diag/vnc-$b.txt |
+    awk '/Animation frame/ {
+      a = k = i = ""
+      for (n = 1; n <= NF; n++) {
+        split($n, f, "=")
+        if (f[1] == "activation") a = f[2]
+        else if (f[1] == "kind") k = f[2]
+        else if (f[1] == "interval_ms") i = f[2]
+      }
+      if (i == "") next
+      us = sprintf("%.0f", i * 1000)
+      if (a == pa && k == pk) { line = line " " us; next }
+      if (line != "") print line
+      line = a " " k " " us; pa = a; pk = k
+    }
+    END { if (line != "") print line }'
+  } > pkg/ui/testdata/vnc-$l.txt
+done
+----
