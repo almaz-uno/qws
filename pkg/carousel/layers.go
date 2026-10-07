@@ -42,12 +42,16 @@ func CardLayer(windowData []WindowData, index, offset int, cfg Config) *image.RG
 	).Intersect(canvas)
 	img := drawCard(windowData, index, offset, band, cfg)
 	if b := opaqueBounds(img); b.Empty() {
+		Recycle(img)
 		return nil
 	} else if b.Min.X == band.Min.X && band.Min.X > 0 || b.Min.Y == band.Min.Y && band.Min.Y > 0 ||
 		b.Max.X == band.Max.X && band.Max.X < canvas.Max.X || b.Max.Y == band.Max.Y && band.Max.Y < canvas.Max.Y {
+		Recycle(img)
 		img = drawCard(windowData, index, offset, canvas, cfg)
 	}
-	return crop(img, opaqueBounds(img))
+	layer := crop(img, opaqueBounds(img))
+	Recycle(img)
+	return layer
 }
 
 // CardCenter is the centre and the scale of the card of window index at a
@@ -75,7 +79,7 @@ func CarouselHover(windowData []WindowData, index, offset int, cfg Config) *imag
 		int(math.Floor(card.x-card.finalW/2-margin)), int(math.Floor(card.y-card.finalH/2-margin)),
 		int(math.Ceil(card.x+card.finalW/2+margin)), int(math.Ceil(card.y+card.finalH/2+margin)),
 	)
-	dc := gg.NewContext(r.Dx(), r.Dy())
+	dc := gg.NewContextForRGBA(clearImage(image.Rect(0, 0, r.Dx(), r.Dy())))
 	dc.Translate(float64(-r.Min.X), float64(-r.Min.Y))
 	drawHoverIndicator(dc, card.x, card.y, card.finalW, card.finalH, cfg)
 	img := getImageRGBA(dc)
@@ -85,7 +89,7 @@ func CarouselHover(windowData []WindowData, index, offset int, cfg Config) *imag
 
 // drawCard draws the card onto a transparent image with bounds r
 func drawCard(windowData []WindowData, index, offset int, r image.Rectangle, cfg Config) *image.RGBA {
-	dc := gg.NewContext(r.Dx(), r.Dy())
+	dc := gg.NewContextForRGBA(clearImage(image.Rect(0, 0, r.Dx(), r.Dy())))
 	dc.Translate(float64(-r.Min.X), float64(-r.Min.Y))
 	drawWindowWithData(dc, &windowData[index], index, index-offset, -1, 0,
 		float64(cfg.Width)/2, float64(cfg.Height)/2, cfg, nil, nil)
@@ -102,9 +106,10 @@ func drawCard(windowData []WindowData, index, offset int, r image.Rectangle, cfg
 // (specs/007-animation).
 func GridTiles(windowData []WindowData, cfg Config) *image.RGBA {
 	tiles := startGridTiles(windowData, headerBand(cfg), -1, -1, cfg)
-	dc := gg.NewContext(cfg.Width, cfg.Height)
+	dc := gg.NewContextForRGBA(clearImage(image.Rect(0, 0, cfg.Width, cfg.Height)))
 	tiles.draw(dc)
 	img := getImageRGBA(dc)
+	defer Recycle(img)
 	b := opaqueBounds(img)
 	if b.Empty() {
 		return nil
@@ -119,7 +124,7 @@ func GridShadow(w, h, o float64, cfg Config) *image.RGBA {
 	const margin = 2
 	r := image.Rect(int(math.Floor(o))-margin, int(math.Floor(o))-margin,
 		int(math.Ceil(o+w))+margin, int(math.Ceil(o+h))+margin)
-	dc := gg.NewContext(r.Dx(), r.Dy())
+	dc := gg.NewContextForRGBA(clearImage(image.Rect(0, 0, r.Dx(), r.Dy())))
 	dc.Translate(o-float64(r.Min.X), o-float64(r.Min.Y))
 	setColor(dc, cfg.ShadowColor, 0.6)
 	dc.DrawRoundedRectangle(0, 0, w, h, 8)
@@ -142,7 +147,7 @@ func GridTile(n, i int, cfg Config) (x, y, w, h float64) {
 func GridHover(w, h float64) *image.RGBA {
 	const margin = 4
 	r := image.Rect(-margin, -margin, int(math.Ceil(w))+margin, int(math.Ceil(h))+margin)
-	dc := gg.NewContext(r.Dx(), r.Dy())
+	dc := gg.NewContextForRGBA(clearImage(image.Rect(0, 0, r.Dx(), r.Dy())))
 	dc.Translate(margin, margin)
 	drawGridHover(dc, w, h)
 	img := getImageRGBA(dc)
@@ -155,7 +160,7 @@ func GridHover(w, h float64) *image.RGBA {
 func GridSelection(w, h float64, cfg Config) *image.RGBA {
 	const margin = 8
 	r := image.Rect(-margin, -margin, int(math.Ceil(w))+margin, int(math.Ceil(h))+margin)
-	dc := gg.NewContext(r.Dx(), r.Dy())
+	dc := gg.NewContextForRGBA(clearImage(image.Rect(0, 0, r.Dx(), r.Dy())))
 	dc.Translate(margin, margin)
 	drawGridSelection(dc, w, h, cfg)
 	img := getImageRGBA(dc)
@@ -185,9 +190,10 @@ func opaqueBounds(img *image.RGBA) image.Rectangle {
 	return image.Rect(minX, minY, maxX, maxY)
 }
 
-// crop copies the part r of img into an image of its own
+// crop copies the part r of img into an image of its own, its pixels from
+// the free list of canvases: every one of them copied
 func crop(img *image.RGBA, r image.Rectangle) *image.RGBA {
-	out := image.NewRGBA(r)
+	out, _ := takeImage(r)
 	for y := r.Min.Y; y < r.Max.Y; y++ {
 		copyRow(out.Pix[out.PixOffset(r.Min.X, y):][:4*r.Dx()], img.Pix[img.PixOffset(r.Min.X, y):])
 	}

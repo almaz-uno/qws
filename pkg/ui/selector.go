@@ -66,6 +66,7 @@ type Selector struct {
 	step                stepAnimation                   // The step of the carousel in progress
 	rest                restDrawing                     // The frame at rest drawn in the background
 	layers              layerCache                      // Layers the animator holds
+	held                heldFrames                      // Frames the presenter may still read (specs/030-drawing-memory)
 	period              time.Duration                   // Frame period of the monitor of the overlay
 	fade                fadeAnimation                   // The appearance or disappearance in progress
 	hover               hoverAnimation                  // The levels of the hover frames
@@ -435,6 +436,7 @@ func (s *Selector) Show() (*x11.WindowInfo, error) {
 		if err := s.presenter.Bind(s.window); err != nil {
 			return nil, fmt.Errorf("failed to bind presenter to window: %w", err)
 		}
+		s.framesUnbound()
 	}
 
 	// Prepare thumbnails
@@ -876,6 +878,13 @@ func (s *Selector) render(thumbnails []image.Image) {
 		s.fade.level.start = end.Add(-s.period)
 	}
 	s.dumpFrame(img)
+	// The presenter's last frame from now, or, not presented, nobody's
+	// (specs/030-drawing-memory, D3)
+	if err == nil {
+		s.framePresented(img)
+	} else {
+		s.recycleFrame(img)
+	}
 	if s.fade.active {
 		s.logAnimationFrame(&s.fade.animationLog, s.fade.kind(), s.fade.level.progress(drawEnd), false, drawStart, drawEnd, end)
 		s.frameDue = drawEnd.Add(s.period)

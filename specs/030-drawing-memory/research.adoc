@@ -1,0 +1,414 @@
+= 030 — research
+:toc: left
+:toc-title: Contents
+:revdate: 2026-10-05
+
+The figures the specification quotes, with how they were taken. `develop`
+at `1de774d` (1.5.0) for the service on ws2; the code of `develop` at
+`4af8412` (1.5.1, merged into the branch) for the measurements off the
+screen — 1.5.1 changes nothing of the drawing.
+
+== The service on ws2
+
+`qws.service` of 1.5.0 on ws2, started at 12:43 on 2026-10-05; its pprof
+(`--pprof=localhost:6061`) read at 13:40 — `/debug/pprof/heap`, and
+`?debug=1` for the `MemStats` — and `/proc/<pid>/smaps_rollup`:
+
+[cols="3,1",options="header"]
+|===
+| | MB
+| `HeapInuse` | 133.7
+| `HeapIdle` − `HeapReleased`: idle, kept | 83.8
+| `HeapSys`: taken from the system, the peak | 958.4
+| `HeapReleased` | 740.9
+| resident set | 325.9
+| anonymous | 267.2
+| the resident set of the service on ws1 at the same time | 91.6
+|===
+
+The anonymous memory beyond the Go heap — some 50 MB — is the driver's and
+the C libraries' (`/dev/nvidia*`, `memfd:/.nvidia_drv.*` in the maps).
+
+The profile, in use: `image.NewRGBA` 49.7 MB, `image.NewAlpha` 41.7 MB —
+41.65 MB of it under `truetype.NewFace`, 44.9 MB under `carousel.Config.face`
+in all; allocated since the start: 8.4 GB, `image.NewRGBA` 6.4 GB,
+`image.NewAlpha` 1.6 GB under `truetype.NewFace`, 2.1 GB under
+`(*Selector).requestLayers`.
+
+== A face's glyph masks
+
+`truetype.NewFace` (`github.com/golang/freetype/truetype/face.go`) allocates
+`image.NewAlpha(maxw, maxh × GlyphCacheEntries)` at once, `maxw` and `maxh`
+the font's bounds at the size plus 2, 512 entries unless set. Computed for
+the default fonts at 72 dpi, a test outside the repository on ws1:
+
+[cols="2,1,1,1,1",options="header"]
+|===
+| Font | 14 px | 20 px | 23 px | 50 px
+| Noto Sans, 512 entries | 0.55 MB | 1.11 MB | 1.43 MB | 6.55 MB
+| Noto Sans, 128 entries | 0.14 MB | 0.28 MB | 0.36 MB | 1.64 MB
+| DejaVu Sans, 512 entries | 0.52 MB | 1.04 MB | 1.35 MB | 6.25 MB
+| DejaVu Sans, 128 entries | 0.13 MB | 0.26 MB | 0.34 MB | 1.56 MB
+|===
+
+20 px is the author's font size, 50 px the hostname of the header at 2.5
+times it.
+
+== The sets and the pool
+
+`pkg/ui/animation.go`: `fontSets = sync.Pool{New: carousel.NewFontSet}`,
+taken by the drawing of a frame at rest and by each layer drawn in the
+background; `layerSlots` bounds those to half the CPUs — 12 on ws1. A
+`sync.Pool` is emptied by the collector (its victim cache survives one
+cycle): a set is lost within two cycles of not being used, 186 cycles in
+the hour on ws2. 020, open decisions: the drawings of the frames at rest
+found the pool empty a third more often with live thumbnails on.
+
+== The scenario off the screen (T1)
+
+`BenchmarkE1Memory` in `pkg/ui`, added before any change of the code
+(`a895c35`), runs the scenario of M1 and M2 once a process:
+
+[cols="1,3"]
+|===
+| Host | ws1, the host of E1: Intel Core i9-7920X, 12 cores, 24 threads —
+  `layerSlots` 12; NVIDIA GeForce RTX 4080 SUPER, driver 580.105.08;
+  Debian 12, Linux 6.12, i3; Go 1.26.0
+| Selector | That of `BenchmarkE1Switch` (028): the overlay of E1,
+  2520×1400 at 144 Hz; 33 windows with opaque thumbnails of 512×288, icons
+  on two in three, titles Latin and Cyrillic; the author's appearance —
+  cards of 512×512, Noto Sans and DejaVu Sans at 20, the dark theme, the
+  defaults of the animations, the layout key `q`, the header of ws1
+| Presenter | The GLX presenter on a window of 2520×1400 mapped off the
+  screen, left of it; logging at info level, discarded
+| Live thumbnails | On, from a fake snapshotter: the pictures of four
+  windows, textures of 512×288 made once in the presenter's context,
+  newer every 1/30 s while the overlay is shown in full, each publication
+  waking the selector as the snapshotter's ClientMessage does — the
+  frames, live items and records of 020 as the switcher makes them; no
+  passes, no captures
+| An activation | As `Show` and `FadeOut` make one: the layers dropped,
+  the first frame drawn on the CPU through the fade-in, then the keys on
+  a fixed schedule — 400 ms, three Tab 200 ms apart, `q` and 600 ms (the
+  convergence of 028), Right, Down, Right 200 ms apart, `q` and 300 ms,
+  two Tab 200 ms apart — the loop of `handleEventsSync` run between them
+  as it runs while no event comes; the fade-out, the overlay unmapped
+  (`hide`), 500 ms; 50 activations, some 3.7 s each
+| M1 | The peaks of `HeapSys`, of `HeapSys` less `HeapReleased` and of
+  `HeapInuse`, `runtime.ReadMemStats` sampled every 100 ms during the
+  run; 5 s after the last activation `HeapInuse`, and `VmRSS`, `RssAnon`
+  and `VmHWM` of `/proc/self/status`; what the process holds for good,
+  _kept_: `HeapAlloc` after two collections — the second empties what a
+  `sync.Pool` holds, as two minutes idle in the service do, whose
+  collections are forced every two minutes — and `VmRSS` once
+  `debug.FreeOSMemory` has given its idle heap back
+| M2 | The bytes allocated, from the heap profile scaled as pprof scales
+  its samples, at a collection before the first activation, after the
+  tenth and after the last: in all; images, by `image.NewRGBA` (with D3,
+  the new buffers of its free list); the glyph masks, by
+  `truetype.NewFace`; the pictures prepared for the frames, by
+  `carousel.scratchImage`; the images by the function of qws that made
+  them
+| Not measured | The snapshotter's own memory — its snapshots and passes;
+  the main loop of qws; a window list that changes
+| Load | The author's desktop, the qws service idle, other agents'
+  sessions: load average 4–8; 19.5 GiB of the 33 GiB of swap in use
+|===
+
+`go test ./pkg/ui -run '^$' -bench E1Memory -benchtime 1x`, a test
+binary of the commit run three times in turn; MB are of 2^20 bytes.
+
+== The memory before (T1)
+
+2026-10-05, 19:25 to 19:35, `a895c35`, three runs:
+
+[cols="3,1,1,1",options="header"]
+|===
+| | 1 | 2 | 3
+| peak `HeapSys` | 1488 | 1628 | 1660
+| peak `HeapInuse` | 1428 | 1556 | 1612
+| 5 s after: `HeapInuse` | 950 | 1002 | 943
+| 5 s after: `VmRSS` | 1520 | 1237 | 1183
+| `VmHWM` | 1601 | 1663 | 1664
+| kept: the heap | 82.3 | 82.3 | 82.3
+| kept: `VmRSS` | 236 | 179 | 179
+| collections | 70 | 71 | 67
+|===
+
+Allocated per activation, MB:
+
+[cols="2,1,1,1,1",options="header"]
+|===
+| Activations | in all | images | glyph masks | prepared
+| 1–10 | 718–768 | 387–394 | 277–323 | 6.8–9.2
+| 11–50 | 669–687 | 387–393 | 228–246 | 4.8–6.1
+|===
+
+The images by the function that made them, over the 50 activations, MB
+an activation: `newCanvas` 175.3 — the frames on the CPU and at rest and
+the bases, 13 frames of 2520×1400; `drawCard` 102.1–102.4, the bands the
+cards are drawn on; `headCanvas` 48.5–53.0, the scratch canvas of the
+grid's heads, a `sync.Pool`; `crop` 46.9–48.0, the layers cropped from
+the bands and the tiles; `GridTiles` 13.5, the canvas of the tiles
+layer; the shadows and frames of the grid 1.2.
+
+The glyph masks are the faces of the font sets made again: the pool lends
+up to 13 sets at once on ws1 — 12 layers and the frame at rest — and a
+collection every 2.6 s empties it. Most of the heap in use 5 s after the
+last activation is what nothing has collected yet: the sets the pool still
+holds, the canvases dropped; two collections leave 82 MB. The resident set
+follows the heap at its peak and gives back only what the scavenger
+returns: 1.2–1.5 GB 5 s after, 179–236 MB once the idle heap is given back.
+
+== A set's faces
+
+A drawing of E1 asks a set for faces of 14 sizes: the header's 50 and 20;
+the titles of the carousel at 23 px times the scale of the cards at the
+offsets 0 to 5, and its workspaces at 20 px times it; the grid's 18. Their
+glyph masks for Noto Sans and DejaVu Sans, from the bounds `NewFace`
+computes (a program outside the repository on ws1): 32.5 MB a set with 512
+entries, 16.3 with 256, 8.1 with 128. With D1, 13 sets on ws1 keep up to
+423, 211 or 106 MB, and the shared cache of the drawings on the main
+thread a set's worth more.
+
+== The drawing times before (M3)
+
+2026-10-05, 19:35, the test binaries of `a895c35`:
+`-bench 'E1Grid|E1Frame' -benchtime 20x -count 10` of `pkg/carousel`, ten
+values of the mean of 20 frames each; `-bench E1Switch -benchtime 40x
+-count 5` of `pkg/ui`, five runs of 40 switches. In ms, p50 and p95 of
+the runs:
+
+[cols="3,1,1",options="header"]
+|===
+| | p50 | p95
+| `E1Frame/carousel-e1-24-second` | 32.6 | 33.8
+| `E1Frame/carousel-e1-header` | 33.0 | 34.6
+| `E1Grid/grid-e1-24-second` | 45.2 | 46.6
+| `E1Grid/grid-e1-header` | 43.6 | 45.3
+| `E1Grid/grid-e1-header-tiles` | 54.4 | 55.6
+| `E1Switch`, a switch there and back, ms/op | 89.2 | 91.1
+| `E1Switch`, `frame_p50_ms` | 0.178 | 0.183
+| `E1Switch`, `ready_p50_ms` | 0.193 | 0.202
+|===
+
+Since 028 the grid's layers are held at the switch: `frame` and `ready`
+no longer wait for a drawing, and the time of `E1Switch` that does is its
+ms/op — the loop until the layers of both layouts are drawn and uploaded
+and the frames at rest presented.
+
+== The canvases: a prototype
+
+D1–D4 on a copy of the code, 30 activations of the scenario a run,
+2026-10-05 19:36 to 19:40; the free list of canvases two ways — kept
+across activations, or dropped at the unmap before `debug.FreeOSMemory`:
+
+[cols="3,1,1",options="header"]
+|===
+| | kept | dropped
+| peak `HeapSys` | 318 | 342
+| 5 s after: `HeapInuse`; `VmRSS` | 266; 342 | 181; 320
+| kept: the heap; `VmRSS` | 251; 331 | 167; 309
+| images an activation, 11–30 | 0 | 80
+| glyph masks an activation, 1–10; 11–30 | 10.9; 0 | 13.0; 0
+|===
+
+Counted in the free list: at most 89 MB of canvases out at once, at most
+84 MB free. Kept, those 84 MB stay resident while the overlay is unmapped
+— on a machine short of memory they go to swap and come back from it at
+the next activation; dropped, the next activation takes 80 MB of new
+pages, a fifth of what it allocated before. The plan drops them.
+
+A check of the frames given back, made once on that copy and undone: the
+GLX presenter's last and staged frames compared, at each `Recycle`, with
+the frame given back, and a panic if one of them. 12 activations of the
+scenario and `BenchmarkE1Switch` passed; with the selector made to give
+back the frame it had just presented, the scenario panicked at once.
+
+The faces: the sets made 109–130 MB of glyph masks in the first ten
+activations and none after; the heap kept grows by them, 82 to 167 MB.
+
+== After D1
+
+2026-10-05, 19:59 to 20:09, the test binaries of D1 on `0095568`: three
+runs of the scenario; `BenchmarkE1Switch` three runs at a time, the
+binaries of T1 and of D1 in turn, twice. Medians of the runs, the range
+after them, MB:
+
+[cols="3,1,2",options="header"]
+|===
+| | before | D1
+| peak `HeapSys` | 1628 | 1325 (1269–1325)
+| 5 s after: `HeapInuse` | 950 | 702 (672–739)
+| 5 s after: `VmRSS` | 1237 | 1202 (1131–1211)
+| `VmHWM` | 1663 | 1221 (1131–1242)
+| kept: the heap | 82 | 490
+| kept: `VmRSS` | 179 | 418 (359–429)
+| collections | 70 | 49
+| glyph masks an activation, 1–10 | 277 | 43 (43–45)
+| glyph masks an activation, 11–50 | 240 | 0
+| images an activation, 11–50 | 391 | 384 (383–387)
+| `E1Switch`, ms/op, in turn | 87.2 | 79.8
+|===
+
+The sets keep their faces, 512 entries each: 430 MB of glyph masks made in
+the first ten activations, none after, and the heap kept grows by them —
+13 sets of 32.5 MB ("A set's faces"). A switch there and back is 8 % the
+quicker for the faces not made again; the drawing of `pkg/carousel`, on the
+shared cache, is unchanged.
+
+== After D2
+
+2026-10-05, 20:13 to 20:25, the test binaries of D2 on `2d91aae`. M3 in
+turn with the binaries before it — of `pkg/carousel`, that of T1, which
+D1 does not change; of `pkg/ui`, that of D1 — twice: ten values of 20
+frames each, six runs of 40 switches; load average 7–13. The p50 of the
+values, the p95 after it, ms:
+
+[cols="3,2,2,1",options="header"]
+|===
+| | 512 entries | 128 entries | p50
+| `E1Frame/carousel-e1-24-second` | 33.8; 35.9 | 34.8; 37.6 | +2.8 %
+| `E1Frame/carousel-e1-header` | 34.4; 35.7 | 35.5; 47.5 | +3.2 %
+| `E1Grid/grid-e1-24-second` | 45.3; 48.2 | 46.7; 48.3 | +3.0 %
+| `E1Grid/grid-e1-header` | 45.0; 47.7 | 45.0; 48.4 | 0.0 %
+| `E1Grid/grid-e1-header-tiles` | 59.1; 61.8 | 56.1; 57.2 | −5.1 %
+| `E1Switch`, ms/op | 79.6; 82.0 | 81.4; 84.8 | +2.2 %
+|===
+
+Within 5 % at p50 (K3): 128 kept. A glyph whose entry another took is
+rasterized again — the frames of the carousel some 3 % the slower — and the
+tiles layer, on the same face, is not slower: the noise of the desktop is
+of the order of the difference.
+
+The scenario, three runs, medians and ranges, MB:
+
+[cols="3,1,1,2",options="header"]
+|===
+| | before | D1 | D1, D2
+| peak `HeapSys` | 1628 | 1325 | 581 (557–585)
+| 5 s after: `HeapInuse` | 950 | 702 | 291 (262–336)
+| 5 s after: `VmRSS` | 1237 | 1202 | 596 (572–630)
+| `VmHWM` | 1663 | 1221 | 647 (640–662)
+| kept: the heap | 82 | 490 | 167
+| kept: `VmRSS` | 179 | 418 | 272 (271–275)
+| collections | 70 | 49 | 108
+| glyph masks an activation, 1–10; 11–50 | 277; 240 | 43; 0 | 11.6; 0
+| images an activation, 11–50 | 391 | 384 | 396 (394–396)
+|===
+
+The sets' faces a quarter as large: 116 MB of glyph masks in the first ten
+activations, the heap kept 85 MB over before's — the 13 sets at 8.1 MB. A
+smaller heap alive, a lower goal for the collector: more collections, and
+a lower peak.
+
+== After D3
+
+2026-10-05, 20:42 to 20:54, the test binaries of D3 on `a9555c2`, M3 in
+turn with those of D2 as above, load average 8–13; three runs of the
+scenario.
+
+[cols="3,2,2,1",options="header"]
+|===
+| ms, p50; p95 | D2 | D3 | p50
+| `E1Frame/carousel-e1-24-second` | 32.9; 34.1 | 33.1; 34.7 | +0.7 %
+| `E1Frame/carousel-e1-header` | 33.7; 35.3 | 33.8; 34.8 | +0.5 %
+| `E1Grid/grid-e1-24-second` | 45.8; 48.5 | 46.1; 48.2 | +0.6 %
+| `E1Grid/grid-e1-header` | 44.3; 45.8 | 45.1; 46.7 | +1.7 %
+| `E1Grid/grid-e1-header-tiles` | 54.2; 55.5 | 54.8; 56.7 | +1.1 %
+| `E1Switch`, ms/op | 81.6; 82.5 | 78.7; 80.5 | −3.7 %
+|===
+
+The benchmarks of `pkg/carousel` give no frame back; their temporary
+canvases go back — the tiles layer allocates 18.5 MB a drawing against 34.0.
+
+[cols="3,1,1,2",options="header"]
+|===
+| MB | before | D2 | D3
+| peak `HeapSys` | 1628 | 581 | 532 (532–541)
+| 5 s after: `HeapInuse` | 950 | 291 | 417 (415–449)
+| 5 s after: `VmRSS` | 1237 | 596 | 625 (620–632)
+| `VmHWM` | 1663 | 647 | 626 (623–633)
+| kept: the heap | 82 | 167 | 252 (252–254)
+| kept: `VmRSS` | 179 | 272 | 350 (348–357)
+| collections | 70 | 108 | 18
+| images an activation, 1–10; 11–50 | 390; 391 | 399; 396 | 11.8; 0.04
+| in all an activation, 11–50 | 677 | 445 | 41
+|===
+
+The canvases taken from the free list, the new ones in the first
+activation; after it 0.01–0.07 MB an activation. A collection every 10 s in
+place of every 2.6 s. The free list keeps the canvases of the last
+activation, 85 MB, in the heap kept and resident, until D4 drops them.
+
+== After D4
+
+2026-10-05, 20:55 to 21:06, the test binaries of D4 on `07c1661`: three
+runs of the scenario; then M3 in turn with the binaries of T1, twice, load
+average 7–10. D4 changes no benchmark of M3 — they unmap no overlay — and
+they stand here for the change against before.
+
+[cols="3,1,2",options="header"]
+|===
+| MB | before | D1–D4
+| peak `HeapSys` | 1628 | 338 (330–338)
+| peak `HeapInuse` | 1556 | 309 (308–309)
+| 5 s after: `HeapInuse` | 950 | 182 (181–182)
+| 5 s after: `VmRSS` | 1237 | 264 (262–318)
+| `VmHWM` | 1663 | 379 (377–433)
+| kept: the heap | 82 | 167
+| kept: `VmRSS` | 179 | 252 (250–307)
+| collections | 70 | 61
+| glyph masks an activation, 1–10; 11–50 | 277; 240 | 11.4; 0
+| images an activation, 1–10; 11–50 | 390; 391 | 82.6; 80.1 (79.8–81.6)
+| in all an activation, 11–50 | 677 | 123 (123–124)
+|===
+
+The canvases dropped at the unmap are taken anew by the next activation:
+80 MB of images an activation, `newCanvas` 27.2, `drawCard` 21.3–21.7,
+`GridTiles` 13.5, `headCanvas` 12.4–13.2, `crop` 4.8–5.3 — the
+prototype's figures. Five seconds after the last activation the heap in
+use is what is kept and the resident set near what is kept: the memory has
+been given back. What is kept exceeds before's by the sets' faces, 85 MB of
+heap and 73 MB of resident set at the medians.
+
+[cols="3,2,2,1",options="header"]
+|===
+| ms, p50; p95 | before | D1–D4 | p50
+| `E1Frame/carousel-e1-24-second` | 32.9; 36.8 | 33.1; 35.7 | +0.8 %
+| `E1Frame/carousel-e1-header` | 33.5; 34.5 | 34.0; 35.1 | +1.4 %
+| `E1Grid/grid-e1-24-second` | 45.3; 46.8 | 46.2; 48.1 | +1.9 %
+| `E1Grid/grid-e1-header` | 43.9; 45.1 | 44.8; 46.3 | +2.1 %
+| `E1Grid/grid-e1-header-tiles` | 54.2; 56.7 | 54.7; 59.9 | +0.9 %
+| `E1Switch`, ms/op | 86.6; 88.5 | 80.3; 80.9 | −7.3 %
+| `E1Switch`, `frame_p50_ms` | 0.174; 0.182 | 0.173; 0.175 |
+| `E1Switch`, `ready_p50_ms` | 0.193; 0.200 | 0.190; 0.196 |
+|===
+
+== A day on ws2
+
+The build of `e8d2c79` installed as `/usr/local/bin/qws` on ws2 and the
+service restarted at 2026-10-06 00:01; `~/.cache/qws-diag/k5.sh` on ws2
+read every 10 minutes `/proc/<pid>/status` and the `MemStats` of its pprof
+into `~/.cache/qws-diag/k5.log`: 146 samples to 2026-10-07 00:11, one pid,
+the service's swap held at 0 by `MemorySwapMax=0` (2026-10-05).
+
+[cols="2,1,1,1,1,1",options="header"]
+|===
+| | VmRSS | VmHWM | HeapInuse | HeapSys | idle kept
+| 00:01, the start | 75 | 75 | 8 | 19 | 5
+| 01:01, 1 h, the night | 68 | 75 | 10 | 19 | 2
+| 12:01, 12 h | 736 | 978 | 315 | 673 | 135
+| 2026-10-07 00:01, 24 h | 500 | 978 | 251 | 673 | 26
+|===
+
+In MB. The resident set at most 798 MB, 500 MB at the median, 730 MB at
+p95. The profile at 24 h, in use 245 MB: `image.NewAlpha` 144 MB under
+`truetype.NewFace` under `(*FontSet).face` — the glyph masks of the font
+sets, 15 on ws2's 28 CPUs, some 10 MB a set with three monitors of two
+sizes —, `image.NewRGBA` 44 MB, `(*pixelList).take` 27 MB — the frames the
+selector holds for the presenter, two of 14 MB.
+
+ws1's service on 1.5.1 at the same time, 29 h after its start: VmRSS
+300 MB and 56 MB in swap, VmHWM 1576 MB, `HeapSys` 1601 MB, `HeapInuse`
+150 MB, of it 43 MB of glyph masks.

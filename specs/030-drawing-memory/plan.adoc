@@ -1,0 +1,143 @@
+= 030 — plan
+:toc: left
+:toc-title: Contents
+:revdate: 2026-10-05
+
+== Approach
+
+*The font sets* (D1). `fontSets` of `pkg/ui/animation.go` becomes a free
+list under a mutex: `get` takes the set given back last — its faces the
+likeliest to be those needed, so that the sets used most carry most sizes
+— or makes one when none is free; `put` gives it back. Nothing empties
+it: there are as many sets as drawings have run at once — on ws1 the 12 of
+`layerSlots` and the frame at rest — and each keeps the faces it made, once
+per size, for the life of the process. The drawings on the main thread
+keep the shared cache of `NewMultiFallbackFace`, as now.
+
+*The glyph caches* (D2). `loadFontFaceFromPath` gives `truetype.NewFace`
+`GlyphCacheEntries: 128`, a power of two as truetype requires. A glyph's
+mask is rasterized into the entry its index and subpixel position hash to
+and drawn before the next glyph is asked for; an entry is used again only
+for the same glyph at the same position. The rasterizer's bounds are those
+of the font's largest glyph, whatever the entries: a glyph rasterized again
+has the bytes it had. Kept if K3 holds; else 256, and 512 with the finding
+recorded.
+
+*The canvases* (D3). A free list of pixel buffers in `pkg/carousel`
+(`canvases.go`), under a mutex, ascending by capacity: a canvas of n bytes
+takes the smallest free buffer of n to 1.5 n bytes, else a new one; a
+buffer given back is kept while the list holds at most eight times the
+largest it was given — eight frames. The canvases taken from it:
+
+[cols="2,3,3"]
+|===
+| Canvas | Its pixels | Given back
+
+| `newCanvas`: the frames of the carousel and of the grid, the bases
+| A copy of the window background over every row, or `Clear` to its
+  colour: every byte written
+| A base once uploaded; a frame once the presenter no longer holds it
+  (pkg/ui)
+
+| `drawCard`: the band a card layer is drawn on
+| Cleared, as `image.NewRGBA` makes it
+| Once cropped, in `CardLayer`; at once when the card leaves nothing or
+  is drawn again on the whole canvas
+
+| `GridTiles`: the canvas of the tiles
+| Cleared
+| Once cropped
+
+| `crop`: a card layer, the tiles layer
+| Every row copied
+| Once uploaded (pkg/ui)
+
+| `CarouselHover`, `GridShadow`, `GridHover`, `GridSelection`
+| Cleared
+| Once uploaded (pkg/ui)
+
+| `headCanvas`: the scratch canvas of the grid's heads, a `sync.Pool`
+  now
+| As they were: each head fills its rectangle before it draws there
+  (019)
+| When the tiles are drawn, every head waited for
+|===
+
+A canvas's bounds and stride are those of `image.NewRGBA`, on which alone
+gg's rasterizer depends (019, research): the pixels are those of a canvas
+made anew. A buffer is cleared a row at a time, as `copyRow` copies, so
+that the collector need not wait for one long clear. Not changed:
+`DrawPlaceholder`, drawn once a title; the pictures prepared for the frames
+(`scratchImage`, a `sync.Pool` of 5 MB an activation, research); the
+background kept by `newCanvas`.
+
+*Who reads a canvas after it is drawn.* A layer: `SetLayer` copies it into
+a texture with `glTexImage2D` from the process's memory, no pixel buffer
+bound — done when the call returns — so `setLayer` gives it back, and a
+result for layers dropped since, or a base already drawn on the spot, as
+well. A frame: the GLX presenter keeps the last frame it presented
+(`Present`, `PresentFaded` with a frame, `PresentStaged`) to upload only
+the rows of the next one that differ, and the frame it stages in the pauses
+(`StageFrame`) until it is presented; the PutImage presenter of `cpu` keeps
+none. The selector keeps the same two, `held.shown` and `held.staged`, set
+when a call succeeds, and a frame goes back once it is neither of them nor
+the frame at rest drawn and not yet presented (`rest.ready`): the one shown
+before a frame presented, the one staged before a frame staged, a frame at
+rest dropped by a new target or a step cancelled, one drawn for a target
+since left, the frame of `render` when its presentation failed — after its
+dump. A failed call changes neither: the presenter then holds no more than
+before. A new `Bind` holds none. Frames given to the presenter are only
+those the selector drew, and the stills of the tests — `TestScenes`,
+`TestLayers`, `TestParallelDrawing`, `TestGLXPresenterMatchesCPU` — are
+never given back: their canvases come from the list but are not returned
+to it.
+
+*The memory given back* (D4). `hide`, as the overlay is unmapped, starts a
+goroutine — one at a time — that drops the free canvases, for the
+collector, and calls `debug.FreeOSMemory`: a collection and the idle heap
+returned. The free canvases go with it: kept, they stay resident unused
+until the next activation, and on a machine short of memory go to swap and
+come back from it then; dropped, the next activation takes some 80 MB of
+new pages, a fifth of what it allocated before (research, "The canvases: a
+prototype").
+
+*The measurements.* `BenchmarkE1Memory` for M1 and M2, `BenchmarkE1Grid`,
+`BenchmarkE1Frame` and `BenchmarkE1Switch` for M3, from test binaries of
+each commit run in turn, before and after each of D1, D2, and D3 with D4.
+
+== Files
+
+[cols="2,5"]
+|===
+| File | What changes
+
+| `pkg/ui/animation.go`
+| D1: `fontSets` a free list. D3: `setLayer` gives the layers back; the
+  frames the presenter holds, `held`, and the frames given back.
+
+| `pkg/ui/selector.go`
+| D3: `held`; `render` records its frame; a `Bind` holds none.
+
+| `pkg/ui/fade.go`
+| D4: `hide` gives the memory back in the background.
+
+| `pkg/carousel/fontfallback.go`
+| D2: `GlyphCacheEntries`.
+
+| `pkg/carousel/canvases.go`
+| New: the free list of canvases, `Recycle`, and the drop of D4.
+
+| `pkg/carousel/renderer-cpu.go`, `pkg/carousel/layers.go`,
+  `pkg/carousel/gridheads.go`
+| D3: the canvases from the free list, the temporary ones given back.
+
+| `pkg/ui/memory_bench_test.go`
+| `BenchmarkE1Memory`, T1; with D3 it counts the new buffers of the free
+  list among the images.
+|===
+
+What must stay: every pixel — `TestScenes` with `testdata/scenes.json` as
+it is, `TestGLXPresenterMatchesCPU`, `TestLayers`, `TestParallelDrawing`;
+the configuration; the frames, layers and records of the animations, of
+the live thumbnails and of 028; the drawings on the main thread with the
+shared cache of faces.

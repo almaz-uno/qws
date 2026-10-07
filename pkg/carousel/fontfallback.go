@@ -181,6 +181,14 @@ func joinPaths(paths []string) string {
 	return result
 }
 
+// glyphCacheEntries is the number of glyph masks a face keeps: 32 glyphs at
+// the 4 subpixel positions of x, a quarter of truetype's 512. A face
+// allocates the masks of all its entries at once, each of the size of the
+// font's largest glyph — 0.28 MB for Noto Sans at 20 px, 1.64 MB at the
+// 50 px of the header, against 1.11 and 6.55 MB with 512 — and a glyph out
+// of the cache is rasterized again (specs/030-drawing-memory, D2)
+const glyphCacheEntries = 128
+
 // loadFontFaceFromPath loads a font face from a file path
 func loadFontFaceFromPath(path string, size float64) (font.Face, *truetype.Font, error) {
 	f, err := parseFont(path)
@@ -189,9 +197,10 @@ func loadFontFaceFromPath(path string, size float64) (font.Face, *truetype.Font,
 	}
 
 	face := truetype.NewFace(f, &truetype.Options{
-		Size:    size,
-		DPI:     72,
-		Hinting: font.HintingFull,
+		Size:              size,
+		DPI:               72,
+		Hinting:           font.HintingFull,
+		GlyphCacheEntries: glyphCacheEntries,
 	})
 	return face, f, nil
 }
