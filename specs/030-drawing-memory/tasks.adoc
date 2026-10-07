@@ -11,7 +11,7 @@
 . [x] T3. D2, in a commit of its own; M1–M3 after it; K3 decides 128,
   256 or 512: 128.
 . [x] T4. D3 and D4; M1–M3 after them; K1.
-. [ ] T5. K6 on every commit, in a worktree of its own.
-. [ ] T6. The author's trial: the service of the build on ws2 for a day,
+. [x] T5. K6 on every commit, in a worktree of its own.
+. [x] T6. The author's trial: the service of the build on ws2 for a day,
   K5.
-. [ ] T7. The results.
+. [x] T7. The results.

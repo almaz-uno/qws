@@ -384,3 +384,31 @@ heap and 73 MB of resident set at the medians.
 | `E1Switch`, `frame_p50_ms` | 0.174; 0.182 | 0.173; 0.175 |
 | `E1Switch`, `ready_p50_ms` | 0.193; 0.200 | 0.190; 0.196 |
 |===
+
+== A day on ws2
+
+The build of `e8d2c79` installed as `/usr/local/bin/qws` on ws2 and the
+service restarted at 2026-10-06 00:01; `~/.cache/qws-diag/k5.sh` on ws2
+read every 10 minutes `/proc/<pid>/status` and the `MemStats` of its pprof
+into `~/.cache/qws-diag/k5.log`: 146 samples to 2026-10-07 00:11, one pid,
+the service's swap held at 0 by `MemorySwapMax=0` (2026-10-05).
+
+[cols="2,1,1,1,1,1",options="header"]
+|===
+| | VmRSS | VmHWM | HeapInuse | HeapSys | idle kept
+| 00:01, the start | 75 | 75 | 8 | 19 | 5
+| 01:01, 1 h, the night | 68 | 75 | 10 | 19 | 2
+| 12:01, 12 h | 736 | 978 | 315 | 673 | 135
+| 2026-10-07 00:01, 24 h | 500 | 978 | 251 | 673 | 26
+|===
+
+In MB. The resident set at most 798 MB, 500 MB at the median, 730 MB at
+p95. The profile at 24 h, in use 245 MB: `image.NewAlpha` 144 MB under
+`truetype.NewFace` under `(*FontSet).face` — the glyph masks of the font
+sets, 15 on ws2's 28 CPUs, some 10 MB a set with three monitors of two
+sizes —, `image.NewRGBA` 44 MB, `(*pixelList).take` 27 MB — the frames the
+selector holds for the presenter, two of 14 MB.
+
+ws1's service on 1.5.1 at the same time, 29 h after its start: VmRSS
+300 MB and 56 MB in swap, VmHWM 1576 MB, `HeapSys` 1601 MB, `HeapInuse`
+150 MB, of it 43 MB of glyph masks.

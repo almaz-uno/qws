@@ -2,8 +2,8 @@
 :toc: left
 :toc-title: Contents
 :sectnums:
-:revdate: 2026-10-05
-:status: draft
+:revdate: 2026-10-07
+:status: implemented
 :issue: 88
 
 == What and why
@@ -141,10 +141,51 @@ drawing, as its first frame and the grid's layers no longer do since 028
   -race` of `pkg/ui`, `pkg/carousel`, `pkg/snapshot`, `pkg/x11`.
 |===
 
+== Results
+
+Off the screen: `BenchmarkE1Memory` and the benchmarks of 019 and 028 on
+ws1, the medians of three runs (research). On the desktop: the build of
+`e8d2c79` as the service of ws2 from 2026-10-06 00:01 to 2026-10-07 00:11,
+its memory sampled every 10 minutes (research, "A day on ws2"); the commits
+after it add the test of K1 on canvases of garbage and an atomic flag read
+as a canvas is taken, nothing else.
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | Met. `TestScenes` — 28 scenes, `testdata/scenes.json` unchanged —,
+  `TestGLXPresenterMatchesCPU`, `TestLayers`, `TestParallelDrawing`;
+  `TestScenesOnGarbage` and `TestLayersOnGarbage`, which a clear left out
+  of `clearImage` and a row of the background left uncopied each fail.
+| K2 | Met. The peak `HeapSys` 338 MB against 1628 (bound 814); 5 s after
+  the last activation the heap in use 182 MB against 950 (475), the
+  resident set 264 MB against 1237 (618). Kept, not bounded: the heap
+  167 MB against 82, the resident set 252 MB against 179 — D1's faces.
+| K3 | Met: every benchmark within +0.8 to +2.1 % at p50, the switch 7 %
+  quicker; D2 at 128 entries.
+| K4 | Met. Over the activations 11–50: glyph masks 0 MB an activation
+  against 240 (bound 1), images 80 MB against 391 (bound 98).
+| K5 | Measured; no bound was set, the comparison of the criterion — a day
+  against an hour of 1.5.0 — was not one of like times. A day of the build
+  on ws2: the resident set 500 MB at 24 h (68 MB at 1 h, at night; 736 MB at
+  12 h), at most 798 MB, the peak resident set 978 MB, the peak `HeapSys`
+  673 MB, the heap in use 251 MB at 24 h, nothing in swap, one process, no
+  warning or error. ws1 on 1.5.1, a service of 29 h at the same time: the
+  resident set 300 MB and 56 MB in swap, the peak resident set 1576 MB, the
+  peak `HeapSys` 1601 MB, the heap in use 150 MB. The peaks lower by 38 to
+  58 %; the heap kept higher by some 100 MB — 144 MB of glyph masks against
+  43, the font sets of D1, 15 on ws2's 28 CPUs. Taken by the author on
+  2026-10-07.
+| K6 | Met. Every commit in a worktree of its own: build, `gofmt -l`, vet,
+  `check-specs`, `go test ./...`, `-race` of `pkg/ui`, `pkg/carousel`,
+  `pkg/snapshot`, `pkg/x11`; the rule of 021.
+|===
+
 == Open decisions
 
 . Fewer font sets: the drawings with text bounded below `layerSlots` would
-  keep fewer faces and draw the layers later; not measured. The author, on
-  2026-10-06, took D1 as it is — the faces a set for each drawing that ran
-  at once, on ws1 13 of some 8 MB at 128 entries (research), the memory kept
-  between the activations higher and the peak a fifth.
+  keep fewer faces and draw the layers later; not measured. D1's faces grow
+  with the CPUs — 13 sets of some 8 MB on ws1's 24, 15 of some 10 MB on
+  ws2's 28 with three monitors. The author took D1 as it is on 2026-10-06,
+  and again on 2026-10-07 with the day on ws2.
