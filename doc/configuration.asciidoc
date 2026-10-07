@@ -668,7 +668,7 @@ log:
 | `--windows-workspace`
 | `QWS_WINDOWS_WORKSPACE`
 | `string`
-| `current`
+| `all`
 | Workspace filter: current, all, all-except-current. The workspace_modifier key (Ctrl) inverts this: "all" becomes "current", "current" becomes "all", "all-except-current" becomes "current"
 
 | `windows.ignore_skip_taskbar`
