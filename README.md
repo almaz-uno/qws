@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="doc/images/qws.webp" width="960" alt="qws: a step through the carousel, q to the grid, a step through the grid, q back">
+  <img src="doc/images/qws.webp" width="960" alt="qws: a step through the carousel, q to the grid with its selection frame converging onto the tile, a step through the grid, q back">
   <br><sub>Every frame drawn by qws's own renderer, off the screen, from synthetic windows —
   <a href="console/readme-demo">console/readme-demo</a>, <code>make readme-images</code>.</sub>
 </p>

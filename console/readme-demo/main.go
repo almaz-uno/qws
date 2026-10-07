@@ -27,11 +27,13 @@
 // The overlay is blended over the desktop as a compositor blends an ARGB
 // window, and the picture is scaled down 2× with Catmull-Rom. The animation
 // is a loop: the carousel at rest, two steps right, the layout key — the grid
-// at once —, a step down and a step right in the grid, the layout key back to
-// the carousel. Steps take 150 ms along ease-out cubic, as in qws; their
-// frames are 20 ms apart, and a frame at rest is one long frame of the WebP,
-// which img2webp (the webp package) encodes losslessly: its frames are the
-// pixels drawn.
+// at once, its selection frame and the shadow of the selected tile
+// converging onto the tile (specs/028-grid-locate) —, a step down and a step
+// right in the grid, the layout key back to the carousel. Steps take 150 ms
+// and the convergence 400 ms along ease-out cubic, as in qws; their frames
+// are 20 ms apart, and a frame at rest is one long frame of the WebP, which
+// img2webp (the webp package) encodes losslessly: its frames are the pixels
+// drawn.
 //
 // The stills come out byte for byte the same on every run: the data is fixed,
 // nothing depends on the time or on chance.

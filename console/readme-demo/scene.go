@@ -3,17 +3,21 @@ package main
 import (
 	"image"
 	"math"
+	"time"
 
 	"github.com/almaz-uno/qws/pkg/carousel"
 )
 
 // The frames in motion. The selector here keeps what the Selector of pkg/ui
 // keeps for the glx presenter (pkg/ui/animation.go): the base layer and the
-// card or grid layers requested since the layers were last dropped — at the
-// activation and at every switch of the layout — all of them drawn by the
-// time a step needs them, as they are after a pause at rest. A frame of a
-// step is the scene of carouselItems or gridItems at the position of the
-// selection then, composed as present_glx_scene.go composes it on the GPU.
+// card or grid layers of the layout shown, all of them drawn by the time a
+// step or a switch needs them, as they are after a pause at rest. pkg/ui
+// keeps the layers of both layouts side by side (specs/028-grid-locate);
+// here those of the layout shown are drawn again at a switch, the same
+// pixels. A frame of a step is the scene of carouselItems or gridItems at
+// the position of the selection then; a frame of the convergence after a
+// switch to the grid, the scene of gridItems at the look of the selection
+// frame then; each composed as present_glx_scene.go composes it on the GPU.
 
 // cardKey names a layer as pkg/ui names it: the card of window index at an
 // integer offset from the selection, or, with a negative index, a layer of
@@ -67,12 +71,56 @@ func (s *selector) dropLayers() {
 	s.layers = map[cardKey]*image.RGBA{}
 }
 
-// switchLayout shows the layout at once — the frame at rest is drawn anew —
-// and prefetches its layers
-func (s *selector) switchLayout(mode string) {
+// switchLayout shows the layout from its layers, as switchLayout of pkg/ui
+// does on a presenter that composes, prefetches them, and returns the frames
+// in motion that follow the key: in the grid, those of the selection frame
+// converging onto its tile (locateScenes); the frame after the last is the
+// frame at rest. None in the carousel.
+func (s *selector) switchLayout(mode string) []*image.RGBA {
 	s.mode = mode
 	s.dropLayers()
 	s.prefetch()
+	if mode != "grid" {
+		return nil
+	}
+	s.ensureBase()
+	var frames []*image.RGBA
+	for _, items := range s.locateScenes() {
+		frames = append(frames, composeScene(s.base, items))
+	}
+	return frames
+}
+
+// locateScenes are the scenes of the grid after a switch to it while the
+// selection frame and the shadow of the selected tile converge onto the
+// tile (specs/028-grid-locate): at 0, framePeriod, 2·framePeriod, … before
+// the locate duration, the first at the key; none at a duration of 0
+func (s *selector) locateScenes() [][]item {
+	x, y, _, _ := carousel.GridTile(len(s.d.data), s.selected, s.cfg)
+	var scenes [][]item
+	for t := time.Duration(0); t < s.d.locate; t += framePeriod {
+		scenes = append(scenes, s.gridItems(x, y, locateLook(t, s.d.locate, s.d.locateZoom)))
+	}
+	return scenes
+}
+
+// ensureBase draws the base of the layout shown — the canvas and the header
+// with the hint of the layout key — unless it is held
+func (s *selector) ensureBase() {
+	if s.base == nil {
+		s.base = carousel.CarouselBase(s.cfg)
+	}
+}
+
+// locateLook is how the selection frame and the shadow of the selected tile
+// are drawn at t after a switch to the grid while they converge, as
+// locateLook of pkg/ui draws them (specs/028-grid-locate): their level moves
+// from 0 to 1 in the duration d along ease-out cubic, as a motion of pkg/ui;
+// they are faded by it and zoomed from zoom at 0 to 1 at 1, as effects.look
+// of pkg/ui with both effects
+func locateLook(t, d time.Duration, zoom float64) carousel.Fade {
+	v := easeOut(float64(t) / float64(d))
+	return carousel.Fade{Alpha: v, Scale: zoom + (1-zoom)*v}
 }
 
 // request draws the layers not held
@@ -136,9 +184,7 @@ func (s *selector) stepTo(target int) []*image.RGBA {
 	gx0, gy0, _, _ := carousel.GridTile(n, s.selected, s.cfg)
 	gx1, gy1, _, _ := carousel.GridTile(n, target, s.cfg)
 	s.selected = target
-	if s.base == nil {
-		s.base = carousel.CarouselBase(s.cfg)
-	}
+	s.ensureBase()
 	if s.mode != "grid" {
 		s.request(s.motionLayers(from, float64(target)))
 	}
@@ -149,7 +195,7 @@ func (s *selector) stepTo(target int) []*image.RGBA {
 		e := easeOut(float64(t) / float64(s.d.step))
 		var items []item
 		if s.mode == "grid" {
-			items = s.gridItems(gx0+(gx1-gx0)*e, gy0+(gy1-gy0)*e)
+			items = s.gridItems(gx0+(gx1-gx0)*e, gy0+(gy1-gy0)*e, carousel.Opaque)
 		} else {
 			items = s.carouselItems(from + (float64(target)-from)*e)
 		}
@@ -216,22 +262,35 @@ func (s *selector) placeLayer(key cardKey, x, y, scale float64) (*image.RGBA, ca
 
 // gridItems is the scene of the grid with the selection frame's tile at x, y,
 // as gridItems of pkg/ui makes it without hover and live thumbnails: the
-// shadow of the selected tile, the tiles, the selection frame
-func (s *selector) gridItems(x, y float64) []item {
+// shadow of the selected tile, the tiles, the selection frame — the shadow
+// and the frame drawn at the look f, faded by its alpha and zoomed by its
+// scale about the centre of their tile (specs/028-grid-locate), the tiles as
+// they are
+func (s *selector) gridItems(x, y float64, f carousel.Fade) []item {
+	_, _, w, h := carousel.GridTile(len(s.d.data), s.selected, s.cfg)
+	cx, cy := x+w/2, y+h/2
 	var items []item
-	add := func(key cardKey, dx, dy float64) {
+	add := func(key cardKey, dx, dy float64, f carousel.Fade) {
 		l := s.layers[key]
 		if l == nil {
 			return
 		}
 		b := l.Rect
 		r := carousel.Rect{X: dx + float64(b.Min.X), Y: dy + float64(b.Min.Y), W: float64(b.Dx()), H: float64(b.Dy())}
-		items = append(items, item{a: l, ra: r, alpha: 1})
+		items = append(items, item{a: l, ra: zoomRect(r, cx, cy, f.Scale), alpha: f.Alpha})
 	}
-	add(cardKey{index: gridShadow}, x, y)
-	add(cardKey{index: gridTiles}, 0, 0)
-	add(cardKey{index: gridSelection}, x, y)
+	add(cardKey{index: gridShadow}, x, y, f)
+	add(cardKey{index: gridTiles}, 0, 0, carousel.Opaque)
+	add(cardKey{index: gridSelection}, x, y, f)
 	return items
+}
+
+// zoomRect is r scaled by f about the point cx, cy, as zoomRect of pkg/ui
+func zoomRect(r carousel.Rect, cx, cy, f float64) carousel.Rect {
+	if f == 1 {
+		return r
+	}
+	return carousel.Rect{X: cx + (r.X-cx)*f, Y: cy + (r.Y-cy)*f, W: r.W * f, H: r.H * f}
 }
 
 // composeScene composes a scene as drawScene of the glx presenter does: the

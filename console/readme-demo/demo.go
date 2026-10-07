@@ -40,12 +40,20 @@ type demo struct {
 	key    string        // the layout key, as configured
 	step   time.Duration // of a step of the selection
 	header bool
+
+	// The convergence of the selection frame onto its tile after a switch
+	// to the grid (specs/028-grid-locate): its duration, 0 for none, and the
+	// scale it converges from
+	locate     time.Duration
+	locateZoom float64
 }
 
 // newDemo is the demo of the windows over the desktop, with the overlay
 // configured as NewSelector of pkg/ui configures it from config.Default(),
 // but for the size of the thumbnails, the spacing and the font size of the
-// options; the dark theme
+// options; the dark theme. The animations are those of config.Default():
+// the duration of a step, and that of the convergence after a switch to the
+// grid with the scale it converges from.
 func newDemo(o options, wins []window, desk *image.RGBA) *demo {
 	def := config.Default()
 	a := def.Appearance
@@ -92,6 +100,9 @@ func newDemo(o options, wins []window, desk *image.RGBA) *demo {
 		key:    def.Keybindings.LayoutToggle,
 		step:   a.Animation.Duration,
 		header: a.Header.Enabled,
+
+		locate:     a.Animation.LocateDuration,
+		locateZoom: a.Animation.LocateZoom,
 	}
 }
 
@@ -149,23 +160,26 @@ func (d *demo) animation() []frame {
 	hold := func(ms int) {
 		frames = append(frames, frame{d.shown(d.rest(s.mode, s.selected)), ms})
 	}
-	step := func(target int) {
-		for _, img := range s.stepTo(target) {
+	moving := func(imgs []*image.RGBA) {
+		for _, img := range imgs {
 			frames = append(frames, frame{d.shown(img), int(framePeriod / time.Millisecond)})
 		}
+	}
+	step := func(target int) {
+		moving(s.stepTo(target))
 	}
 	hold(1100)
 	step(2)
 	hold(600)
 	step(3)
 	hold(800)
-	s.switchLayout("grid")
+	moving(s.switchLayout("grid"))
 	hold(900)
 	step(3 + carousel.GridColumns(len(d.data), d.layout("grid")))
 	hold(600)
 	step(s.selected + 1)
 	hold(800)
-	s.switchLayout("carousel")
+	moving(s.switchLayout("carousel"))
 	hold(1000)
 	return frames
 }
