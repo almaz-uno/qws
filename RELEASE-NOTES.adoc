@@ -9,6 +9,27 @@ newest come first (link:specs/004-releases/spec.adoc[specification 004]). The
 version of a build is `qws version`. Release files are built on Debian 12:
 they need glibc 2.36 or newer and the OpenGL and X11 libraries.
 
+== 1.6.0 — 2026-10-07
+
+*The animation on, auto and off*
+(link:specs/031-animation-auto/spec.adoc[specification 031]):
+
+* `appearance.animation.enabled` takes `auto`, now the default, besides
+  `true` and `false`. In `auto` the switcher goes still — every change at
+  once, no live thumbnails — while a VNC viewer is connected to the
+  display, and when the frames of the animation slip, as over VNC or on a
+  loaded machine; five minutes later it tries the animation again. The log
+  says when and why, once a change.
+* A viewer is a connection on a port of `appearance.animation.vnc_ports`,
+  `[5900]` by default; `[]` checks none. A tunnel listening on such a port
+  counts too.
+* A configuration that sets `enabled: true` or `false` keeps it: `true`
+  animates whatever slips.
+
+*Two small fixes* (#94): a failed activation of the chosen window is
+logged, and the documentation gives `all` as the default of
+`windows.workspace`, as the code has it.
+
 == 1.5.0 — 2026-10-05
 
 *The selected tile shown after a switch to the grid*
