@@ -6,7 +6,7 @@
 . [x] T1. Before any code, the batches of the research replayed into the
   count of D5: with the fade-out counted, batch B goes still; D5 amended,
   O1 (research, "The count replayed").
-. [ ] T2. The count, the probe and the records — D5–D7 — in
+. [x] T2. The count, the probe and the records — D5–D7 — in
   `autoAnimation`, the check for a viewer — D4 —, the extract of the
   batches; K2, K3.
 . [ ] T3. The key — D2 — and still in the selector — D1, D3 — with their

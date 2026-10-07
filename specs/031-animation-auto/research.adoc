@@ -65,7 +65,8 @@ order. A record with `interval_ms` — a frame of an animation but its first
 frames counted runs on across the activations, and the third late in it
 trips the count. No frame of either batch carries the records of two
 animations counted; four frames of activation 1 of B carry a step's and
-the fade-in's. The extract of the logs and the test that replays it: T2.
+the fade-in's. The test that replays them, `TestSlipReplay`, reads the
+extract of the next section.
 
 [cols="3,2,3,2,3",options="header"]
 |===
@@ -97,3 +98,44 @@ its 114th frame counted; no frame counted after a pause that uploaded more
 than 1 MB — B 2, A at its 28th frame, but of such frames 1 of 416 is late
 in B and 32 of 417 in A, no more than of the others: the uploads do not
 make the frames late.
+
+== The batches as test data
+
+`pkg/ui/testdata/vnc-a.txt` and `vnc-b.txt` hold of the two logs what the
+count needs and nothing else: of each record "Animation frame" with an
+interval, its activation, its kind and its interval in microseconds — a
+line a run of records of one kind in one activation, in their order —, and
+the period in a comment. No intervals lie within 2 µs of 1.25 periods,
+7583.35 µs: the rounding to the microsecond changes no frame's lateness.
+Made on ws1 from the logs of the research, the colours of the console
+writer stripped:
+
+[source,sh]
+----
+for b in A B; do
+  l=$(echo $b | tr AB ab)
+  {
+    printf '# The frames of batch %s of specs/031-animation-auto, research: ws2, 165 Hz,\n' $b
+    printf '# the records "Animation frame" with an interval, in their order. A line\n'
+    printf '# is a run of records of one kind in one activation: the activation, the\n'
+    printf '# kind, the intervals in microseconds.\n'
+    printf '# period_us 6066.679\n'
+    sed 's/\x1b\[[0-9;]*m//g' ~/.cache/qws-diag/vnc-$b.txt |
+    awk '/Animation frame/ {
+      a = k = i = ""
+      for (n = 1; n <= NF; n++) {
+        split($n, f, "=")
+        if (f[1] == "activation") a = f[2]
+        else if (f[1] == "kind") k = f[2]
+        else if (f[1] == "interval_ms") i = f[2]
+      }
+      if (i == "") next
+      us = sprintf("%.0f", i * 1000)
+      if (a == pa && k == pk) { line = line " " us; next }
+      if (line != "") print line
+      line = a " " k " " us; pa = a; pk = k
+    }
+    END { if (line != "") print line }'
+  } > pkg/ui/testdata/vnc-$l.txt
+done
+----
