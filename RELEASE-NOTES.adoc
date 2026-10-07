@@ -27,6 +27,21 @@ renderer:
 * The first switch of an activation may still take some tens of
   milliseconds on NVIDIA: the first use of the grid's textures on the GPU.
 
+=== 1.5.2 — 2026-10-07
+
+*Less memory at the peaks*
+(link:specs/030-drawing-memory/spec.adoc[specification 030]), the pictures
+the same byte for byte:
+
+* The font faces of the drawings are made once and kept, with a glyph
+  cache a quarter of the size, instead of being made again after the
+  collector dropped them; the canvases of the frames and the layers are
+  reused; the memory is given back to the system as the switcher closes.
+* Off the screen, 33 windows and 50 activations: the peak of the heap
+  338 MB instead of 1628. A day of a service: the peak resident set
+  978 MB instead of 1576, the heap kept between activations some 100 MB
+  higher on a machine of 28 CPUs — the faces kept.
+
 === 1.5.1 — 2026-10-05
 
 *The last picture of a window hidden*
