@@ -27,7 +27,8 @@ the pictures at rest; the animation itself when it runs; `enabled: false`.
 
 D1 decided by the author on 2026-10-07; D2, D3 and D6 by the author the
 same day, each as recommended; D4, D5 and D7 made in the specification and
-taken with them.
+taken with them. D5 amended in the plan the same day — the fade-out not
+counted —, open for the author until the trial (O1).
 
 D1 (the author's). *Three settings.* On: the animation always, as
 `enabled: true` now. Off: never, as `enabled: false` now. Auto: on, but
@@ -65,6 +66,17 @@ target, the rest of the activation and the next ones still. From the
 measurement: with a viewer some 5.9 late of 60, without 0.3 — tripped
 within two or three steps, falsely some 0.4 % of the windows.
 
+Amended in the plan (O1): the fade-out is not counted either. The frames
+of the research replayed into the count (research, "The count replayed"):
+with the fade-out, batch B — no viewer — goes still in its fourth
+activation, a frame near the end of the fade-out of the third among its
+three late; the fade-out misses without a viewer too, a frame near its end
+in 9 of the 15 activations of B, 2.5 % of its intervals above 1.25 periods
+against 0.3 % of the steps', and with a viewer 8.6 % against the steps'
+9.4 % — little to tell the two apart by. Without it, B reaches 2 late of
+60 at most, and A goes still where it did with it: at the 30th frame
+counted, in its second step.
+
 D6. *The probe.* Five minutes after it went still for the frames, the
 first activation is animated again, its count started anew: 60 frames
 with fewer than 3 late, animated from then on; 3 late, still for five
@@ -100,7 +112,8 @@ probed every five minutes. `true`: as now, whatever slips. `false`: as now.
 | The detector on the measured frames: the intervals of the batches of the
   research replayed into it, as test data — batch A trips it within its
   first three activations, batch B never; and the edges: 2 late of 60 no,
-  3 yes, the fade-in not counted, the count carried across activations.
+  3 yes, the fade-in not counted — nor the fade-out (O1) —, the count
+  carried across activations.
 
 | K3
 | The viewer: the parsing of `/proc/net/tcp` and `tcp6` lines — the local
@@ -137,4 +150,8 @@ probed every five minutes. `true`: as now, whatever slips. `false`: as now.
 
 == Open decisions
 
-None.
+O1. *The fade-out in the count of D5.* Taken in the plan: not counted —
+then K2 holds on the batches of the research. The alternative, D5 as first
+written: counted, and batch B, without a viewer, goes still once, in its
+fourth activation, for five minutes; K2 would then have to say so. The
+author's to confirm with the trial (K7).

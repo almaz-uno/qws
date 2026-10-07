@@ -55,3 +55,45 @@ local port the VNC server listens on: in `/proc/net/tcp` and
 on 2026-10-07: `[::1]:5900 ← [::1]:47302`, `X0tigervnc`, the viewer through
 an ssh tunnel. ws2 also runs `Xvnc :1 -rfbport 15900`, a display of its
 own, which qws's service on `:0` does not serve.
+
+== The count replayed
+
+The rule of D5 over the records "Animation frame" of the two logs, in their
+order. A record with `interval_ms` — a frame of an animation but its first
+— of a kind counted is a frame counted, late when its interval is above
+1.25 × 6.066679 ms, the period of every record; a window of the last 60
+frames counted runs on across the activations, and the third late in it
+trips the count. No frame of either batch carries the records of two
+animations counted; four frames of activation 1 of B carry a step's and
+the fade-in's. The extract of the logs and the test that replays it: T2.
+
+[cols="3,2,3,2,3",options="header"]
+|===
+| Counted | A: frames, late | A: tripped | B: frames, late | B: most late of 60
+| steps and fade-out (D5 as first written) | 1855, 172
+| activation 1, its 30th frame counted: its second step, at 0.28
+| 1858, 13
+| 3: tripped in activation 4, its 17th frame counted: its first step
+| steps (D5 amended, O1) | 1495, 141 | the same | 1499, 4 | 2
+|===
+
+The late frames of B: the last frames of the fade-out — at 0.89 to 0.93
+of it — in activations 3, 4, 5, 6, 7, 10, 11, 14 and 15, 7.7 to 18.7 ms;
+and four of the steps, in activations 1, 4 (two) and 10. The window that
+reaches 3: the fade-out of activation 3 at 12.6 ms, then the first step of
+activation 4 at 7.7 ms — 1.5 MB of layers uploaded in the pause before it
+— and at 10.4 ms, within 19 frames counted. The batch ended each
+activation with Escape: no window was activated before the fade-out, and
+what delays its last frames is not established.
+
+Of the steps alone the replay counts 141 late in A (9.4 %) and 4 in B
+(0.3 %), a little below the 9.8 % and 0.5 % of the table above, which this
+count does not reproduce; above 1.5 periods it does, 2.3 % and 0.1 %.
+
+Other ways to keep B from tripping, each against a word of D5, the
+fade-out counted: a window started anew at each activation — B 2 at most,
+A tripped where it is; 1.5 periods — B 2, A tripped only in activation 3,
+its 114th frame counted; no frame counted after a pause that uploaded more
+than 1 MB — B 2, A at its 28th frame, but of such frames 1 of 416 is late
+in B and 32 of 417 in A, no more than of the others: the uploads do not
+make the frames late.
