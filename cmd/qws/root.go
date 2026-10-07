@@ -658,6 +658,8 @@ func handleKeyPress(ctx context.Context, conn *x11.Connection, e xproto.KeyPress
 			log.Debug().
 				Dur("since_choice_ms", time.Since(selector.ChosenAt())).
 				Msg("Window activated")
+		} else {
+			log.Warn().Err(err).Uint32("window", uint32(selected.ID)).Msg("Failed to activate the chosen window")
 		}
 	}
 	return selector, selector.FadeOut()
