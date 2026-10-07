@@ -7,6 +7,7 @@ import (
 	"image"
 	"math"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -90,7 +91,7 @@ func TestSwitchFromLayers(t *testing.T) {
 	const q, right = 0x0071, 0xFF53
 	for _, enabled := range []bool{true, false} {
 		appearance := config.Default().Appearance
-		appearance.Animation.Enabled = enabled
+		appearance.Animation.Enabled = strconv.FormatBool(enabled)
 		s, rec, a := animatedSelector(t, appearance, 12)
 		name := map[bool]string{true: "animations on", false: "animations off"}[enabled]
 
@@ -316,7 +317,7 @@ func TestLocateWhen(t *testing.T) {
 		t.Errorf("cpu: converging %v, waiting %v", cpu.locate.active, cpu.locate.key)
 	}
 	for name, off := range map[string]func(*config.Animation){
-		"the animations off": func(a *config.Animation) { a.Enabled = false },
+		"the animations off": func(a *config.Animation) { a.Enabled = "false" },
 		"duration 0":         func(a *config.Animation) { a.Duration = 0 },
 		"locate_duration 0s": func(a *config.Animation) { a.LocateDuration = 0 },
 	} {

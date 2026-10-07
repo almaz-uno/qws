@@ -112,7 +112,10 @@ The modifier, the key, `q` and the rest are configurable
   grid, the hover, the switcher appearing and going — with fades and zooms
   to taste (`appearance.animation`), or none. After a switch to the grid the
   selection frame comes in larger and shrinks onto the selected tile, so the
-  eye finds it at once ([028](specs/028-grid-locate/spec.adoc)).
+  eye finds it at once ([028](specs/028-grid-locate/spec.adoc)). By
+  default it stands still while a VNC viewer is connected or when its
+  frames slip, and tries again five minutes later
+  ([031](specs/031-animation-auto/spec.adoc)).
 - **Workspaces:** all windows, the current workspace's, or all but it;
   `Ctrl` inverts the choice while the switcher is shown.
 - **The monitor under the pointer** gets the switcher.
@@ -185,6 +188,7 @@ appearance:
   colors:
     theme: auto             # auto, dark, light
   animation:
+    enabled: auto           # true, false; auto: still over VNC or when the frames slip
     duration: 150ms
     show: [fade, zoom]      # fade, zoom, both, or none
     hide: [fade, zoom]

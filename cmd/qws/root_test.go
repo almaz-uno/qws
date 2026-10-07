@@ -28,14 +28,16 @@ func TestAnimationFlags(t *testing.T) {
 	applyFlags()
 
 	want := config.Animation{
-		Enabled: false, Duration: 250 * time.Millisecond, Step: false,
+		Enabled: "false", Duration: 250 * time.Millisecond, Step: false,
 		Show: []string{"fade", "zoom"}, Hide: []string{"none"}, Hover: []string{"zoom"},
 	}
 	got := cfg.Appearance.Animation
 	// The keys of specs/014-appearance-keys are checked by TestAppearanceFlags,
-	// those of specs/028-grid-locate by TestLocateFlags
+	// those of specs/028-grid-locate by TestLocateFlags, of
+	// specs/031-animation-auto by TestAnimationEnabledFlag
 	got.HoverDuration, got.OverlayZoom, got.HoverZoom = 0, 0, 0
 	got.LocateDuration, got.LocateZoom = 0, 0
+	got.VNCPorts = nil
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("flags: %+v, want %+v", got, want)
 	}
@@ -118,5 +120,47 @@ func TestLayoutToggleFlag(t *testing.T) {
 		if got := cfg.Keybindings.LayoutToggle; got != name {
 			t.Errorf("flag %q: %q", name, got)
 		}
+	}
+}
+
+// TestAnimationEnabledFlag checks K1 of specs/031-animation-auto: the flag of
+// appearance.animation.enabled takes auto, true, false, on and off; alone it
+// is true, as the bool flag it was; and the ports of the VNC server are read
+// from theirs
+func TestAnimationEnabledFlag(t *testing.T) {
+	flags := rootCmd.PersistentFlags()
+	if f := flags.Lookup("appearance-animation-enabled"); f.DefValue != "auto" {
+		t.Errorf("default %q, want auto", f.DefValue)
+	}
+	for _, c := range []struct {
+		args []string
+		want string
+		mode config.AnimationMode
+	}{
+		{[]string{"--appearance-animation-enabled"}, "true", config.AnimationOn},
+		{[]string{"--appearance-animation-enabled=auto"}, "auto", config.AnimationAuto},
+		{[]string{"--appearance-animation-enabled=false"}, "false", config.AnimationOff},
+		{[]string{"--appearance-animation-enabled=off"}, "off", config.AnimationOff},
+		{[]string{"--appearance-animation-enabled=on"}, "on", config.AnimationOn},
+		{[]string{"--appearance-animation-enabled=true"}, "true", config.AnimationOn},
+	} {
+		if err := flags.Parse(c.args); err != nil {
+			t.Fatalf("%v: %v", c.args, err)
+		}
+		cfg = config.Default()
+		applyFlags()
+		mode, _ := cfg.Appearance.Animation.Mode()
+		if cfg.Appearance.Animation.Enabled != c.want || mode != c.mode {
+			t.Errorf("%v: %q, %v; want %q, %v", c.args, cfg.Appearance.Animation.Enabled, mode, c.want, c.mode)
+		}
+	}
+
+	if err := flags.Parse([]string{"--appearance-animation-vnc-ports=5901,5902"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg = config.Default()
+	applyFlags()
+	if got := cfg.Appearance.Animation.VNCPorts; !reflect.DeepEqual(got, []int{5901, 5902}) {
+		t.Errorf("--appearance-animation-vnc-ports=5901,5902: %v", got)
 	}
 }

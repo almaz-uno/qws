@@ -104,7 +104,8 @@ func init() {
 	rootCmd.PersistentFlags().String("appearance-window-padding-horizontal", defaultCfg.Appearance.WindowPadding.Horizontal, "horizontal padding from screen edges (e.g., \"5%\" or \"50px\")")
 	rootCmd.PersistentFlags().String("appearance-window-padding-vertical", defaultCfg.Appearance.WindowPadding.Vertical, "vertical padding from screen edges (e.g., \"5%\" or \"50px\")")
 	rootCmd.PersistentFlags().Bool("appearance-header-enabled", defaultCfg.Appearance.Header.Enabled, "show the hostname and the version at the top left of the switcher")
-	rootCmd.PersistentFlags().Bool("appearance-animation-enabled", defaultCfg.Appearance.Animation.Enabled, "animate the switcher (glx renderer); false: every change at once")
+	rootCmd.PersistentFlags().String("appearance-animation-enabled", defaultCfg.Appearance.Animation.Enabled, "animate the switcher (glx renderer): auto, true or false; auto: still while a VNC viewer is connected or the frames slip; false: every change at once; alone: true")
+	rootCmd.PersistentFlags().Lookup("appearance-animation-enabled").NoOptDefVal = "true" // alone, as the bool flag it was (specs/031-animation-auto)
 	rootCmd.PersistentFlags().Duration("appearance-animation-duration", defaultCfg.Appearance.Animation.Duration, "duration of every animation (0 = at once)")
 	rootCmd.PersistentFlags().Bool("appearance-animation-step", defaultCfg.Appearance.Animation.Step, "animate the step of the selection")
 	rootCmd.PersistentFlags().StringSlice("appearance-animation-show", defaultCfg.Appearance.Animation.Show, "effects of the appearance (fade, zoom, none)")
@@ -115,6 +116,7 @@ func init() {
 	rootCmd.PersistentFlags().Float64("appearance-animation-hover-zoom", defaultCfg.Appearance.Animation.HoverZoom, "scale the hover frame zooms from as it comes and to as it goes")
 	rootCmd.PersistentFlags().Duration("appearance-animation-locate-duration", defaultCfg.Appearance.Animation.LocateDuration, "duration of the selection frame converging onto its tile after a switch to the grid (0 = none)")
 	rootCmd.PersistentFlags().Float64("appearance-animation-locate-zoom", defaultCfg.Appearance.Animation.LocateZoom, "scale, above 1, the selection frame converges from onto its tile after a switch to the grid")
+	rootCmd.PersistentFlags().IntSlice("appearance-animation-vnc-ports", defaultCfg.Appearance.Animation.VNCPorts, "local ports of a VNC server of the display: a viewer connected on one makes the animation still under auto")
 
 	// Behavior
 	rootCmd.PersistentFlags().Duration("behavior-snapshot-interval", defaultCfg.Behavior.SnapshotInterval, "background thumbnail refresh interval")
@@ -286,7 +288,7 @@ func applyFlags() {
 		cfg.Appearance.Header.Enabled, _ = rootCmd.PersistentFlags().GetBool("appearance-header-enabled")
 	}
 	if rootCmd.PersistentFlags().Changed("appearance-animation-enabled") {
-		cfg.Appearance.Animation.Enabled, _ = rootCmd.PersistentFlags().GetBool("appearance-animation-enabled")
+		cfg.Appearance.Animation.Enabled, _ = rootCmd.PersistentFlags().GetString("appearance-animation-enabled")
 	}
 	if rootCmd.PersistentFlags().Changed("appearance-animation-duration") {
 		cfg.Appearance.Animation.Duration, _ = rootCmd.PersistentFlags().GetDuration("appearance-animation-duration")
@@ -317,6 +319,9 @@ func applyFlags() {
 	}
 	if rootCmd.PersistentFlags().Changed("appearance-animation-locate-zoom") {
 		cfg.Appearance.Animation.LocateZoom, _ = rootCmd.PersistentFlags().GetFloat64("appearance-animation-locate-zoom")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-animation-vnc-ports") {
+		cfg.Appearance.Animation.VNCPorts, _ = rootCmd.PersistentFlags().GetIntSlice("appearance-animation-vnc-ports")
 	}
 
 	// Behavior

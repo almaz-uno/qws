@@ -112,7 +112,9 @@ func (s *Selector) liveOn() bool {
 // the end of its appearance, or after its first frame when it appears at
 // once — or ends them as it starts to disappear, or is unmapped. The fades
 // take none: in S5 a pass beside the first frames of an appearance, which
-// upload the layers, held them up (D5)
+// upload the layers, held them up (D5). A still activation takes none
+// either: each pass presents the overlay again, a frame more for a VNC
+// server to send (specs/031-animation-auto, D3).
 func (s *Selector) setLive(on bool) {
 	if !s.liveOn() {
 		return
@@ -120,6 +122,9 @@ func (s *Selector) setLive(on bool) {
 	if !on {
 		s.live.snap.SetLive(0, 0)
 		s.live.wanted = false
+		return
+	}
+	if s.still {
 		return
 	}
 	interval := s.live.interval

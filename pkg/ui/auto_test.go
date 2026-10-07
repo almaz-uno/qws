@@ -2,13 +2,21 @@ package ui
 
 import (
 	"bufio"
+	"bytes"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/almaz-uno/qws/internal/config"
+	"github.com/almaz-uno/qws/pkg/carousel"
+	"github.com/almaz-uno/qws/pkg/snapshot"
+	"github.com/jezek/xgb/xproto"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -260,5 +268,346 @@ func TestSlipCount(t *testing.T) {
 	off := &autoAnimation{viewer: func([]int) (int, bool) { return 5900, true }, ports: []int{5900}}
 	if off.begin() || frames(off, repeat(late, 10)...) != 0 || off.count != 0 {
 		t.Error("off: still, or frames counted")
+	}
+}
+
+// passCounter is a snapshotter of the live thumbnails that counts the times
+// the passes are asked for
+type passCounter struct {
+	fakeSource
+	on int
+}
+
+func (p *passCounter) SetLive(overlay xproto.Window, interval time.Duration) {
+	if interval > 0 {
+		p.on++
+	}
+	p.fakeSource.SetLive(overlay, interval)
+}
+
+// autoSelector is the selector of keySelector on a sceneAnimator, its
+// animations read from the appearance as NewSelector reads them, before its
+// first activation; the live thumbnails on, the passes counted; the clock of
+// the probe the test's, and no viewer: the machine of the test may have one
+func autoSelector(t *testing.T, appearance config.Appearance, n int) (*Selector, *sceneAnimator, *passCounter, *time.Time) {
+	t.Helper()
+	s, _ := keySelector(t, appearance, "q", n)
+	a := &sceneAnimator{livePresenter: livePresenter{&fakePresenter{}}}
+	s.presenter, s.animator = a, a
+	s.initAnimations(appearance.Animation)
+	src := &passCounter{fakeSource: fakeSource{pics: map[xproto.Window]snapshot.Picture{}}}
+	s.live = liveThumbnails{snap: src, presenter: &fakePresenter{}, atom: 77, drawn: map[xproto.Window]uint64{}}
+	s.window = &carousel.Window{}
+	clock := new(time.Time)
+	*clock = time.Unix(1_000_000, 0)
+	s.auto.clock = func() time.Time { return *clock }
+	s.auto.viewer = func([]int) (int, bool) { return 0, false }
+	return s, a, src, clock
+}
+
+// activate starts an activation as Show does, without its window — the
+// layers dropped, animated or still decided, the first frame — and runs the
+// loop until nothing moves
+func activate(s *Selector) {
+	s.BeginActivation(time.Now(), 0)
+	s.dropLayers()
+	s.beginAnimation()
+	s.showFirst(s.prepareThumbnails())
+	loopIdle(s, func() bool { return false })
+}
+
+// deactivate ends an activation as hide does, without its window
+func deactivate(s *Selector) {
+	s.setLive(false)
+	s.restoreInitialLayoutMode()
+}
+
+// syncBuffer is a buffer the log writes to from any goroutine
+type syncBuffer struct {
+	sync.Mutex
+	bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.Lock()
+	defer b.Unlock()
+	return b.Buffer.Write(p)
+}
+
+// logRecords captures the log at debug level for the test; the function
+// returned gives its records so far
+func logRecords(t *testing.T) func() []map[string]any {
+	t.Helper()
+	buf := &syncBuffer{}
+	level, logger := zerolog.GlobalLevel(), log.Logger
+	zerolog.SetGlobalLevel(zerolog.DebugLevel)
+	log.Logger = zerolog.New(buf).Level(zerolog.DebugLevel)
+	t.Cleanup(func() { zerolog.SetGlobalLevel(level); log.Logger = logger })
+	return func() []map[string]any {
+		buf.Lock()
+		defer buf.Unlock()
+		var records []map[string]any
+		for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+			var r map[string]any
+			if err := json.Unmarshal([]byte(line), &r); err != nil {
+				t.Fatalf("%q: %v", line, err)
+			}
+			records = append(records, r)
+		}
+		return records
+	}
+}
+
+// count is the number of records of the message
+func count(records []map[string]any, message string) int {
+	n := 0
+	for _, r := range records {
+		if r["message"] == message {
+			n++
+		}
+	}
+	return n
+}
+
+// stepAtOnce checks that the records have frames of a step and that each
+// is at its target, and that no fade-in is among them
+func stepAtOnce(t *testing.T, name string, records []map[string]any) {
+	t.Helper()
+	steps := 0
+	for _, r := range records {
+		if r["message"] != "Animation frame" {
+			continue
+		}
+		switch r["kind"] {
+		case "fade-in":
+			t.Errorf("%s: a frame of a fade-in %v", name, r)
+		case "carousel":
+			steps++
+			if r["progress"] != 1.0 {
+				t.Errorf("%s: a frame of the step on its way %v", name, r)
+			}
+		}
+	}
+	if steps == 0 {
+		t.Errorf("%s: no frame of the step", name)
+	}
+}
+
+// TestStillViewer checks K4 of specs/031-animation-auto, D4 and D7: a VNC
+// viewer connected at the start of an activation makes it still from its
+// first frame — no fade-in, the steps at once, no live pass —, the next ones
+// as well while it stays, with one record; gone, the next activation is
+// animated again, with one record
+func TestStillViewer(t *testing.T) {
+	const right = 0xFF53
+	records := logRecords(t)
+	s, a, src, _ := autoSelector(t, config.Default().Appearance, 12)
+	connected := true
+	s.auto.ports = []int{5900}
+	s.auto.viewer = func(ports []int) (int, bool) { return ports[0], connected }
+
+	for i := 1; i <= 2; i++ {
+		name := fmt.Sprintf("activation %d with a viewer", i)
+		a.shown = nil
+		from := len(records())
+		activate(s)
+		if !s.still || len(a.shown) == 0 || a.shown[0].scene || a.shown[0].fade != carousel.Opaque {
+			t.Errorf("%s: still %v, the first frame %+v; want still, a frame opaque at once", name, s.still, a.shown)
+		}
+		before := s.selectedIndex
+		pressKey(t, s, right)
+		loopIdle(s, func() bool { return false })
+		if s.selectedIndex != before+1 {
+			t.Errorf("%s: the selection at %d, want %d", name, s.selectedIndex, before+1)
+		}
+		stepAtOnce(t, name, records()[from:])
+		if src.on != 0 {
+			t.Errorf("%s: the live passes asked for %d times, want none", name, src.on)
+		}
+		deactivate(s)
+	}
+
+	connected = false
+	a.shown = nil
+	activate(s)
+	if s.still || len(a.shown) == 0 || a.shown[0].fade == carousel.Opaque || src.on != 1 {
+		t.Errorf("the viewer gone: still %v, the first frame %+v, the passes asked for %d times; want a fade-in and the passes",
+			s.still, a.shown, src.on)
+	}
+	deactivate(s)
+
+	all := records()
+	if n := count(all, "Animation still: a VNC viewer connected"); n != 1 {
+		t.Errorf("%d records of the viewer, want 1", n)
+	}
+	for _, r := range all {
+		if r["message"] == "Animation still: a VNC viewer connected" && (r["level"] != "info" || r["port"] != 5900.0) {
+			t.Errorf("the record of the viewer %v, want at info level with the port", r)
+		}
+	}
+	if n := count(all, "Animation back"); n != 1 {
+		t.Errorf("%d records of the animation back, want 1", n)
+	}
+}
+
+// TestStillFrames checks K4 of specs/031-animation-auto, D5–D7: the third
+// late frame of a step makes the activation still in the middle of the
+// step: the step is at its target in the next frame, the next steps at once,
+// the live passes stop; the next activation still, with no record; five
+// minutes after, by the clock of the test, the probe: animated, its count
+// started anew, and still again on 3 late. A fade-out with a step moving
+// ends at once.
+func TestStillFrames(t *testing.T) {
+	const right = 0xFF53
+	records := logRecords(t)
+	s, a, src, clock := autoSelector(t, config.Default().Appearance, 12)
+	activate(s)
+	if s.still || src.on != 1 {
+		t.Fatalf("the first activation: still %v, the passes asked for %d times; want animated, asked for", s.still, src.on)
+	}
+
+	// trip steps once with every frame late — intervals far above 1.25
+	// periods of 1 ns — until the count trips; it returns the frames
+	// presented
+	trip := func() int {
+		t.Helper()
+		s.period = time.Nanosecond
+		defer func() { s.period = 7 * time.Millisecond }()
+		pressKey(t, s, right)
+		n := 0
+		for !s.still && n < 100 {
+			s.frame()
+			n++
+		}
+		return n
+	}
+
+	n := trip()
+	// The first frame of the step has no interval: the third late is its
+	// fourth
+	if !s.still || n != 4 {
+		t.Fatalf("every frame late: still %v after %d frames; want still after 4", s.still, n)
+	}
+	if !s.step.active || time.Since(s.step.pos.start) >= s.animated.step {
+		t.Fatalf("tripped after the step: active %v, %v since it started", s.step.active, time.Since(s.step.pos.start))
+	}
+	from := len(records())
+	s.frame()
+	if s.step.active {
+		t.Error("the frame after the trip: the step still moves")
+	}
+	loopIdle(s, func() bool { return false })
+	stepAtOnce(t, "the step tripped", records()[from:])
+	if src.overlay != 0 || src.interval != 0 {
+		t.Error("the live passes not stopped")
+	}
+
+	from = len(records())
+	pressKey(t, s, right)
+	loopIdle(s, func() bool { return false })
+	stepAtOnce(t, "the next step", records()[from:])
+	deactivate(s)
+
+	// A minute later: still, no fade-in, no live pass
+	*clock = clock.Add(time.Minute)
+	a.shown = nil
+	from = len(records())
+	activate(s)
+	pressKey(t, s, right)
+	loopIdle(s, func() bool { return false })
+	if !s.still || a.shown[0].fade != carousel.Opaque || src.on != 1 {
+		t.Errorf("the next activation: still %v, the first frame %+v, the passes asked for %d times; want still at once, none",
+			s.still, a.shown[0], src.on)
+	}
+	stepAtOnce(t, "the next activation", records()[from:])
+	deactivate(s)
+
+	// Five minutes after the frames slipped: the probe
+	*clock = clock.Add(4 * time.Minute)
+	a.shown = nil
+	activate(s)
+	if s.still || a.shown[0].fade == carousel.Opaque || src.on != 2 || s.auto.frames != 0 {
+		t.Errorf("the probe: still %v, the first frame %+v, the passes asked for %d times, %d frames counted; want a fade-in, the passes, a count anew",
+			s.still, a.shown[0], src.on, s.auto.frames)
+	}
+	if n := trip(); !s.still || n != 4 {
+		t.Errorf("the probe, every frame late: still %v after %d frames; want still after 4", s.still, n)
+	}
+	loopIdle(s, func() bool { return false })
+	deactivate(s)
+
+	all := records()
+	if n := count(all, "Animation still: the frames slip"); n != 2 {
+		t.Errorf("%d records of the frames, want 2", n)
+	}
+	for _, r := range all {
+		if r["message"] == "Animation still: the frames slip" && (r["level"] != "info" || r["late"] != 3.0 || r["frames"] != 3.0) {
+			t.Errorf("the record of the frames %v, want at info level with 3 late of 3", r)
+		}
+	}
+	if n := count(all, "Animation back"); n != 1 {
+		t.Errorf("%d records of the animation back, want 1", n)
+	}
+
+	// A step moving in the fade-out, tripped: the fade-out ends at once
+	f, _, _, _ := autoSelector(t, config.Default().Appearance, 12)
+	activate(f)
+	f.period = time.Nanosecond
+	pressKey(t, f, right)
+	f.setLive(false)
+	f.beginFade(true, time.Now(), time.Now())
+	for i := 0; i < 100 && !f.still; i++ {
+		f.frame()
+	}
+	if !f.still || f.fade.active {
+		t.Errorf("the fade-out with a step: still %v, fading %v; want still and ended", f.still, f.fade.active)
+	}
+	f.period = 7 * time.Millisecond
+	loopIdle(f, func() bool { return false })
+}
+
+// TestAnimationSettings checks K4 of specs/031-animation-auto for true and
+// false, and D1: true never still — a viewer connected, every frame late —
+// with no record; false as before, nothing moving, nothing looked for;
+// under cpu no auto
+func TestAnimationSettings(t *testing.T) {
+	const right = 0xFF53
+	records := logRecords(t)
+	viewer := func(ports []int) (int, bool) { return 5900, true }
+
+	on := config.Default().Appearance
+	on.Animation.Enabled = "true"
+	s, a, src, _ := autoSelector(t, on, 12)
+	s.auto.ports, s.auto.viewer = []int{5900}, viewer
+	activate(s)
+	s.period = time.Nanosecond
+	pressKey(t, s, right)
+	loopIdle(s, func() bool { return false })
+	s.period = 7 * time.Millisecond
+	if s.still || s.anim != s.animated || a.shown[0].fade == carousel.Opaque || src.on != 1 {
+		t.Errorf("true: still %v, options %+v; want animated", s.still, s.anim)
+	}
+	deactivate(s)
+
+	off := config.Default().Appearance
+	off.Animation.Enabled = "false"
+	s, a, src, _ = autoSelector(t, off, 12)
+	s.auto.ports, s.auto.viewer = []int{5900}, viewer
+	activate(s)
+	if s.still || s.anim != (animationOptions{}) || a.shown[0].fade != carousel.Opaque || src.on != 1 {
+		t.Errorf("false: still %v, options %+v, the passes asked for %d times; want nothing moving, the live thumbnails as before",
+			s.still, s.anim, src.on)
+	}
+	deactivate(s)
+
+	if n := count(records(), "Animation still: a VNC viewer connected") + count(records(), "Animation still: the frames slip") +
+		count(records(), "Animation back"); n != 0 {
+		t.Errorf("%d records of the setting under true and false, want none", n)
+	}
+
+	cpu, _ := keySelector(t, config.Default().Appearance, "q", 12)
+	cpu.initAnimations(config.Default().Appearance.Animation)
+	if cpu.auto.on {
+		t.Error("auto on without a presenter that composes")
 	}
 }

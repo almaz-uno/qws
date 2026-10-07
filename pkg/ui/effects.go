@@ -51,15 +51,22 @@ type animationOptions struct {
 }
 
 // parseAnimation reads the animations of a configuration. It returns a
-// warning for each effect name it does not know, for a negative duration and
-// for a zoom factor that is not a positive number — that of locate_zoom not
-// above 1 —, which it ignores: a negative duration as 0, a factor as its
-// default. With the animation off, or at a duration of 0, nothing moves; at a
-// hover duration of 0 the hover takes the duration; at a locate duration of
-// 0 the selection frame does not converge.
+// warning for a setting of enabled that is not auto, true or false, taken as
+// auto (specs/031-animation-auto), for each effect name it does not know, for
+// a negative duration and for a zoom factor that is not a positive number —
+// that of locate_zoom not above 1 —, which it ignores: a negative duration as
+// 0, a factor as its default. With the animation off, or at a duration of 0,
+// nothing moves; at a hover duration of 0 the hover takes the duration; at a
+// locate duration of 0 the selection frame does not converge. Under auto, the
+// animations are those of true: whether an activation is still is decided
+// as it starts (autoAnimation).
 func parseAnimation(a config.Animation) (animationOptions, []string) {
 	var o animationOptions
 	var warnings []string
+	mode, warning := a.Mode()
+	if warning != "" {
+		warnings = append(warnings, warning)
+	}
 	show, w := parseEffects("show", a.Show)
 	warnings = append(warnings, w...)
 	hide, w := parseEffects("hide", a.Hide)
@@ -89,7 +96,7 @@ func parseAnimation(a config.Animation) (animationOptions, []string) {
 		warnings = append(warnings, fmt.Sprintf("appearance.animation.locate_duration %v is negative: the selection frame does not converge onto its tile", ld))
 		ld = 0
 	}
-	if !a.Enabled || d == 0 {
+	if mode == config.AnimationOff || d == 0 {
 		return o, warnings
 	}
 	o.duration = d

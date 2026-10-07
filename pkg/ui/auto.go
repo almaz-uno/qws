@@ -1,8 +1,10 @@
 package ui
 
 import (
+	"fmt"
 	"time"
 
+	"github.com/almaz-uno/qws/internal/config"
 	"github.com/rs/zerolog/log"
 )
 
@@ -153,4 +155,87 @@ func (a *autoAnimation) become(reason string, port int) {
 	default:
 		log.Info().Str("was", was).Msg("Animation back")
 	}
+}
+
+// parseVNCPorts reads appearance.animation.vnc_ports: TCP ports, 1 to 65535;
+// it returns a warning for any other, which it leaves out
+func parseVNCPorts(ports []int) ([]int, []string) {
+	var kept []int
+	var warnings []string
+	for _, p := range ports {
+		if p < 1 || p > 65535 {
+			warnings = append(warnings, fmt.Sprintf("appearance.animation.vnc_ports: %d is not a TCP port, left out", p))
+			continue
+		}
+		kept = append(kept, p)
+	}
+	return kept, warnings
+}
+
+// initAnimations reads the animations of the configuration, and the setting
+// that decides whether an activation is animated: auto only on a presenter
+// that composes — under cpu nothing moves
+func (s *Selector) initAnimations(a config.Animation) {
+	anim, warnings := parseAnimation(a)
+	mode, _ := a.Mode() // its warning is among those of parseAnimation
+	ports, w := parseVNCPorts(a.VNCPorts)
+	warnings = append(warnings, w...)
+	for _, w := range warnings {
+		log.Warn().Msg(w)
+	}
+	s.animated = anim
+	s.auto = autoAnimation{on: mode == config.AnimationAuto && s.animator != nil, ports: ports}
+	s.setStill(false)
+	log.Debug().
+		Bool("composes", s.animator != nil).
+		Str("enabled", string(mode)).
+		Ints("vnc_ports", ports).
+		Dur("duration", anim.duration).
+		Dur("step", anim.step).
+		Dur("hover_duration", anim.hoverDuration).
+		Interface("show", anim.show).
+		Interface("hide", anim.hide).
+		Interface("hover", anim.hover).
+		Float64("overlay_zoom", anim.overlayZoom).
+		Float64("hover_zoom", anim.hoverZoom).
+		Dur("locate_duration", anim.locate).
+		Float64("locate_zoom", anim.locateZoom).
+		Msg("Animations")
+}
+
+// beginAnimation decides, at the start of an activation and before its
+// first frame, whether it is animated or still
+func (s *Selector) beginAnimation() {
+	s.setStill(s.auto.begin())
+}
+
+// setStill makes the animations of the activation those of the
+// configuration, or none while still — as enabled: false gives —, with the
+// durations of the motions of the step and of the fade
+func (s *Selector) setStill(still bool) {
+	s.still = still
+	o := s.animated
+	if still {
+		o = animationOptions{}
+	}
+	s.anim = o
+	s.step.pos.d, s.step.gx.d, s.step.gy.d = o.step, o.step, o.step
+	s.fade.level.d = o.duration
+}
+
+// stillNow makes the activation still in its middle, the frames having
+// slipped (D5): what moves — the step, the hover levels, the convergence of
+// the selection frame, a fade-in — is at its target in the next frame; a
+// fade-out ends at once, the overlay unmapped; the live passes stop
+func (s *Selector) stillNow() {
+	s.setStill(true)
+	s.locate.level.d = 0
+	for i, m := range s.hover.levels {
+		m.d = 0
+		s.hover.levels[i] = m
+	}
+	if s.fade.active && s.fade.out {
+		s.fade.active = false
+	}
+	s.setLive(false)
 }

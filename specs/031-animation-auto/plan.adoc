@@ -96,18 +96,20 @@ command written in the research; `TestSlipReplay` replays them into
 
 | `pkg/ui/auto.go`
 | New: `autoAnimation` — the start of an activation, the count, the probe,
-  the records —, `countsSlips`, the ports read.
+  the records —, `countsSlips`, the ports read; the selector's
+  `initAnimations`, `beginAnimation`, `setStill` and `stillNow`.
 
 | `pkg/ui/viewer.go`
 | New: the connections established on the ports, from `/proc/net/tcp` and
   `/proc/net/tcp6`.
 
 | `pkg/ui/selector.go`
-| `animated`, `still`, `auto`; `setStill`; `beginAnimation` and
-  `showFirst` in `Show`; the keys in the record "Animations".
+| `animated`, `still`, `auto`; `initAnimations` in `NewSelector`, with the
+  keys in the record "Animations"; `beginAnimation` and `showFirst` in
+  `Show`.
 
 | `pkg/ui/animation.go`, `pkg/ui/timing.go`, `pkg/ui/live.go`
-| The frames counted in `frame`, `stillNow`; the interval returned by
+| The frames counted in `frame`; the interval returned by
   `logAnimationFrame`; no live pass while still.
 
 | `pkg/ui/auto_test.go`, `pkg/ui/viewer_test.go`, `pkg/ui/testdata/`
