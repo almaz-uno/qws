@@ -1,0 +1,116 @@
+= 032 — the picture of the README with the convergence
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-07
+:status: draft
+:issue: 96
+
+== What and why
+
+The animated picture at the top of the README, `doc/images/qws.webp`, is
+made by `console/readme-demo` with `make readme-images` (specification
+029): a step of the carousel, `q` to the grid, a step of the grid, `q`
+back, its frames in motion composed of the layers of `pkg/carousel` as the
+presenter of `glx` composes them. It was made before specification 028:
+after `q` it shows the grid with its selection frame at rest at once.
+Since 1.5.0 qws shows more after a switch to the grid: the selection frame
+and the shadow of the selected tile start scaled by `locate_zoom` about the
+tile's centre and transparent, and within `locate_duration` shrink onto
+the tile and become opaque, eased out (028, D1). The picture shows
+behaviour qws no longer has — an open decision of 029.
+
+The specification is a delta to `develop` at `83a5551` (the notes of
+1.5.2). Unchanged: the code of qws — `cmd/`, `internal/`, `pkg/`; the
+stills `doc/images/carousel.png` and `grid.png`; every frame the picture
+has now, with its duration and in its order; `README.md` but for the
+description of the picture.
+
+== Decisions
+
+D1. *The convergence drawn as the presenter composes it.* After `q` the
+picture shows the frames of the convergence: each the scene of `gridItems`
+of `pkg/ui` — the shadow of the selected tile, the tiles, the selection
+frame — with the shadow and the frame at the look `locateLook` of `pkg/ui`
+gives them at that time: their level v = easeOut(t / d) of a motion from 0
+to 1 in the duration d (`easeOut`, `motion`); faded by v and zoomed by
+z + (1 − z)·v from the scale z (`effects.look` with both effects) about the
+centre of the tile (`zoomRect`); the tiles as they are. Each scene composed
+on the CPU as `present_glx_scene.go` composes it on the GPU, by the
+`composeScene` of 029. The program uses the exported API of `pkg/carousel`
+only, and `internal/config` for the defaults, as it does: the few lines of
+`pkg/ui` it follows are copied, as it copies `easeOut`, `carouselItems`
+and `placeLayer`, and a test holds the copy to their formula (K1).
+Rejected: exporting them from `pkg/ui`, the code of qws changed for a
+picture; frames read back from the presenter of `glx` itself, which needs
+an X server and a GPU that `make readme-images` does not.
+
+D2. *The defaults.* `locate_duration` 400 ms and `locate_zoom` 1.6, from
+`config.Default()`, as the program takes the duration of a step from it.
+No flag of the program for them.
+
+D3. *Frames at 20 ms,* as those of the steps: the scenes at t = 0, 20, …,
+380 ms from the key, 20 frames each shown 20 ms, the first at the key — in
+qws the switch presents the first frame of the convergence at once, the
+shadow and the frame transparent at the scale 1.6 —; from 400 ms the frame
+at rest of the grid, as qws presents its frame at rest once the level is
+1. The frames at rest held as long as now: the grid at rest 900 ms after
+the convergence, before the step down; the loop 0.4 s longer. Rejected:
+the hold of the grid shortened by 400 ms to keep the loop's length, which
+leaves the grid at rest half a second before the step.
+
+D4. *The picture as in 029.* Lossless WebP of `img2webp`, at most 3 MB —
+the program refuses a larger one; the frames at rest those of `cpu`; the
+same bytes on every run. The description of the picture in `README.md`, its
+`alt`, names the convergence.
+
+== Acceptance criteria
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| The scenes: `TestLocateFrames` in `console/readme-demo` — after the
+  switch to the grid, 20 scenes, at 0, 20, …, 380 ms; in the scene at t the
+  shadow of the selected tile and the selection frame at the alpha
+  v = 1 − (1 − t/d)³ and zoomed by z + (1 − z)·v about the tile's centre, at
+  d = 400 ms and z = 1.6 of `config.Default()`: the formula of `easeOut`,
+  `effects.look` and `zoomRect` of `pkg/ui`, to which `TestLocateScene` of
+  `pkg/ui` holds qws (028, K1). The alpha growing and the scale shrinking
+  at every frame; at t = 0 the alpha 0 and the scale 1.6, at d opaque at 1;
+  the tiles as at rest; nothing else in the scene.
+
+| K2
+| The frames at rest: every frame of the picture of `83a5551` in the new
+  one, pixel for pixel, with its duration and in its order; the frames
+  added, those of the convergence, of 20 ms each, between the carousel at
+  rest before `q` and the grid at rest after it — the frame after the last
+  of the convergence the grid at rest as before. Method: both pictures
+  decoded frame by frame with Pillow (`python3-pil`, which seeks animated
+  WebP), the RGBA of each frame compared.
+
+| K3
+| The picture: `qws.webp` at most 3 MB; 55 frames, 6.76 s — the 35 frames
+  and 6.36 s of 029 (Results, K2), 20 frames and 0.4 s more.
+
+| K4
+| The stills: `carousel.png` and `grid.png` byte for byte as committed.
+
+| K5
+| The same bytes: `make readme-images` twice, in a worktree of its own,
+  gives the committed `doc/images/` byte for byte.
+
+| K6
+| `go build ./...`, `gofmt -l` empty, `go vet ./...`, `make check-specs` and
+  `go test ./...` on every commit, in a worktree of its own.
+|===
+
+== Open decisions
+
+. The header of the pictures shows `v1.4.1`, the default of the program's
+  `-version`; another version changes the stills, a change of its own.
+. The open decisions 2 and 3 of 029 stay open: the constitution lists the
+  programs of `console/` and the targets of the build without
+  `readme-demo` and `make readme-images`; `doc/configuration.asciidoc`
+  gives `current` as the default of `windows.workspace`, the code `all`.
