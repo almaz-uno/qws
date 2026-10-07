@@ -138,3 +138,15 @@ func TestViewerConnected(t *testing.T) {
 		}
 	}
 }
+
+// BenchmarkViewerConnected measures the look for a viewer on the tables of
+// the system, for a port no connection is on (research of
+// specs/031-animation-auto, "The look for a viewer")
+func BenchmarkViewerConnected(b *testing.B) {
+	if _, err := os.Stat(tcpTables[0]); err != nil {
+		b.Skipf("no %s: %v", tcpTables[0], err)
+	}
+	for range b.N {
+		viewerConnected([]int{1})
+	}
+}

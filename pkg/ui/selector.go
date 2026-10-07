@@ -73,6 +73,7 @@ type Selector struct {
 	animated            animationOptions                // The animations of the configuration
 	still               bool                            // The activation is still under auto: a VNC viewer connected, or the frames slipped (specs/031-animation-auto)
 	auto                autoAnimation                   // What decides it
+	deciding            bool                            // The first frame of the activation decides whether it is still
 	frameDue            time.Time                       // When the next frame of an animation is due
 	uploaded            int                             // Bytes uploaded in the pause before that frame
 	animations          int                             // Animations so far, for the frame records
@@ -370,7 +371,8 @@ func (s *Selector) Show() (*x11.WindowInfo, error) {
 	if currentMonitor.Refresh > 0 {
 		s.period = time.Duration(float64(time.Second) / currentMonitor.Refresh)
 	}
-	// Animated or still, before its first frame (specs/031-animation-auto)
+	// Animated or still, decided before its first frame is presented, the
+	// viewer looked for meanwhile (specs/031-animation-auto)
 	s.beginAnimation()
 
 	// Check if monitor has changed or window needs recreation
@@ -508,9 +510,10 @@ func (s *Selector) Show() (*x11.WindowInfo, error) {
 }
 
 // showFirst presents the first frame of the activation, shown by the effects
-// of show when the presenter composes, and asks for the layers of the steps
+// of show when the presenter composes and the activation is animated, and
+// asks for the layers of the steps
 func (s *Selector) showFirst(thumbnails []image.Image) {
-	s.fade.pending = s.animator != nil && s.anim.show.any()
+	s.fade.pending = s.animator != nil
 	s.render(thumbnails)
 	if !s.fade.active {
 		// Shown at once
@@ -841,9 +844,13 @@ func (s *Selector) render(thumbnails []image.Image) {
 	}
 	drawEnd := time.Now()
 
-	// The first frame of an activation starts its appearance; while a fade
-	// runs, a frame drawn in full is presented through it
-	appears := s.fade.pending
+	// The first frame of an activation starts its appearance, when the
+	// activation is animated — decided now, the viewer looked for while the
+	// frame was drawn (specs/031-animation-auto); while a fade runs, a frame
+	// drawn in full is presented through it
+	s.decideAnimation()
+	appears := s.fade.pending && s.anim.show.any()
+	s.fade.pending = false
 	if appears {
 		s.beginFade(false, drawEnd, s.timing.start)
 	}

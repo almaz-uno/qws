@@ -99,6 +99,21 @@ than 1 MB — B 2, A at its 28th frame, but of such frames 1 of 416 is late
 in B and 32 of 417 in A, no more than of the others: the uploads do not
 make the frames late.
 
+== The look for a viewer
+
+`BenchmarkViewerConnected` (`pkg/ui/viewer_test.go`) reads the two tables
+as the switcher does, for a port no connection is on: on ws1 — 24 CPUs,
+249 lines in `/proc/net/tcp` and 37 in `/proc/net/tcp6` —, 5.3 ms a look,
+1000 looks, 2026-10-07. Benchmarks of the same reads, not kept: a table
+read whole in one call of 1 MB takes as long as through a `bufio.Scanner`,
+and the tables apart 2.8 ms the first, 2.4 ms the second, for seven times
+fewer lines. The time is the kernel's: for each table it walks
+its hash of connections, of a size by the memory of the machine, not by
+the connections in it. Not the 0.1 ms that D4 first said: a look made
+before the first frame would delay it by as much, so it is made while the
+frame is drawn — 27–52 ms on ws2 in the batches of the research — and
+waited for before it is presented.
+
 == The batches as test data
 
 `pkg/ui/testdata/vnc-a.txt` and `vnc-b.txt` hold of the two logs what the

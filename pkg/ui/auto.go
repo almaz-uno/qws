@@ -53,8 +53,17 @@ type autoAnimation struct {
 	next   int              // where the next frame counted goes in it
 	count  int              // late frames in it
 
-	slipped time.Time // when the frames slipped; zero: they did not, or a probe started since
-	reason  string    // why the activation is still: stillNot, stillViewer, stillFrames
+	slipped time.Time       // when the frames slipped; zero: they did not, or a probe started since
+	reason  string          // why the activation is still: stillNot, stillViewer, stillFrames
+	look    chan viewerLook // the viewer looked for in the background for the activation; nil: none
+}
+
+// viewerLook is a viewer looked for: its port, whether it is connected, and
+// how long the look took
+type viewerLook struct {
+	port int
+	ok   bool
+	took time.Duration
 }
 
 // now is the time of the clock
@@ -66,9 +75,10 @@ func (a *autoAnimation) now() time.Time {
 }
 
 // begin decides at the start of an activation, before its first frame,
-// whether it is still: while a viewer is connected (D4); else within
-// probeAfter of when the frames slipped — past it the activation is animated,
-// its count started anew: the probe (D6). Off, never.
+// whether it is still: while a viewer is connected (D4) — the look of
+// lookForViewer waited for, if one runs —; else within probeAfter of when the
+// frames slipped — past it the activation is animated, its count started
+// anew: the probe (D6). Off, never.
 func (a *autoAnimation) begin() bool {
 	if !a.on {
 		return false
@@ -89,23 +99,48 @@ func (a *autoAnimation) begin() bool {
 	return false
 }
 
-// viewerOn looks for a viewer connected on the ports, when there are any
-func (a *autoAnimation) viewerOn() (int, bool) {
-	if len(a.ports) == 0 {
-		return 0, false
+// lookForViewer starts looking for a viewer connected on the ports, when
+// there are any, in the background: the tables take some 5 ms to read on ws1,
+// the kernel walking its hash of connections for each (research), and they
+// are read while the first frame of the activation is drawn
+func (a *autoAnimation) lookForViewer() {
+	a.look = nil
+	if !a.on || len(a.ports) == 0 {
+		return
 	}
 	check := a.viewer
 	if check == nil {
 		check = viewerConnected
 	}
-	start := time.Now()
-	port, ok := check(a.ports)
+	ports, look := a.ports, make(chan viewerLook, 1)
+	go func() {
+		start := time.Now()
+		port, ok := check(ports)
+		look <- viewerLook{port, ok, time.Since(start)}
+	}()
+	a.look = look
+}
+
+// viewerOn is the viewer connected on the ports, when there are any: the
+// look started by lookForViewer, waited for, or one made now
+func (a *autoAnimation) viewerOn() (int, bool) {
+	if len(a.ports) == 0 {
+		return 0, false
+	}
+	if a.look == nil {
+		a.lookForViewer()
+	}
+	if a.look == nil {
+		return 0, false
+	}
+	r := <-a.look
+	a.look = nil
 	log.Debug().
 		Ints("ports", a.ports).
-		Bool("connected", ok).
-		Dur("check_ms", time.Since(start)).
+		Bool("connected", r.ok).
+		Dur("check_ms", r.took).
 		Msg("VNC viewer")
-	return port, ok
+	return r.port, r.ok
 }
 
 // frame counts a frame of an animation presented interval after the frame
@@ -203,9 +238,21 @@ func (s *Selector) initAnimations(a config.Animation) {
 		Msg("Animations")
 }
 
-// beginAnimation decides, at the start of an activation and before its
-// first frame, whether it is animated or still
+// beginAnimation starts deciding, at the start of an activation, whether it
+// is animated or still: the viewer is looked for while the first frame is
+// drawn, and render decides before it presents it (decideAnimation)
 func (s *Selector) beginAnimation() {
+	s.auto.lookForViewer()
+	s.deciding = true
+}
+
+// decideAnimation decides, before the first frame of the activation is
+// presented, whether the activation is animated or still
+func (s *Selector) decideAnimation() {
+	if !s.deciding {
+		return
+	}
+	s.deciding = false
 	s.setStill(s.auto.begin())
 }
 

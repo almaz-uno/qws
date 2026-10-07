@@ -54,7 +54,11 @@ connection established on a local port of
 `appearance.animation.vnc_ports`, `[5900]` by default, makes the
 activation still from its first frame — no fade-in. The viewer gone, the
 next activation is animated again, unless the frames slip (D5). An empty
-list checks nothing. Some 0.1 ms; no request to the X server.
+list checks nothing. Some 0.1 ms; no request to the X server. Measured in
+the plan: some 5 ms on ws1, the kernel walking its hash of connections for
+each table (research, "The look for a viewer"); the tables are read while
+the first frame is drawn, and the decision waits for them before it is
+presented.
 
 D5. *Frames that slip.* Counted over the frames of the steps of the
 carousel and of the grid, of the hover, of the convergence (028) and of

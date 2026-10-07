@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"image"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -609,5 +610,43 @@ func TestAnimationSettings(t *testing.T) {
 	cpu.initAnimations(config.Default().Appearance.Animation)
 	if cpu.auto.on {
 		t.Error("auto on without a presenter that composes")
+	}
+}
+
+// drawSignal is a renderer that says when it has drawn a frame of the
+// carousel
+type drawSignal struct {
+	*frameRecorder
+	drawn chan struct{}
+	once  sync.Once
+}
+
+func (d *drawSignal) Draw3DCarouselWithData(data []carousel.WindowData, selected, hover int, offset float64, cfg carousel.Config) *image.RGBA {
+	defer d.once.Do(func() { close(d.drawn) })
+	return d.frameRecorder.Draw3DCarouselWithData(data, selected, hover, offset, cfg)
+}
+
+// TestViewerWhileDrawn checks the look of D4 of specs/031-animation-auto as
+// the plan makes it: in the background while the first frame of the
+// activation is drawn, and waited for before it is presented
+func TestViewerWhileDrawn(t *testing.T) {
+	quietLog(t)
+	s, a, _, _ := autoSelector(t, config.Default().Appearance, 12)
+	d := &drawSignal{frameRecorder: s.renderer.(*frameRecorder), drawn: make(chan struct{})}
+	s.renderer = d
+	s.auto.ports = []int{5900}
+	waited := false
+	s.auto.viewer = func(ports []int) (int, bool) {
+		select {
+		case <-d.drawn:
+		case <-time.After(5 * time.Second):
+			waited = true
+		}
+		return ports[0], true
+	}
+	activate(s)
+	if waited || !s.still || len(a.shown) == 0 || a.shown[0].fade != carousel.Opaque {
+		t.Errorf("the look waited for the drawing %v; still %v, the first frame %+v; want the look while it is drawn, still from it",
+			!waited, s.still, a.shown)
 	}
 }

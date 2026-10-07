@@ -39,16 +39,19 @@ nothing moves and nothing is checked. While still, `setLive(true)` does
 nothing: no live pass.
 
 *The start of an activation* (D4, D6). `Show`, once it has read the
-refresh period and before the first frame — of a quick press too — asks
-`autoAnimation.begin`. A viewer — a line of `/proc/net/tcp` or
-`/proc/net/tcp6` in state `01` on a local port of `vnc_ports` — makes the
-activation still. Else the frames: still within five minutes of the time
-they slipped; past five minutes the activation is animated and its count
-starts anew — the probe, which a connected viewer defers: it says when it
-is gone. The first frame and its fade-in follow from `anim` as set
-(`showFirst`, out of `Show`, for the tests). The clock of the probe is a
-function of `autoAnimation`, which the tests replace; so is the check for
-a viewer.
+refresh period, starts looking for a viewer — a line of `/proc/net/tcp` or
+`/proc/net/tcp6` in state `01` on a local port of `vnc_ports` — in the
+background: the two tables take some 5 ms to read on ws1 (research, "The
+look for a viewer"), and the first frame some 30–50 ms to draw. `render`,
+once it has drawn the first frame — of a quick press too — and before it
+presents it, asks `autoAnimation.begin`, which waits for the look. A
+viewer makes the activation still. Else the frames: still within five
+minutes of the time they slipped; past five minutes the activation is
+animated and its count starts anew — the probe, which a connected viewer
+defers: it says when it is gone. The fade-in of the first frame follows
+from `anim` as set (`showFirst`, out of `Show`, for the tests). The clock
+of the probe is a function of `autoAnimation`, which the tests replace; so
+is the look for a viewer.
 
 *The count* (D5, O1). `logAnimationFrame` returns the interval it logs, 0
 for the first frame of an animation. `frame`, after a frame presented,
@@ -104,9 +107,10 @@ command written in the research; `TestSlipReplay` replays them into
   `/proc/net/tcp6`.
 
 | `pkg/ui/selector.go`
-| `animated`, `still`, `auto`; `initAnimations` in `NewSelector`, with the
-  keys in the record "Animations"; `beginAnimation` and `showFirst` in
-  `Show`.
+| `animated`, `still`, `auto`, `deciding`; `initAnimations` in
+  `NewSelector`, with the keys in the record "Animations"; `beginAnimation`
+  and `showFirst` in `Show`; the decision in `render`, before the first
+  frame is presented.
 
 | `pkg/ui/animation.go`, `pkg/ui/timing.go`, `pkg/ui/live.go`
 | The frames counted in `frame`; the interval returned by
