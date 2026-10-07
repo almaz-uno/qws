@@ -12,5 +12,5 @@
 . [x] T3. The key — D2 — and still in the selector — D1, D3 — with their
   documents; K1, K4, K5.
 . [x] T4. K6 on every commit, in a worktree of its own.
-. [ ] T5. The author's trial on ws2 over VNC: K7, O1.
-. [ ] T6. The results.
+. [x] T5. The author's trial over VNC — on ws1, where the author was connected: K7, O1.
+. [x] T6. The results.

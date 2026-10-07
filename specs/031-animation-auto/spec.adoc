@@ -3,7 +3,7 @@
 :toc-title: Contents
 :sectnums:
 :revdate: 2026-10-07
-:status: draft
+:status: implemented
 :issue: 92
 
 == What and why
@@ -152,10 +152,60 @@ probed every five minutes. `true`: as now, whatever slips. `false`: as now.
   disconnected.
 |===
 
+== Results
+
+Off the screen: the tests on ws1, the commits `2e10792` to `5e98e0c`, each
+in a worktree of its own. On the desktop: the author's trial on ws1 on
+2026-10-07, 11:39–11:48 — on ws1, where the author was connected by VNC to
+`X0tigervnc` on port 5900, not on ws2 —: the build of `5e98e0c` on Alt+F11
+beside the service, `--log-level debug`
+(`~/.cache/qws-trial-031/k7/log-ws1.txt` on ws1).
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | Met. `TestAnimationEnabled`, `TestVNCPorts`,
+  `TestAnimationEnabledFlag`, `TestRoundTrip`, `TestTagNames`,
+  `TestJoinedKeys`, `TestAnimationSources`, `TestAnimationDefaults`,
+  `TestAnimationFlags`, `TestParseAnimation`. On the configuration files of
+  ws1, ws2 and ws3, `config show` of the build: no warning, `enabled: auto`;
+  `false` from the variable and `on` from the flag read as they mean.
+| K2 | Met. `TestSlipReplay`: batch A goes still in its first activation,
+  at the 30th frame counted, the second step; batch B never — 1499 frames,
+  at most 2 late of 60. With the fade-out counted, B would go still in its
+  fourth activation (O1). `TestSlipCount` for the edges.
+| K3 | Met. `TestTCPLines`, `TestViewerConnected` on tcp4 and tcp6. The
+  check reads the tables in 4.3–6.2 ms on ws1 (5.3 ms in
+  `BenchmarkViewerConnected`), not the 0.1 ms the draft guessed: it runs
+  while the first frame is drawn (D4), `TestViewerWhileDrawn`.
+| K4 | Met. `TestStillViewer`, `TestStillFrames`, `TestAnimationSettings`.
+| K5 | Met. `TestScenes` with `testdata/scenes.json` unchanged,
+  `TestGLXPresenterMatchesCPU`, `TestLayers`, the tests of 007, 010, 020,
+  026 and 028.
+| K6 | Met. Every commit in a worktree of its own: build, `gofmt -l`, vet,
+  `check-specs`, `go test ./...`, `-race` of `pkg/ui`, `pkg/carousel`,
+  `pkg/snapshot`, `pkg/x11`; the rule of 021.
+| K7 | Met in its first part, the second otherwise. Eight activations:
+  with the viewer connected, still from the first frame, "Animation still:
+  a VNC viewer connected" — the author: all is well; the viewer gone, the
+  next animated in full, "Animation back was=viewer"; the next, the machine
+  loaded — a load average of 9.7, one interval of 83 ms — still by the
+  frames, "Animation still: the frames slip frames=60 late=3"; five minutes
+  later, the load gone, animated again at the probe, "Animation back
+  was=frames". Each change recorded once, no warning or error. The second
+  part — `vnc_ports: []` over VNC, still by the frames — was not tried on
+  the desktop: the frames of a viewer trip the count in the replay of K2,
+  and the count tripped on the desktop by a load.
+|===
+
+Not checked: `true` and `false` on the desktop, tests alone; Mesa (ws3);
+ws2.
+
 == Open decisions
 
-O1. *The fade-out in the count of D5.* Taken in the plan: not counted —
-then K2 holds on the batches of the research. The alternative, D5 as first
-written: counted, and batch B, without a viewer, goes still once, in its
-fourth activation, for five minutes; K2 would then have to say so. The
-author's to confirm with the trial (K7).
+O1. *The fade-out in the count of D5.* Taken in the plan and by the author
+on 2026-10-07: not counted, K2 holding on the batches of the research; with
+the check of D4 run while the first frame is drawn, and the viewer told by
+its port alone — a tunnel listening on a port of the list counts too, as
+the documentation says.
