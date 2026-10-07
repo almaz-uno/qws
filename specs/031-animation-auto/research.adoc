@@ -1,0 +1,57 @@
+= 031 — research
+:toc: left
+:toc-title: Contents
+:revdate: 2026-10-07
+
+The measurement the specification rests on, and how the animation is
+turned off now. `develop` at `4af8412` (1.5.1).
+
+== The frames over VNC
+
+ws2, 2026-10-07: 2560×1440 at 165 Hz (a period of 6.07 ms), RTX 5060 Ti;
+`X0tigervnc -display :0 -rfbport 5900 -localhost=1` serving the display,
+the viewer on ws1 through an ssh tunnel. A qws of the build of 030
+(`v1.5.1-9-ge8d2c79`) beside the service on Alt+F11, `--log-level debug`;
+`~/.cache/qws-vnc/batch.sh` on ws2 drove 15 activations by `xdotool`:
+Alt+F11, three steps by F11, Right, Escape, the modifier released. Batch A
+with the viewer connected, batch B after the author disconnected it, the
+same script; the records "Animation frame" read by kind
+(`~/.cache/qws-diag/vnc-A.txt`, `vnc-B.txt` on ws1).
+
+[cols="2,1,1,1,1,1",options="header"]
+|===
+| Kind, batch | Intervals | Above 1.5 periods | Above 1.25 periods | p95 interval, ms | Presenting above 1 ms
+| steps of the carousel, A | 1495 | 2.3 % | 9.8 % | 8.27 | 15.2 %
+| steps of the carousel, B | 1499 | 0.1 % | 0.5 % | 6.46 | 2.9 %
+| fade-out, A | 360 | 2.8 % | 8.9 % | 8.44 | 12.5 %
+| fade-out, B | 359 | 1.7 % | 2.5 % | 6.21 | 2.7 %
+| fade-in, A | 354 | 12.1 % | — | 12.34 | —
+| fade-in, B | 361 | 7.5 % | — | 11.81 | —
+|===
+
+The steps missed at least one interval in each of the 15 activations of A
+(1–4 of some 100), once in all of B. The fade-in misses without a viewer
+too: the first frame of an activation uploads a whole frame (007).
+
+Of a window of 60 frames of steps: intervals above 1.25 periods some 5.9
+with a viewer, 0.3 without. A threshold of 3: with Poisson counts,
+P(≥3 | 0.3) ≈ 0.4 %, P(≥3 | 5.9) ≈ 93 %.
+
+== The animation off now
+
+`appearance.animation.enabled: false` reaches `parseAnimation`
+(`pkg/ui/effects.go`), which leaves every duration 0: a step at once, no
+fade, no hover animation, no convergence of 028. The animator — the
+presenter that composes — stays: the layers are drawn, a switch of the
+layout is shown from them (028, D7). The key is a bool, its flag
+`--appearance-animation-enabled` a bool flag, default `true`. None of the
+configuration files of ws1, ws2 and ws3 sets it.
+
+== A VNC viewer
+
+A connected viewer is a TCP connection in the state ESTABLISHED on the
+local port the VNC server listens on: in `/proc/net/tcp` and
+`/proc/net/tcp6` a line of local port `170C` (5900) and state `01`. On ws2
+on 2026-10-07: `[::1]:5900 ← [::1]:47302`, `X0tigervnc`, the viewer through
+an ssh tunnel. ws2 also runs `Xvnc :1 -rfbport 15900`, a display of its
+own, which qws's service on `:0` does not serve.

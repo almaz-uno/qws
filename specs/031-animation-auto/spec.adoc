@@ -1,0 +1,136 @@
+= 031 — the animation on, auto and off
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-07
+:status: draft
+:issue: 92
+
+== What and why
+
+Over VNC the animation of the switcher stutters. Measured on ws2 with
+`X0tigervnc` serving its display (research): with a viewer connected, the
+steps of the carousel missed 2.3 % of their frame intervals against 0.1 %
+without, in every activation; 9.8 % of the intervals were above 1.25
+refresh periods against 0.5 %. The VNC server scrapes the screen about
+every 30 ms, and the frames wait for the X server; the viewer then gets a
+whole overlay to encode at every frame of a fade.
+
+The author, 2026-10-07: the animation setting on, auto and off; in auto,
+the animation off by itself when a VNC viewer is connected, and when the
+frames slip — both — with a probe now and then to turn it back on.
+
+The specification is a delta to `develop` at `4af8412` (1.5.1). Unchanged:
+the pictures at rest; the animation itself when it runs; `enabled: false`.
+
+== Decisions — recommended, for the author to confirm
+
+D1 (the author's). *Three settings.* On: the animation always, as
+`enabled: true` now. Off: never, as `enabled: false` now. Auto: on, but
+still while a VNC viewer is connected or while the frames slip.
+
+D2. *One key.* `appearance.animation.enabled` takes `auto`, `true` and
+`false` (`on` and `off` read as `true` and `false`); `auto` by default,
+written so by `config init`. A file that says `true` or `false` means what
+it meant. The flag `--appearance-animation-enabled` becomes a string,
+alone meaning `true` as now; the variable the same. None of the files of
+ws1–ws3 sets the key: all three take `auto`. Rejected: a key `mode` beside
+`enabled`, two keys of one thing.
+
+D3. *Still as off is.* Still, the switcher changes at once as with
+`enabled: false`: every duration 0, the switch of the layout from the
+layers (028, D7). And no live thumbnails: each pass presents the overlay
+again, a frame more for the VNC server to scrape and send, a load more for
+frames that slip.
+
+D4. *A viewer, before the first frame.* At the start of each activation,
+before its first frame, qws reads `/proc/net/tcp` and `/proc/net/tcp6`: a
+connection established on a local port of
+`appearance.animation.vnc_ports`, `[5900]` by default, makes the
+activation still from its first frame — no fade-in. The viewer gone, the
+next activation is animated again, unless the frames slip (D5). An empty
+list checks nothing. Some 0.1 ms; no request to the X server.
+
+D5. *Frames that slip.* Counted over the frames of the steps of the
+carousel and of the grid, of the hover, of the convergence (028) and of
+the fade-out — not of the fade-in, which misses without a viewer too, its
+first frame uploading a whole frame (research). An interval above 1.25
+refresh periods is late; 3 late of the last 60 such frames, the count
+carried across activations, make it still: what moves ends at once at its
+target, the rest of the activation and the next ones still. From the
+measurement: with a viewer some 5.9 late of 60, without 0.3 — tripped
+within two or three steps, falsely some 0.4 % of the windows.
+
+D6. *The probe.* Five minutes after it went still for the frames, the
+first activation is animated again, its count started anew: 60 frames
+with fewer than 3 late, animated from then on; 3 late, still for five
+minutes more. A viewer connected (D4) needs no probe: its connection says
+when it is gone.
+
+D7. *Said in the log.* A record at info level as the setting changes —
+"Animation still: a VNC viewer connected", "Animation still: the frames
+slip" with the count, "Animation back" — once per change, not per
+activation.
+
+== Behavior
+
+`auto`, nothing slow: as `true` now. A viewer connected: the next
+activation shows at once, steps at once, no live thumbnails; disconnected:
+animated again at the next activation. The frames slipping, from a load or
+a viewer on a port not listed: animated until 3 late of 60, then still,
+probed every five minutes. `true`: as now, whatever slips. `false`: as now.
+
+== Acceptance criteria
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| The key: `auto`, `true`, `false`, `on`, `off` from the file, the flag —
+  alone as `true` — and the variable; `auto` by default and from
+  `config init`; anything else a warning and `auto`. `TestRoundTrip`,
+  `TestTagNames`, the documentation, `config.yaml.example`.
+
+| K2
+| The detector on the measured frames: the intervals of the batches of the
+  research replayed into it, as test data — batch A trips it within its
+  first three activations, batch B never; and the edges: 2 late of 60 no,
+  3 yes, the fade-in not counted, the count carried across activations.
+
+| K3
+| The viewer: the parsing of `/proc/net/tcp` and `tcp6` lines — the local
+  port, the state, IPv4 and IPv6; and a socket of the test listening on a
+  free port of the list, a client connected — seen, closed — not.
+
+| K4
+| Still on the presenter of the tests of `pkg/ui`: a viewer at the start —
+  no fade-in, steps at once, no live pass; tripped in the middle of a step
+  — the step at its target in the next frame, the rest at once; the next
+  activation still; the probe at five minutes, a clock of the test —
+  animated, and still again on 3 late; `true` never still; the records of
+  D7 once per change.
+
+| K5
+| The pictures at rest and the animation when it runs unchanged:
+  `TestScenes` with `testdata/scenes.json` as it is,
+  `TestGLXPresenterMatchesCPU`, `TestLayers`, the tests of 007, 010, 026,
+  028 and 020.
+
+| K6
+| `go build ./...`, `gofmt -l` empty, `go vet ./...`, `make check-specs`,
+  `go test ./...` on every commit, each in a worktree of its own; `go test
+  -race` of `pkg/ui`, `pkg/carousel`, `pkg/snapshot`, `pkg/x11`; the rule
+  of 021.
+
+| K7
+| The author's trial on ws2: connected by VNC, Alt+Tab shows at once and
+  steps at once, a record says why; disconnected, the next activation
+  animated. With `vnc_ports: []`, connected: still within the first few
+  activations by the frames, and animated again at a probe once
+  disconnected.
+|===
+
+== Open decisions
+
+. D2–D7, for the author to confirm.
