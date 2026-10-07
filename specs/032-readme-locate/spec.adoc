@@ -3,7 +3,7 @@
 :toc-title: Contents
 :sectnums:
 :revdate: 2026-10-07
-:status: draft
+:status: implemented
 :issue: 96
 
 == What and why
@@ -104,6 +104,41 @@ same bytes on every run. The description of the picture in `README.md`, its
 | K6
 | `go build ./...`, `gofmt -l` empty, `go vet ./...`, `make check-specs` and
   `go test ./...` on every commit, in a worktree of its own.
+|===
+
+== Results
+
+2026-10-07, off the screen on ws1: the commits `372ad0d` and `876d175`,
+each in a worktree of its own. No trial on the desktop: the picture is
+drawn off the screen, and the author sees it in the pull request.
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | Met. `TestLocateFrames`: 20 scenes, at 0 to 380 ms; in each the
+  shadow and the frame within 1e-9 of the formula — the alpha 0 and the
+  scale 1.6 at the key, 0.271 and 1.4374 at 40 ms, 0.875 and 1.075 at
+  200 ms, 0.999875 and 1.000075 at 380 ms —, the alpha growing and the
+  scale shrinking at every frame; opaque at 1 at 400 ms; the tiles as at
+  rest, three items in every scene. The test fails with the level linear in
+  t, and with the scale zoom + (1 − zoom)·v².
+| K2 | Met. The pictures of `83a5551` and `876d175` decoded with Pillow
+  9.4.0: the 35 frames of the old in the new, their RGBA identical, their
+  durations and order the same; the frames 18 to 37 of the new, 20 ms each,
+  those of the convergence, between the carousel at rest before `q` (17)
+  and the grid at rest after it (38), counted from 1.
+| K3 | Met. `qws.webp` 2 237 672 bytes, 1 965 842 before; 55 frames,
+  6.76 s.
+| K4 | Met. `carousel.png`, 240 813 bytes, and `grid.png`, 300 990 bytes,
+  of the same SHA-256 as at `83a5551`.
+| K5 | Met. `make readme-images` twice in the worktree of each commit: the
+  three pictures the committed bytes each time.
+| K6 | Met. `go build ./...`, `gofmt -l` empty, `go vet ./...`, `make
+  check-specs` and `go test ./...` on both commits. On `372ad0d`, which
+  changes no code, `TestLiveAtRest` of `pkg/snapshot` failed once — no
+  picture drawn at rest in 1.5 s — and passed three times of three when run
+  again: the flaky test it is known to be.
 |===
 
 == Open decisions
