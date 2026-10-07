@@ -23,7 +23,11 @@ frames slip — both — with a probe now and then to turn it back on.
 The specification is a delta to `develop` at `4af8412` (1.5.1). Unchanged:
 the pictures at rest; the animation itself when it runs; `enabled: false`.
 
-== Decisions — recommended, for the author to confirm
+== Decisions
+
+D1 decided by the author on 2026-10-07; D2, D3 and D6 by the author the
+same day, each as recommended; D4, D5 and D7 made in the specification and
+taken with them.
 
 D1 (the author's). *Three settings.* On: the animation always, as
 `enabled: true` now. Off: never, as `enabled: false` now. Auto: on, but
@@ -133,4 +137,4 @@ probed every five minutes. `true`: as now, whatever slips. `false`: as now.
 
 == Open decisions
 
-. D2–D7, for the author to confirm.
+None.
