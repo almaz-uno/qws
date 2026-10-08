@@ -30,6 +30,18 @@ they need glibc 2.36 or newer and the OpenGL and X11 libraries.
 logged, and the documentation gives `all` as the default of
 `windows.workspace`, as the code has it.
 
+=== 1.6.1 — 2026-10-08
+
+*The first switch of an activation as quick as the others*
+(link:specs/033-texture-warmup/spec.adoc[specification 033]):
+
+* The first switch of the layout could take some 40 ms on NVIDIA, when it
+  brought into view a window drawn into its frame (xterm, Telegram, a
+  Flutter app on i3): the first live pass of that window bound a new
+  pixmap on the GPU, and the switcher's frames waited for it. The pixmap is
+  now made with the window's snapshot, while no switcher is shown: on ws2
+  the first switch took 5.6 ms instead of 37.8.
+
 == 1.5.0 — 2026-10-05
 
 *The selected tile shown after a switch to the grid*
