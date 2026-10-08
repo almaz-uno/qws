@@ -454,6 +454,12 @@ func run(cmd *cobra.Command, args []string) error {
 		}
 	} else {
 		defer snap.Close()
+		// The pixmaps of the live passes of the windows taken from their
+		// frames made at their snapshots, not beside the frames of an
+		// activation (specs/033-texture-warmup)
+		if cfg.Appearance.Thumbnail.Live && cfg.Appearance.Renderer == "glx" {
+			snap.PrepareLive()
+		}
 	}
 
 	// The windows of an activation from a model kept by events

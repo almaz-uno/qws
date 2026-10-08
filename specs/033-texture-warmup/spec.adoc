@@ -1,0 +1,233 @@
+= 033 — the first switch of the layout as quick as the others
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-08
+:status: implemented
+:issue: 99
+
+== What and why
+
+Since 028, while one layout is shown the other's layers are drawn and
+uploaded in the background, and a switch of the layout is shown from them
+at once: in the author's trial on ws2 (2026-10-05), 0.37–2.43 ms from the
+key to the first frame — but the first switch, to the grid, took 37.8 ms:
+its scene drawn in 8.2 ms, presented in 29.3 ms, nothing uploaded (028,
+Results, K6). Its open decision guessed the cause: the driver placing a
+texture at its first use, so that the first frame sampling the grid's
+layers pays for it; the issue (#99) asks for the first switch as quick as
+the others, the textures used once off the frame — warmed up — should that
+be it.
+
+What the research found:
+
+* *Not the textures.* Off the screen on ws1 the first switch of an
+  activation, the grid's layers uploaded and never drawn, takes what the
+  later switches take: 1.6–2.0 ms from the key at p50, 2.3–3.1 ms at p95,
+  presenting the same (T1). In the trial itself, the carousel's layers of
+  the same sizes, uploaded alike, were first sampled at the switch back
+  and presented in 0.25 ms. A draw of each layer after its upload would
+  pay for nothing measured.
+* *A live pass beside the frame.* The trial was the first activation of a
+  fresh process, and its first switch brought into view a window taken
+  from its frame (022) that had changed while out of view. The new list of
+  the windows shown, given by the switch's frame, woke the snapshotter,
+  which made the window's pass at once — beside the frame — and its first
+  pass of the process makes and binds on the GPU the pixmap the window is
+  scaled into (023): 40 ms of the snapshotter's thread, from the key to
+  1–6 ms after the frame.
+* *The binding holds the frames.* Off the screen on ws1, frames presented
+  beside such a first pass are held by the binding of its new pixmap —
+  not by the rest of the pass: up to 16 ms at p95, beyond two refresh
+  periods, in some stretches; as alone in others, the binding's cost
+  varying with the state of the host from 1 to 34 ms (research).
+
+The change: the binding is not made beside the switcher's frames. The
+pixmap a window taken from its frame is scaled into for its live passes is
+made and bound at the window's snapshot, while no switcher is shown —
+warmed up before the activation — so that its first pass in an activation
+binds nothing. The slug keeps the issue's name: the warm-up is of that
+pixmap's texture, not of the layers'.
+
+The specification is a delta to `develop` at `1a6dbc8` (1.6.0). Unchanged:
+every frame of the switcher — `pkg/ui` and `pkg/carousel` are not touched;
+the pictures of the snapshots and of the live passes; which windows are
+passed and when (020's schedule); the pixmap itself, its size and its
+binding, but for when they are made; the configuration — no key, variable
+or flag changes.
+
+== Decisions
+
+None taken by the author yet. Each lists its options and the one
+recommended — taken by the author with the trial, 2026-10-08.
+
+D1. *Where the pixmap of the passes is made.* Recommended: at a snapshot
+on change of a window taken from its frame, when it has none of its
+thumbnail's size — its first snapshot, or after its size changed. The
+snapshots on change are taken only while no switcher is shown (007, 011,
+020): no frame of qws is presented meanwhile. Not at the snapshot of an
+activation (`Refresh`), which may run beside its first frame. The pixmap
+and its binding cost the snapshotter's thread 1–31 ms (research) once per
+window and size, as they do now at the first pass; the pixmap, at most
+1 MB in the X server, is kept as now from the first pass. A failure to
+make it leaves it to the first pass, as now; a binding that fails turns
+the passes from frames off for the session, said once, as at a pass.
+What stays: a window first captured by an activation's `Refresh` — new
+within the settle of a snapshot before it — or whose size changed while
+the switcher is shown gets its pixmap at its first pass, as now.
+
+Alternatives:
+(b) the passes of the windows that come into view with a switch held off
+its frame — the snapshotter woken after the frame, not by it, and the
+passes waiting for the frames to stop: only the switch's first frame
+spared; the binding then lands in the pause after the convergence, or
+under a key pressed meanwhile;
+(c) the issue's: each layer texture used once off the frame after its
+upload, by a draw into a small scratch framebuffer: rejected — no cost of
+a layer's first use was measured (research), and the draws would cost the
+pauses of the animations for nothing.
+
+D2. *Only with the live thumbnails.* Recommended: the snapshotter makes the
+pixmaps only when told, before its first snapshots, that the live
+thumbnails will be asked for: qws tells it at start when
+`appearance.thumbnail.live` is on and the renderer is `glx` — the
+conditions of 020 that the configuration decides. Should the presenter
+then not share the snapshotter's context, the live thumbnails are off
+(020) and the pixmaps are made for nothing: 4 of the 35 client windows of
+ws1 are taken from their frames. Alternative: always, whatever the
+configuration — a pixmap and a binding per such window for nothing with
+the live thumbnails off.
+
+== Behavior
+
+None the user sees but the time of the first switch: with the live
+thumbnails on, the first live pass of a window taken from its frame, in
+an activation, binds no new pixmap beside the frames, and a switch that
+brings it into view presents its first frame within a refresh period, as
+the later switches do. The record "Pixmap of the live passes made", at
+debug level, with its window, size and time, follows the record
+"Snapshot" that made it.
+
+== Metrics
+
+L:: time from the key of a switch to the presenting of its first frame:
+`total_ms` of the record "Frame" of cause `key` after "Switching layout";
+of the first switch of an activation, and of the later ones.
+H:: off the screen, the longest frame of the presenter beside the first
+live pass of a window taken from its frame, as for a window new to the
+process, and the pass on the snapshotter's thread
+(`BenchmarkFirstPassBeside`).
+B:: where the binding goes: the snapshot that makes the pixmap, its time.
+
+== Acceptance criteria
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| H off the screen on ws1, `BenchmarkFirstPassBeside` with the pixmap made
+  at the snapshot (D1): the longest frame beside the first pass within a
+  refresh period of E1, 6.94 ms, at p95 over 20 rounds, in each of three
+  runs; and in the same runs the variant with the pixmap made at the pass,
+  as before, to show whether the host was binding slowly then — before,
+  7.5–7.9 ms at p50 and 14.1–16.4 ms at p95 in such a stretch (research).
+
+| K2
+| D1 and D2 in `pkg/snapshot`, a test on windows off the screen: told of
+  the live thumbnails, a snapshot on change of a window taken from its
+  frame makes and binds its pixmap of the thumbnail's size; its first pass
+  binds none, and its picture is, byte for byte, that of a pass whose
+  pixmap was made at the pass; a snapshot of an activation makes none;
+  not told, none — the pass makes it, as now; at another size, the next
+  snapshot makes it anew; a binding that fails at a snapshot keeps the
+  snapshot, turns the passes from frames off, and no pass is made from a
+  frame.
+
+| K3
+| L off the screen, `BenchmarkE1FirstSwitch`: the first switch within a
+  refresh period of the key at p95 once the layers are there, and the
+  later switches as before within noise — before, 2.3–3.1 ms and
+  2.5–3.1 ms at p95 (research). It has no snapshotter: it shows that the
+  switcher's own first switch is not slower, before and after.
+
+| K4
+| Unchanged: the frames — `TestGLXPresenterMatchesCPU`, `TestLayers`,
+  `TestScenes` with `testdata/scenes.json` unchanged; the snapshots and the
+  passes, their pictures and requests — every test of `pkg/snapshot` as
+  it is.
+
+| K5
+| The count of 031 not tripped by the change: no binding of D1 runs beside
+  a frame of the switcher — the snapshots on change are paused while it is
+  shown (`cmd/qws/root.go`), and the snapshot of an activation makes none
+  (K2) — and a frame beside a first pass is within a refresh period at
+  p95 (K1), below the 1.25 periods that count a frame late.
+
+| K6
+| `go build ./...`, `gofmt -l` empty, `go vet ./...`, `make check-specs`,
+  `go test ./...` on every commit, in a worktree of its own; `go test
+  -race` of `pkg/ui`, `pkg/carousel`, `pkg/snapshot` and `pkg/x11`; the
+  rule of 021.
+
+| K7
+| The author's trial on ws2, as that of 028: the build on Alt+F11 with the
+  service stopped, `--log-level debug`, a fresh process; in its first
+  activation, after the fade-in, `q` with a window taken from its frame
+  coming into view with the grid: L of that first switch within a
+  refresh period, 6.07 ms at 165 Hz, and the window's first "Live" record
+  after it not of some 40 ms; the records "Pixmap of the live passes made"
+  at the start of the process, before the activation. Open.
+|===
+
+== Results
+
+Off the screen: the benchmarks and tests on ws1, the commits `a3d4a9b` to
+`11093af`, each in a worktree of its own (research). On the desktop: the
+author's trial on ws2 on 2026-10-08 at 12:12 — 2560×1440 at 165 Hz (a
+period of 6.07 ms), no VNC viewer —, the build of `11093af` on Alt+F11
+beside the service, not with it stopped: the pixmap of a pass is qws's own,
+which the service does not hold; `--log-level debug`, a fresh process
+(`~/.cache/qws-trial-033/log-ws2.txt` on ws1).
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | Met. `BenchmarkFirstPassBeside`, both ways in the same runs: the
+  frames next to the first pass p95 2.3–3.4 ms after, 13.8–15.1 ms before.
+| K2 | Met. `TestPrepareLive`, which fails with the call taken out of the
+  snapshot or let at an activation's refresh.
+| K3 | Met. `BenchmarkE1FirstSwitch`: the first switch p95 1.9–2.4 ms, the
+  later 1.6–2.0 ms.
+| K4 | Met. `pkg/ui` and `pkg/carousel` untouched; the tests of
+  `pkg/snapshot` pass as they are; `testdata/scenes.json` unchanged.
+| K5 | Met, by construction and K1: the pixmaps are made at the snapshots
+  on a change, paused while a switcher is shown, not at an activation's
+  refresh.
+| K6 | Met. Every commit in a worktree of its own: build, `gofmt -l`, vet,
+  `check-specs`, `go test ./...`, `-race` of `pkg/ui`, `pkg/carousel`,
+  `pkg/snapshot`, `pkg/x11`; the rule of 021.
+| K7 | Met. At the start of the process, before any activation, "Pixmap of
+  the live passes made" for the two windows taken from their frames, in 29
+  and 46 ms. The first switch to the grid of the first activation: 5.64 ms
+  from the key to the presenting of its frame (5.55 ms of it presenting),
+  against 37.8 ms in the trial of 028; the four switches after, 1.13–6.41
+  ms. The first "Live" records of the two windows after it 5.6 and 2.8 ms,
+  against some 40 ms with the binding. No warning or error.
+|===
+
+Not checked: E1 on the desktop, Mesa (ws3).
+
+== Open decisions
+
+. The first scene of a process: some 0.4–1.2 ms dearer off the screen on
+  ws1 (research); on the screen not told apart from what ran beside it.
+  Should K7 show the first switch still slow with no first pass beside it,
+  the next suspect.
+. The windows the change leaves to their first pass — new within a
+  settle of an activation, or resized while the switcher is shown — and
+  the windows with a pixmap of their own bound at an activation's
+  `Refresh`, beside its first frame: not measured.
+. What makes the binding cost 1 ms in some stretches and 30 ms in others
+  is not established (research).

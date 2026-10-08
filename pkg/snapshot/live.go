@@ -181,6 +181,20 @@ func nextPass(waiting []liveSchedule, n int, lastPass time.Time, interval time.D
 	return best, at, true
 }
 
+// PrepareLive tells the snapshotter that the switcher will ask for live
+// thumbnails: from then on a snapshot of a window taken from its frame — but
+// that of an activation — also makes the pixmap its live passes scale it
+// into and binds it on the GPU, ahead of its first pass. Binding a new pixmap
+// holds the frames the presenter draws meanwhile, up to two refresh periods
+// off the screen on ws1, and the pass of a window that comes into view with a
+// switch of the layout is made beside the switch's first frame; the snapshots
+// are taken while no switcher is shown (specs/033-texture-warmup). qws calls
+// it at start, before the first snapshots, when the configuration asks for
+// the live thumbnails.
+func (s *Snapshotter) PrepareLive() {
+	s.prepareLive.Store(true)
+}
+
 // SetLive starts the live thumbnails for the switcher whose overlay is
 // shown, a window passed at most once an interval, or, with overlay 0, ends
 // them. In between, no snapshot is taken on change. The windows passed are
@@ -627,6 +641,30 @@ func (s *Snapshotter) scaledFor(w *window, tw, th int) (*scaledPixmap, error) {
 		return nil, err
 	}
 	return sp, nil
+}
+
+// prepareScaled makes, at a snapshot of a window taken from its frame, its
+// scaled pixmap of its thumbnail's size, bound on the GPU, when the switcher
+// will ask for live passes (PrepareLive), the passes from frames are possible
+// and the window has none of that size (specs/033-texture-warmup). A failure
+// is left to the first pass, which meets it again; a pixmap that does not
+// bind turns the passes from frames off, as at a pass.
+func (s *Snapshotter) prepareScaled(w *window) {
+	if w.via == 0 || !s.prepareLive.Load() || s.render == nil || s.noScaled {
+		return
+	}
+	tw, th := thumbSize(w.width, w.height)
+	if sp := w.scaled; sp != nil && sp.width == tw && sp.height == th {
+		return
+	}
+	start := time.Now()
+	if _, err := s.scaledFor(w, tw, th); err != nil {
+		log.Debug().Err(err).Uint32("window", uint32(w.id)).
+			Msg("Pixmap of the live passes not made at the snapshot: made at the first pass")
+		return
+	}
+	log.Debug().Uint32("window", uint32(w.id)).Int("width", tw).Int("height", th).
+		Dur("ms", time.Since(start)).Msg("Pixmap of the live passes made")
 }
 
 // dropScaled frees the window's scaled pixmap and what goes with it

@@ -78,6 +78,10 @@ type Snapshotter struct {
 	quit     chan struct{}
 	done     chan struct{}
 
+	// PrepareLive was called: the snapshots of the windows taken from their
+	// frames make the pixmaps of their live passes (specs/033-texture-warmup)
+	prepareLive atomic.Bool
+
 	// Owned by the loop
 	windows map[xproto.Window]*window
 	frames  map[xproto.Window]xproto.Window // frame of the window manager → its client
@@ -737,6 +741,10 @@ func (s *Snapshotter) capture(w *window, cause string) {
 		return
 	}
 	logSnapshot(w, path, cause, start)
+	if cause != causeActivation {
+		// Not beside the first frame of an activation (specs/033-texture-warmup)
+		s.prepareScaled(w)
+	}
 }
 
 // captureHeld takes the last snapshot of a window hidden with a change not

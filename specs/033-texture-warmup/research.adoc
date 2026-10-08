@@ -1,0 +1,278 @@
+= 033 — research
+:toc: left
+:toc-title: Contents
+:revdate: 2026-10-08
+
+What held the first switch of the trial of 028, what the issue suspected
+and the measurements that refute it, and the figures the specification
+quotes, with where they come from. `develop` at `1a6dbc8` (1.6.0).
+
+== The first switch of the trial of 028
+
+The author's trial of 028 on ws2, 2026-10-05 12:13 — 2560×1440 at 165 Hz,
+a period of 6.07 ms, an RTX 5060 Ti with the driver 580.105.08, 39
+windows, the live thumbnails on at an interval of 50 ms; the build of
+`98594a8` on Alt+F11, the service stopped (`log-ws2.txt`, a copy in
+`~/.cache/qws-trial-028/` on ws1). The whole trial is one activation, the
+first of a fresh process (`cold=true`). Its five switches, each with the
+layers of the layout switched to held, from the record "Frame" of cause
+`key` after each "Switching layout", times from the start of the
+activation:
+
+[cols="1,1,1,1,1,1",options="header"]
+|===
+| At, ms | To | `draw_ms` | `present_ms` | `total_ms` | Before it
+| 1782.0 | the grid | 8.22 | 29.33 | 37.79 | the fade-in, the carousel at rest
+| 4176.8 | the carousel | 0.05 | 0.25 | 0.46 | the convergence, the grid at rest
+| 8627.9 | the grid | 0.38 | 0.37 | 0.86 | steps of the carousel
+| 13321.2 | the carousel | 0.03 | 0.27 | 0.37 | the convergence, steps of the grid
+| 16478.7 | the grid | 1.42 | 0.79 | 2.43 | steps of the carousel
+|===
+
+What is first at the first switch, and not at the others:
+
+* *The first scene of the process.* No step, hover or switch came
+  before it: the carousel was shown by frames of the CPU — the fade-in,
+  then the frame at rest again for the live pictures. It is the first
+  `PresentScene` of the process, the first draw of the scene program.
+* *The first sampling of the grid's layers.* Its base, of 2520×1400, and
+  its tiles were uploaded in the pauses of the fade-in, 1.1 s before
+  (`uploaded_kb` 13781 and 12332 at two of its frames), and never drawn —
+  the issue's suspicion: the driver places a texture at its first use, and
+  the first frame that samples it pays.
+* *A live pass beside it.* The record after its frame:
+  `Live done_ms=41.36 ms=40.19 since_change_ms=1588.83 window=130023431`
+  — a pass of 40 ms of the snapshotter's thread, of a window of 2556×1392
+  taken from its frame by RENDER (022), changed 1.6 s before. Logged
+  between the frames of 1782.56 and 1788.79 ms, it began between 1741 and
+  1748 ms, and the key was read at 1744.2 ms: the pass began with the
+  switch and ended 1–6 ms after its frame. The window was not in view in
+  the carousel — passed there, it would have been passed from 753 ms, the
+  end of the fade-in — and came into view with the grid: `BeginFrame` of
+  the switch's frame, with the new list of the windows shown, wakes the
+  snapshotter (020), and the frames do not come one after another then, so
+  the pass is made at once. It is the window's first pass of the process:
+  its pass makes and binds the pixmap it is scaled into (023), kept from
+  then on for the window.
+
+Against the suspicion, the log itself: the carousel's layers — its base,
+of 2520×1400 too, and its cards at the selection — were uploaded in the
+background as well, and first sampled at the switch back to the carousel
+at 4176.8 ms, the grid shown at rest until then: presented in 0.25 ms. Another window taken from its frame,
+`23068676`, had its first pass when the convergence ended:
+`Live done_ms=40.82 ms=39.12` — 39 ms again, with no frame beside it.
+
+The `draw_ms` of 8.22 ms, the items of the scene and the pictures taken
+for it, is not split further; of it, the geometry of the live tiles is
+made at the first frame of the grid of an activation, `GridLive` —
+0.47–2.91 ms on ws1 for the 33 windows of E1, the first call the longest.
+
+== Off the screen: the first switch (T1)
+
+[cols="1,3"]
+|===
+| Host | ws1, the host of E1: Intel Core i9-7920X, 12 cores, 24 threads;
+  NVIDIA GeForce RTX 4080 SUPER, driver 580.105.08; Debian 12, Linux 6.12,
+  i3, picom of the GLX backend; Go 1.26.0
+| Code | `develop` at `1a6dbc8` and `BenchmarkE1FirstSwitch` in `pkg/ui`,
+  committed after this document, before any change of the code
+| Selector | That of `BenchmarkE1Switch` (028) — the overlay of E1,
+  2520×1400 at 144 Hz, a period of 6.94 ms; 33 windows with thumbnails of
+  512×288; the author's appearance, the defaults of the animations, the
+  layout key `q` — with the live thumbnails of the fake snapshotter of
+  `BenchmarkE1Memory` (030): four windows' pictures, newer every 1/30 s
+| Presenter | The GLX presenter on a window of 2520×1400 mapped off the
+  screen, left of it, mapped and unmapped as an activation does; logging
+  at debug level into the benchmark, which reads the records, so that the
+  presenter waits for the GPU at the end of a frame as in the trials
+| An activation | As `Show` and `FadeOut` make one: the layers dropped,
+  the first frame through the fade-in; 400 ms, then `q` four times 600 ms
+  apart — the grid, the carousel, the grid, the carousel — the loop of
+  `handleEventsSync` run between the keys as it runs while no event comes;
+  the fade-out, the overlay unmapped, 500 ms. Each switch finds the layers
+  of its layout held (`layers=true`)
+| Measured | `present_ms` and `total_ms` of the record "Frame" of cause
+  `key` after each "Switching layout": of the first switch of each
+  activation, and of the three later
+| Not measured | A snapshotter: no passes, no captures, no binding
+|===
+
+`go test ./pkg/ui -run '^$' -bench E1FirstSwitch -benchtime 20x -count 3`,
+2026-10-08 09:04, load average 1.4–2.0: three runs of 20 activations, in
+ms.
+
+[cols="1,1,1,1,1,1,1,1,1",options="header"]
+|===
+| Run | first `present` p50 | p95 | first `total` p50 | p95 | later `present` p50 | p95 | later `total` p50 | p95
+| 1 | 1.39 | 1.66 | 2.03 | 2.80 | 1.38 | 1.72 | 1.53 | 3.10
+| 2 | 1.35 | 1.69 | 1.94 | 3.06 | 1.33 | 2.22 | 1.45 | 2.91
+| 3 | 0.96 | 1.24 | 1.63 | 2.26 | 0.86 | 2.05 | 1.05 | 2.55
+|===
+
+Off the screen the first switch is not slower than the later ones: its
+presenting the same, its total some 0.5 ms more — the drawing of its
+items, the live tiles' geometry among them — and within a refresh period
+at p95 in every run.
+
+The first scene of a process. An earlier form of the benchmark, without
+the live thumbnails, run as a fresh process three times with the driver's
+shader cache off (`__GL_SHADER_DISK_CACHE=0`), three activations each,
+08:47: the first switch of the first activation 0.79, 0.73 and 1.56 ms
+from the key, the later switches of the same activation 0.32–0.44 ms —
+the first scene of a process some 0.4–1.2 ms dearer off the screen, not
+29 ms. On the desktop of ws1 the first scenes of fresh processes of the
+author's trials presented in 6.3 ms (031, a step) and 8.9 ms (026, a
+hover), the next in 0.4 and 0.8 ms: dearer on the screen, by an amount
+these logs cannot tell apart from what ran beside them.
+
+The layers' textures. The first switch samples the grid's tiles and base,
+uploaded and never drawn, as in the trial — and presents in the time of
+the later switches. No cost of the first use of a layer's texture is seen
+off the screen, nor on ws2 at the switch back to the carousel: the
+suspicion of the issue is refuted for the layers, and a draw of each
+layer after its upload would pay for nothing measured.
+
+== The first live pass of a window taken from its frame
+
+A window drawn into its frame's pixmap — of depth 24 in a frame of depth
+24: xterm, Dion, Telegram, KeePassXC on ws1 (022) — takes live passes by
+RENDER into a pixmap of qws's own of its thumbnail's size, bound on the
+GPU as a texture (`scaledFor`, `pkg/snapshot/live.go`, 023). The pixmap
+and its binding are made at the window's first pass and kept while the
+window keeps its size, across activations; the RENDER chain of the pass
+is made at its first pass of each activation. A window with a pixmap of
+its own is bound at its snapshots (008) — on change, or at the `Refresh`
+of an activation when its pixmap is new — and only bound again by its
+passes.
+
+=== The steps of the first pass
+
+Probes off the screen, not kept: the snapshotter of the tests of 022
+(`frameSnapshotter`) on the thread of the test, a GLX presenter sharing
+its context on a thread of its own presenting frames one after another —
+the last frame again and `glFinish`, a millisecond apart — from 5 ms
+before a step of the pass to 60 ms after; per window, a new client of
+2556×1392 in a frame off the screen, captured once by RENDER; six windows
+a run. 2026-10-08 08:49–08:56, load average 2.5–3.2:
+
+[cols="2,2,2",options="header"]
+|===
+| What runs beside the frames | Its time, ms | Longest frame beside it, ms
+| nothing | — | 0.24–0.36
+| the first pass | 8.9–34.4 | 4.9–15.8
+| the X pixmap of 32 bits made (`CreatePixmap`) | 0.11–0.34 | 0.20–0.47
+| its binding on the GPU (`BindPixmap`) | 1.2–25.9 | 0.3–15.2; once 76.9
+| the first pass, its pixmap made and bound before | 1.0–2.1 | 0.5–4.0
+|===
+
+The pass holds the frames by the binding of its new pixmap — what
+`glXCreatePixmap` and `glXBindTexImageEXT` do in the driver and the X
+server — and not by its other work: a pass whose pixmap is already bound
+costs 1–2 ms and the frames beside it little.
+
+=== The frames beside the first pass (T1)
+
+`BenchmarkFirstPassBeside` in `pkg/snapshot`, committed after this
+document, before any change of the code: the same presenter and frames;
+one window of 2556×1392 in a frame off the screen, whose rounds forget
+what its passes made — its pixmap, its chain, its live textures, as for a
+window new to the process — then capture it as a snapshot on change, with
+no frame presented, and make its first pass beside the frames. Per round:
+the snapshot, the pass on the snapshotter's thread, the longest frame of
+the 65 ms beside it and of as long a stretch with no pass just before.
+
+`go test ./pkg/snapshot -run '^$' -bench FirstPassBeside -benchtime 20x`,
+in ms, p50 / p95 over 20 rounds:
+
+[cols="2,2,2,2,2",options="header"]
+|===
+| Run | Snapshot | Pass | Frame beside it | Frame alone
+| 09:02, load 1.7–2.2 | 2.10 / 3.64 | 3.47 / 6.23 | 0.70 / 1.14 | 0.30 / 1.04
+| 09:09, load 3.0, 1 | 1.37 / 2.73 | 12.50 / 21.58 | 7.48 / 16.44 | 0.29 / 1.12
+| 09:09, 2 | 1.35 / 2.57 | 13.57 / 24.07 | 7.92 / 15.14 | 0.33 / 1.00
+| 09:09, 3 | 3.03 / 4.15 | 17.72 / 23.32 | 7.75 / 14.05 | 1.20 / 1.90
+|===
+
+The binding's cost varies with the state of the host: in some stretches
+2–8 ms with the frames beside it as alone, in others 4–34 ms with the
+frames held up to 16 ms — beyond two refresh periods of E1. What makes the
+difference is not established: the desktop and other agents' sessions ran
+meanwhile, 24 of the 32 GiB of swap were in use at 09:09, and a load of
+RENDER in the X server beside the benchmark (`BenchmarkFrameRender`, 3000
+captures) did not slow it in a quick stretch. On ws2 the trial's two first
+passes took 39 and 40 ms.
+
+The first switch of the trial is so explained in kind: a binding beside
+its frame, the frame held until it was done. Not reproduced at the level
+of the switcher off the screen: a real snapshotter in `pkg/ui` would
+capture the author's windows and bind them beside the service's.
+
+== Where the binding can go
+
+The snapshots on change are paused from before `Show` to after `FadeOut`
+(`cmd/qws/root.go`, 007 and 011) and taken in the snapshotter's loop
+while no live session runs (020): a snapshot on change never runs beside
+a frame of the switcher. `Refresh`, the snapshot of the changed windows
+at an activation, runs before its first frame and may still run beside it
+— it waits for them 20 ms at most. Made at a snapshot on change, the
+pixmap of a window's passes and its binding cost the snapshotter's thread
+the binding — 1–31 ms (above) — at the window's first snapshot and after
+a change of its size, while nothing of qws is shown.
+
+The pixmap is 4 bytes a pixel of the thumbnail's size, at most 512×512 —
+1 MB — in the X server; for a window shown in an activation it is made
+now anyway, at its first pass. On ws1 4 of the 35 client windows are
+taken from their frames (022).
+
+== After the change (T2)
+
+The commit of D1 and D2, on ws1, 2026-10-08.
+
+`BenchmarkFirstPassBeside` runs both variants in each round, the other
+first every other round: `atpass`, the snapshotter not told — the pixmap
+made at the first pass, as before; `atsnap`, told — made at the snapshot.
+09:36, load average 4–8, 24 of 32 GiB of swap in use, three runs of 20
+rounds, in ms, p50 / p95:
+
+[cols="1,2,2,2,2,2",options="header"]
+|===
+| Run | Variant | Snapshot | Pass | Frame beside it | Frame alone
+| 1 | `atpass` | 1.73 / 3.63 | 14.74 / 21.31 | 7.45 / 13.75 | 1.04 / 1.39
+| 1 | `atsnap` | 18.33 / 27.51 | 1.87 / 4.42 | 0.98 / 2.81 | 0.84 / 1.30
+| 2 | `atpass` | 2.55 / 3.53 | 15.81 / 23.29 | 9.75 / 15.09 | 0.98 / 1.46
+| 2 | `atsnap` | 6.67 / 8.68 | 2.65 / 4.55 | 1.06 / 3.38 | 0.96 / 1.26
+| 3 | `atpass` | 2.58 / 3.73 | 13.94 / 26.28 | 7.45 / 14.70 | 0.98 / 1.44
+| 3 | `atsnap` | 6.61 / 10.48 | 2.41 / 4.96 | 1.15 / 2.27 | 0.95 / 1.32
+|===
+
+A stretch of the host binding slowly, as the `atpass` rounds show — the
+frames beside their pass held 13.8–15.1 ms at p95. With the pixmap made
+at the snapshot the first pass takes 1.9–2.7 ms at p50 and the frames
+beside it 2.3–3.4 ms at p95, within a refresh period of E1 (K1); the
+binding went to the snapshot, 6.6–18.3 ms at p50, while no frame is
+presented.
+
+`BenchmarkE1FirstSwitch`, 09:37, load average 4–7, three runs of 20
+activations, in ms — `pkg/ui` not changed:
+
+[cols="1,1,1,1,1,1,1,1,1",options="header"]
+|===
+| Run | first `present` p50 | p95 | first `total` p50 | p95 | later `present` p50 | p95 | later `total` p50 | p95
+| 1 | 0.93 | 1.07 | 1.51 | 2.44 | 0.86 | 1.83 | 1.05 | 2.02
+| 2 | 0.85 | 1.05 | 1.38 | 1.93 | 0.78 | 1.24 | 0.92 | 1.62
+| 3 | 0.69 | 0.99 | 1.46 | 1.89 | 0.71 | 1.07 | 0.87 | 1.96
+|===
+
+The first switch within a refresh period at p95, the later ones as
+before (K3).
+
+`TestPrepareLive` (K2) fails with the call of `prepareScaled` taken out of
+`capture` — the pixmap not made at the snapshot — and with it made at the
+snapshot of an activation too.
+
+== Commands
+
+----
+go test ./pkg/ui -run '^$' -bench E1FirstSwitch -benchtime 20x -count 3
+go test ./pkg/snapshot -run '^$' -bench FirstPassBeside -benchtime 20x -count 3
+----
