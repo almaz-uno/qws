@@ -122,17 +122,21 @@ func longest(times []time.Duration) float64 {
 // an activation of a window taken from its frame (specs/022, 023) and the
 // frames of the presenter beside it (specs/033-texture-warmup): a client
 // window of 2556×1392, the size of the window of the trial of 028 on ws2,
-// of depth 24 in a frame, as on the desktop; each of b.N rounds forgets
-// what its passes made — the pixmap it is scaled into, its chain, its live
-// textures, as for a window new to the process — then captures it as a
-// snapshot on change, while no frame is presented, and makes its first live
-// pass on the snapshotter's thread while the presenter, sharing the
+// of depth 24 in a frame, as on the desktop. Each of b.N rounds runs two
+// variants in turn, the other first every other round, in the same state of
+// the host: "atpass", the snapshotter not told of the live thumbnails — the
+// pixmap of the passes made at the first pass, as before the specification
+// — and "atsnap", told (PrepareLive) — made at the snapshot. Each forgets
+// what the window's passes made — the pixmap it is scaled into, its chain,
+// its live textures, as for a window new to the process — then captures it
+// as a snapshot on change, while no frame is presented, and makes its first
+// live pass on the snapshotter's thread while the presenter, sharing the
 // snapshotter's context on a thread of its own, presents frames one after
 // another, a millisecond apart, from 5 ms before the pass to 60 ms after.
-// It reports, at p50 and p95 over the rounds, in ms: the snapshot
-// (snapshot_*), the pass on the snapshotter's thread (pass_*), the longest
-// frame beside it (beside_*), and the longest frame of as long a stretch
-// just before, with no pass (alone_*):
+// It reports for each variant, at p50 and p95 over the rounds, in ms: the
+// snapshot (<variant>_snapshot_*), the pass on the snapshotter's thread
+// (_pass_), the longest frame beside it (_beside_), and the longest frame of
+// as long a stretch just before, with no pass (_alone_):
 //
 //	go test -run '^$' -bench FirstPassBeside -benchtime 20x ./pkg/snapshot
 func BenchmarkFirstPassBeside(b *testing.B) {
@@ -150,39 +154,47 @@ func BenchmarkFirstPassBeside(b *testing.B) {
 	defer s.forget(w.id)
 
 	ms := func(d time.Duration) float64 { return float64(d) / float64(time.Millisecond) }
-	var snapshot, pass, beside, alone []float64
+	variants := []string{"atpass", "atsnap"}
+	metrics := map[string][]float64{}
+	add := func(variant, name string, v float64) {
+		metrics[variant+"_"+name] = append(metrics[variant+"_"+name], v)
+	}
 	b.ResetTimer()
-	for range b.N {
-		// New to the process
-		s.dropLive(w)
-		s.dropChain(w)
-		s.dropScaled(w)
-		w.liveDue = liveSchedule{}
-		w.schedule.change(time.Now())
-		start := time.Now()
-		s.capture(w, causeChange)
-		snapshot = append(snapshot, ms(time.Since(start)))
-		time.Sleep(50 * time.Millisecond)
+	for i := range b.N {
+		// In turn, the other first every other round
+		for k := range variants {
+			variant := variants[(i+k)%len(variants)]
+			s.prepareLive.Store(variant == "atsnap")
+			// New to the process
+			s.dropLive(w)
+			s.dropChain(w)
+			s.dropScaled(w)
+			w.liveDue = liveSchedule{}
+			w.schedule.change(time.Now())
+			start := time.Now()
+			s.capture(w, causeChange)
+			add(variant, "snapshot", ms(time.Since(start)))
+			time.Sleep(50 * time.Millisecond)
 
-		alone = append(alone, longest(<-frames.start(time.Now().Add(65*time.Millisecond))))
-		times := frames.start(time.Now().Add(65 * time.Millisecond))
-		time.Sleep(5 * time.Millisecond)
-		if _, ok := livePicture(b, s, w); !ok {
-			b.Fatal("no pass")
+			add(variant, "alone", longest(<-frames.start(time.Now().Add(65*time.Millisecond))))
+			times := frames.start(time.Now().Add(65 * time.Millisecond))
+			time.Sleep(5 * time.Millisecond)
+			if _, ok := livePicture(b, s, w); !ok {
+				b.Fatal("no pass")
+			}
+			add(variant, "pass", ms(w.live.cpu))
+			add(variant, "beside", longest(<-times))
+			time.Sleep(50 * time.Millisecond)
 		}
-		pass = append(pass, ms(w.live.cpu))
-		beside = append(beside, longest(<-times))
-		time.Sleep(50 * time.Millisecond)
 	}
 	b.StopTimer()
-	for _, m := range []struct {
-		name string
-		v    []float64
-	}{{"snapshot", snapshot}, {"pass", pass}, {"beside", beside}, {"alone", alone}} {
-		sort.Float64s(m.v)
-		b.ReportMetric(m.v[(len(m.v)*50+99)/100-1], m.name+"_p50_ms")
-		b.ReportMetric(m.v[(len(m.v)*95+99)/100-1], m.name+"_p95_ms")
+	for _, variant := range variants {
+		for _, name := range []string{"snapshot", "pass", "beside", "alone"} {
+			v := metrics[variant+"_"+name]
+			sort.Float64s(v)
+			b.ReportMetric(v[(len(v)*50+99)/100-1], variant+"_"+name+"_p50_ms")
+			b.ReportMetric(v[(len(v)*95+99)/100-1], variant+"_"+name+"_p95_ms")
+		}
+		b.Logf("%s: beside, sorted: %.2f", variant, metrics[variant+"_beside"])
 	}
-	b.Logf("beside, sorted: %.2f", beside)
-	b.Logf("pass, sorted: %.2f", pass)
 }

@@ -224,6 +224,52 @@ The pixmap is 4 bytes a pixel of the thumbnail's size, at most 512×512 —
 now anyway, at its first pass. On ws1 4 of the 35 client windows are
 taken from their frames (022).
 
+== After the change (T2)
+
+The commit of D1 and D2, on ws1, 2026-10-08.
+
+`BenchmarkFirstPassBeside` runs both variants in each round, the other
+first every other round: `atpass`, the snapshotter not told — the pixmap
+made at the first pass, as before; `atsnap`, told — made at the snapshot.
+09:36, load average 4–8, 24 of 32 GiB of swap in use, three runs of 20
+rounds, in ms, p50 / p95:
+
+[cols="1,2,2,2,2,2",options="header"]
+|===
+| Run | Variant | Snapshot | Pass | Frame beside it | Frame alone
+| 1 | `atpass` | 1.73 / 3.63 | 14.74 / 21.31 | 7.45 / 13.75 | 1.04 / 1.39
+| 1 | `atsnap` | 18.33 / 27.51 | 1.87 / 4.42 | 0.98 / 2.81 | 0.84 / 1.30
+| 2 | `atpass` | 2.55 / 3.53 | 15.81 / 23.29 | 9.75 / 15.09 | 0.98 / 1.46
+| 2 | `atsnap` | 6.67 / 8.68 | 2.65 / 4.55 | 1.06 / 3.38 | 0.96 / 1.26
+| 3 | `atpass` | 2.58 / 3.73 | 13.94 / 26.28 | 7.45 / 14.70 | 0.98 / 1.44
+| 3 | `atsnap` | 6.61 / 10.48 | 2.41 / 4.96 | 1.15 / 2.27 | 0.95 / 1.32
+|===
+
+A stretch of the host binding slowly, as the `atpass` rounds show — the
+frames beside their pass held 13.8–15.1 ms at p95. With the pixmap made
+at the snapshot the first pass takes 1.9–2.7 ms at p50 and the frames
+beside it 2.3–3.4 ms at p95, within a refresh period of E1 (K1); the
+binding went to the snapshot, 6.6–18.3 ms at p50, while no frame is
+presented.
+
+`BenchmarkE1FirstSwitch`, 09:37, load average 4–7, three runs of 20
+activations, in ms — `pkg/ui` not changed:
+
+[cols="1,1,1,1,1,1,1,1,1",options="header"]
+|===
+| Run | first `present` p50 | p95 | first `total` p50 | p95 | later `present` p50 | p95 | later `total` p50 | p95
+| 1 | 0.93 | 1.07 | 1.51 | 2.44 | 0.86 | 1.83 | 1.05 | 2.02
+| 2 | 0.85 | 1.05 | 1.38 | 1.93 | 0.78 | 1.24 | 0.92 | 1.62
+| 3 | 0.69 | 0.99 | 1.46 | 1.89 | 0.71 | 1.07 | 0.87 | 1.96
+|===
+
+The first switch within a refresh period at p95, the later ones as
+before (K3).
+
+`TestPrepareLive` (K2) fails with the call of `prepareScaled` taken out of
+`capture` — the pixmap not made at the snapshot — and with it made at the
+snapshot of an activation too.
+
 == Commands
 
 ----
