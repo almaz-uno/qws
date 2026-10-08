@@ -4,7 +4,7 @@
 :sectnums:
 :revdate: 2026-10-08
 :issue: 102
-:status: draft
+:status: implemented
 
 == What and why
 
@@ -148,8 +148,61 @@ G — `go test ./...`:: `go test -count=1 ./...` of A, 20 times, under L0.
   `testdata/scenes.json` unchanged.
 |===
 
+== Results
+
+2026-10-08, E1, the author's desktop as it is; B's runs before the change
+with the service of 1.6.0, A's — and B's in turn with them — after the
+author restarted it on 1.6.1 at 14:02; the runs in `research.adoc`.
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | Not as worded: the load did not bring the failure out again. B under
+  L2 failed 13 of 100 subtests at 12:41–12:45, and 11 of 60 before, with
+  no A yet. In turn with A, 14:03–14:59, B failed 2 of 100 and, in five
+  pairs more, 1 of 250; A none of its 100, 100 and 250. Six other loads
+  tried on B did not bring it out either (research, "After the change"):
+  the frames of the steps came 10 ms apart or more 3 times in 308, against
+  33 of the 93 recorded before the drain of the morning's 8 failures
+  diagnosed. A failing none of 450 under L2 shows nothing a B failing 3
+  of 350 at the same hours would not; the cause and the fix rest on K3.
+| K2 | L1: A none of 100 (14:15–14:19), B none of 100 (14:19–14:23), 4 of
+  100 in the morning. L0: A none of 100 (14:23–14:27), B 1 of 100 in the
+  morning. G: `TestLiveAtRest` failed in none of the 20 runs of `go test
+  ./...`, 15:05–15:11; no run failed.
+| K3 | R: B's code failed 38 of 40 subtests (12:51–12:53), each with
+  `woken` true at the start of the rest and every publication of the rest
+  without a wake, 45 of them; A's code none of 40 (13:58–13:59), each
+  with `woken` true at the start of the rest as well and its wake answered
+  at rest, 46 pictures in 46 frames.
+| K4 | Met but for the range of the pictures: the change moves the drain
+  into `frame` and leaves the rest of the test as it was — its windows,
+  its drawing, its steps, its rest, its two bounds. A's runs in F drew
+  42–45 pictures but two, 39 in 40 frames and 46 in 46 (14:42–14:44, L2;
+  research); B's that passed 42–45 in the afternoon, 43–45 in the
+  morning, the range of the criterion. 39 in 40 frames is within both
+  bounds, the frame more the one they allow; 46 in 46 is the situation
+  that failed B, met by A.
+| K5 | At `811f13b`: the tests named pass, none skipped, in `go test -v`
+  of `pkg/snapshot`, `pkg/ui`, `pkg/carousel` and `pkg/x11`; none of them
+  is changed. 033's tip, `c543007`, merged into `811f13b` in a worktree
+  thrown away: no conflict, `go build`, `go vet` and `go test ./...`
+  pass, `TestPrepareLive` and `TestLiveAtRest` with them.
+| K6 | Each commit of the change in a clean worktree on E1: `go build
+  ./...`, `gofmt -l` empty, `go vet ./...`, `make check-specs`, `go test
+  ./...`, `go test -race ./pkg/ui ./pkg/carousel ./pkg/snapshot
+  ./pkg/x11`. `xgb.NewConn` outside tests: `pkg/x11/extensions.go` and the
+  programs `console/framecmp` and `console/glxoverlay`; `.Init(` outside
+  tests: the three `gl.Init`; `pkg/carousel/testdata/scenes.json`
+  unchanged.
+|===
+
 == Open decisions
 
+. K1: whether the change is taken on K3 and G, or F is run again when the
+  host is as busy as it was on the morning of 2026-10-08 — what made it
+  so is not known.
 . Whether R becomes a subtest of the repository: the failure made certain
   needs the test to wake the loop of the snapshotter itself, and 2.4 s a
   run more.

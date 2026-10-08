@@ -162,3 +162,55 @@ slice at the last `BeginFrame` — it then sees the two frames before, 7.5 ms
 apart, and holds — 1 of 40; with the loop woken after the last frame but
 the pause before the rest 7 ms, 20 of 20 `own pixmap` and 2 of 20 `from its
 frame`, whose pass was published after the drain.
+
+== After the change
+
+A, the test binary of `pkg/snapshot` at `811f13b`. The service was
+restarted at 14:02 on 1.6.1 by the author; every run below is after it.
+
+*R with A's code*, the diagnostics applied on top of the change
+(`fixdiag.patch`), 20 runs under L0, 13:58–13:59: none of 40 subtests
+failed. In each, `woken` was true at the start of the rest — the situation
+of every failure of B — and the wake, read after the last frame of the
+steps, was answered by the first frame at rest: 46 pictures in 46 frames,
+the picture of the pass after the steps among them.
+
+*F*, B and A run in turn; the five pairs of 25 runs each, the one first
+alternating:
+
+[cols="2,3,2,2",options="header"]
+|===
+| Time | Load | B | A
+
+| 14:03–14:15 | L2 | 2 of 100 (14:07–14:11) | 0 of 100, 0 of 100
+| 14:15–14:23 | L1 | 0 of 100 | 0 of 100
+| 14:23–14:27 | L0 | — | 0 of 100
+| 14:38–14:59 | L2, five pairs | 1 of 250 | 0 of 250
+|===
+
+A failed none of its 650 subtests. B, in turn with it, 3 of 450: the load
+did not bring the failure out as in the morning, 24 of 160 under L2.
+Neither did other loads tried on B between 14:27 and 15:04: the test and 2
+goroutines spinning on CPUs 0 and 1 (`taskset`), 0 of 40; L1 and L2 at
+once, 0 of 50; 12 and 24 goroutines spinning at the normal priority, 0 of
+20 and 0 of 40; the tests of `pkg/carousel`, `pkg/ui`, `pkg/x11` and
+`pkg/glx` again and again, 0 of 40; `BenchmarkLiveBeside` again and again,
+its frames and passes off the screen, with two loads of L2 left running
+beside it, 0 of 40. The frames of the steps
+under L2, B's code with the diagnostics, 10 runs at 14:35: of 308 recorded,
+3 came 10 ms or more after the one before, p50 7.46 ms, p99 9.53 ms; in the
+records of the morning's failures the frames before the drain were often
+slower, 3–9 ms between `BeginFrame` and `EndFrame` alone. What held the
+frame loop back in the morning — the host's other work — was not there in
+the afternoon.
+
+The pictures of the runs that passed: A 39–46, 42–45 in all but two of its
+650 subtests, both at 14:42–14:44 under L2 — 39 pictures in 40 frames, a
+frame for a wake sent before the last frame of the steps and read after
+it, whose picture that frame had taken: the one frame more the bound
+allows; and 46 in 46, a wake read after the last frame of the steps,
+answered at rest: the situation that fails B, met by A under load as in R.
+B 42–45.
+
+*G*: `go test -count=1 ./...` at `811f13b`, 20 times, 15:05–15:11: every
+run passed.
