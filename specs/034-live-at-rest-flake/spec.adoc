@@ -1,0 +1,155 @@
+= 034 — TestLiveAtRest steady under load
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-08
+:issue: 102
+:status: draft
+
+== What and why
+
+`TestLiveAtRest` (`pkg/snapshot/liverest_test.go`, K13 and K14 of 020)
+fails now and then: "0 pictures drawn in 1.5s at rest, 0 frames; want 15
+at least" — some 1 in 20 runs of `go test ./...` on ws1, of either
+subtest, `own pixmap` or `from its frame`, passing when run again (020,
+K12; 027, 030 and 031 met it on their commits). Its cause was not found.
+
+What the research found: the test loses a wake of the snapshotter. Its
+switcher drains the ClientMessages it has read, once, between the steps and
+the rest, and at rest presents a frame only when woken. The snapshotter
+wakes the switcher once between two of its frames (`wakeSwitcher`, 020): a
+wake read after the last frame of the steps, and drained, leaves it woken,
+and no publication after it wakes the switcher again — 0 frames, 0 pictures
+in 1.5 s, while the snapshotter passes and publishes the window 43–44 times.
+The wake comes before the drain only when a pass is made right after the
+last frame of the steps: a pass waits 30 ms after frames that come less
+than 10 ms apart (`liveHold`, `liveMotion` of 020), and the steps present
+one every 7.5 ms — unless the load holds the test's frame loop back, and
+two frames come 10 ms apart or more. Alone on ws1, 1 subtest of 100 failed;
+beside the tests of `pkg/carousel` run again and again, 4 of 100; beside 24
+goroutines spinning, 24 of 160 (research).
+
+The snapshotter does what 020 says, and the switcher of qws answers every
+wake with a frame — `liveEvent` marks a picture wanted, the next frame's
+`liveBegin` takes it — so qws does not meet this. The test is wrong: the
+change makes its switcher answer the wakes as qws's does, and changes no
+code of qws.
+
+The specification is a delta to `develop` at `1a6dbc8` (1.6.0). Unchanged:
+every file but `pkg/snapshot/liverest_test.go` — the snapshotter, its
+passes, its wakes and their schedule (020), the pause for the switchers of
+other instances (011), the snapshots (008, 016); in the test, its windows,
+the window drawn every 5 ms, the steps out of view and back, the rest of
+1.5 s at an interval of 33 ms, and what it checks: 15 pictures at least, no
+more frames than pictures and one.
+
+== Decisions
+
+Made on the way, 2026-10-08, for the author to confirm:
+
+* *The test, not the snapshotter.* The snapshotter could wake the switcher
+  again when no frame follows a wake — after a time, or at every
+  publication — but no switcher of qws drops a wake: it would send
+  ClientMessages, and qws would present frames, for nothing, against the
+  one wake between two frames of 020.
+* *The switcher of the test answers the wakes as qws's does.* A frame of
+  the test answers the wakes read before it: `frame` drains them before
+  `BeginFrame`, as `liveBegin` takes the picture `liveEvent` marked wanted.
+  The drain between the steps and the rest goes: a wake read after the last
+  frame of the steps is answered at rest. Rejected: a frame presented after
+  the drain, before the rest — it serves as well, but is a frame qws does
+  not present.
+* *The bounds as they are.* A wake sent before a frame and read after its
+  drain is answered by a frame more, which draws no new picture — qws does
+  the same. At rest it cannot happen: a frame follows the wake it answers,
+  and the snapshotter sends none in between. It can once, at the start of
+  the rest, for a wake sent before the last frame of the steps: the bound
+  of one frame more than pictures stays.
+
+== Behavior
+
+. *The frame of the test.* Before it takes the pictures (`BeginFrame`), a
+  frame drains the wakes the test has read: they are answered by it, the
+  pictures published before them among those it takes.
+. *The rest.* It starts right after the steps, with the wakes read since
+  their last frame: a frame for each wake, no sooner than 7 ms after the
+  frame before, as before.
+
+== Metrics
+
+F — failing subtests of `TestLiveAtRest`:: Two test binaries of
+`pkg/snapshot`, `go test -c`: B of `develop` at `1a6dbc8`, built before
+anything changed, and A of this change. Each runs `-test.run
+'^TestLiveAtRest$' -test.count 50`, a run two subtests, from
+`pkg/snapshot`, on E1 with the author's desktop as it is and the service of
+1.6.0 running, under one of three loads:
++
+--
+L0:: none but the desktop's;
+L1:: `go test -count=1 ./pkg/carousel`, run again and again — a package of
+  `go test ./...`, which runs packages at once;
+L2:: a Go program of 24 goroutines spinning, `GOMAXPROCS=24`, at `nice -n
+  19`.
+--
++
+The runner and the program are in the research.
+
+R — the failure made certain:: The diagnostics of the research applied to
+B's code and to A's, with `QWS_SLIP` set: the frame loop of the steps 12 ms
+late before their last frame, the loop of the snapshotter woken right after
+it, as its timer may, and the rest 20 ms after it. 20 runs each, under L0.
+
+G — `go test ./...`:: `go test -count=1 ./...` of A, 20 times, under L0.
+
+== Acceptance criteria
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| The test steady under load: in F under L2, A fails none of its 200
+  subtests (100 runs), while B fails at least 10 of 100; with fewer, the
+  load did not reproduce the failure, and F is run again.
+
+| K2
+| Without the spinning: in F under L1 and under L0, A fails none of its 100
+  subtests each; B's failures counted. In G, `TestLiveAtRest` fails in
+  none of the 20 runs.
+
+| K3
+| The cause: in R, B's code fails at least 30 of its 40 subtests, each with
+  the switcher left woken and every publication of the rest without a
+  wake; A's code none.
+
+| K4
+| What the test checks unchanged: its bounds, its window, its steps and its
+  rest as in "What and why"; A's runs in F draw 43–45 pictures in 1.5 s,
+  as B's that pass, with as many frames, or one more.
+
+| K5
+| The other tests unchanged and passing: of 020, `TestLiveSchedule`,
+  `TestSharedLive`, `TestLiveFromFrame`, `TestFrameCopyQuiet`,
+  `TestFramePassPictures`, `TestFramePassChain`, `TestFramePassRequests`,
+  `TestFramePassMoved`, `TestLiveFrames` and `TestLiveOff` of `pkg/ui`,
+  `TestLiveThumbnails`, `TestLiveCovers` and `TestLiveFallback` of
+  `pkg/carousel`, `TestSwitchersOwnOverlay`; of 011, `TestSwitchers`,
+  `TestWait`, `TestLivePause`; of 016, `TestHiddenSnapshot`,
+  `TestHiddenNoSnapshot`, `TestHiddenPaused`. 033's tip
+  (`origin/issue/qws#99-texture-warmup`) merged into the change in a
+  worktree thrown away: no conflict, `go test ./...` passes.
+
+| K6
+| Each commit in a clean worktree: `go build ./...`, `gofmt -l` empty,
+  `go vet ./...`, `make check-specs`, `go test ./...`, `go test -race
+  ./pkg/ui ./pkg/carousel ./pkg/snapshot ./pkg/x11`; outside tests,
+  `xgb.NewConn` only in `pkg/x11/extensions.go` and the two console
+  programs, no `.Init(` of an extension but `gl.Init` (021);
+  `testdata/scenes.json` unchanged.
+|===
+
+== Open decisions
+
+. Whether R becomes a subtest of the repository: the failure made certain
+  needs the test to wake the loop of the snapshotter itself, and 2.4 s a
+  run more.
