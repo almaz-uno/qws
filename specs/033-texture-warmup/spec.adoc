@@ -3,7 +3,7 @@
 :toc-title: Contents
 :sectnums:
 :revdate: 2026-10-08
-:status: draft
+:status: implemented
 :issue: 99
 
 == What and why
@@ -59,7 +59,7 @@ or flag changes.
 == Decisions
 
 None taken by the author yet. Each lists its options and the one
-recommended — for the author to confirm.
+recommended — taken by the author with the trial, 2026-10-08.
 
 D1. *Where the pixmap of the passes is made.* Recommended: at a snapshot
 on change of a window taken from its frame, when it has none of its
@@ -180,10 +180,47 @@ B:: where the binding goes: the snapshot that makes the pixmap, its time.
   at the start of the process, before the activation. Open.
 |===
 
+== Results
+
+Off the screen: the benchmarks and tests on ws1, the commits `a3d4a9b` to
+`11093af`, each in a worktree of its own (research). On the desktop: the
+author's trial on ws2 on 2026-10-08 at 12:12 — 2560×1440 at 165 Hz (a
+period of 6.07 ms), no VNC viewer —, the build of `11093af` on Alt+F11
+beside the service, not with it stopped: the pixmap of a pass is qws's own,
+which the service does not hold; `--log-level debug`, a fresh process
+(`~/.cache/qws-trial-033/log-ws2.txt` on ws1).
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | Met. `BenchmarkFirstPassBeside`, both ways in the same runs: the
+  frames next to the first pass p95 2.3–3.4 ms after, 13.8–15.1 ms before.
+| K2 | Met. `TestPrepareLive`, which fails with the call taken out of the
+  snapshot or let at an activation's refresh.
+| K3 | Met. `BenchmarkE1FirstSwitch`: the first switch p95 1.9–2.4 ms, the
+  later 1.6–2.0 ms.
+| K4 | Met. `pkg/ui` and `pkg/carousel` untouched; the tests of
+  `pkg/snapshot` pass as they are; `testdata/scenes.json` unchanged.
+| K5 | Met, by construction and K1: the pixmaps are made at the snapshots
+  on a change, paused while a switcher is shown, not at an activation's
+  refresh.
+| K6 | Met. Every commit in a worktree of its own: build, `gofmt -l`, vet,
+  `check-specs`, `go test ./...`, `-race` of `pkg/ui`, `pkg/carousel`,
+  `pkg/snapshot`, `pkg/x11`; the rule of 021.
+| K7 | Met. At the start of the process, before any activation, "Pixmap of
+  the live passes made" for the two windows taken from their frames, in 29
+  and 46 ms. The first switch to the grid of the first activation: 5.64 ms
+  from the key to the presenting of its frame (5.55 ms of it presenting),
+  against 37.8 ms in the trial of 028; the four switches after, 1.13–6.41
+  ms. The first "Live" records of the two windows after it 5.6 and 2.8 ms,
+  against some 40 ms with the binding. No warning or error.
+|===
+
+Not checked: E1 on the desktop, Mesa (ws3).
+
 == Open decisions
 
-. D1 and D2, for the author.
-. K7, the author's trial.
 . The first scene of a process: some 0.4–1.2 ms dearer off the screen on
   ws1 (research); on the screen not told apart from what ran beside it.
   Should K7 show the first switch still slow with no first pass beside it,
