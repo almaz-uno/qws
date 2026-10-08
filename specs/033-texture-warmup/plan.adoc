@@ -1,0 +1,67 @@
+= 033 — plan
+:toc: left
+:toc-title: Contents
+:revdate: 2026-10-08
+
+== Approach
+
+*Told of the live thumbnails* (D2). `Snapshotter.PrepareLive`, an atomic
+flag the loop reads: from then on the snapshots of the windows taken from
+their frames make the pixmaps of their passes. `cmd/qws/root.go` calls it
+right after `snapshot.New`, when `appearance.thumbnail.live` is on and the
+renderer is `glx`: the snapshotter follows the windows from its start and
+captures them a settle later, after the call.
+
+*The pixmap at the snapshot* (D1). `capture`, after a snapshot that
+worked, of any cause but an activation's, calls `prepareScaled`
+(`pkg/snapshot/live.go`): for a window taken from its frame, when told and
+the passes from frames are possible — RENDER there, no pixmap that would
+not bind so far — and the window has no pixmap of its thumbnail's size,
+`scaledFor` makes and binds it, as the first pass does now, and the record
+"Pixmap of the live passes made" gives its time. A failure is the first
+pass's to meet again, as now; a binding that fails sets `noScaled` and
+says so once, in `scaledFor` as now. The first pass then finds the pixmap
+(`scaledFor` returns it) and makes only its chain, its live textures and
+the pass. `captureHeld`, the last snapshot of a window hidden, makes none:
+a window hidden is not shown.
+
+Nothing else moves: the chain is still made at the first pass of each
+activation and dropped at its end; the pixmap is still dropped when the
+window is forgotten or made anew at another size; the passes, their
+schedule and pictures as they are.
+
+*The benchmarks.* `BenchmarkE1FirstSwitch` (`pkg/ui`) and
+`BenchmarkFirstPassBeside` (`pkg/snapshot`) committed before the change,
+run against `develop` for T1 (research). With the change,
+`BenchmarkFirstPassBeside` runs two variants in the same run — `at-pass`,
+not told, as before; `at-snapshot`, told — so that K1 compares them in the
+same state of the host.
+
+== Files
+
+[cols="2,5"]
+|===
+| File | What changes
+
+| `pkg/snapshot/snapshot.go`
+| The flag and `PrepareLive`; `capture` calls `prepareScaled`.
+
+| `pkg/snapshot/live.go`
+| `prepareScaled`, beside `scaledFor`.
+
+| `cmd/qws/root.go`
+| `PrepareLive` after `snapshot.New` with the live thumbnails on `glx`.
+
+| `pkg/snapshot/prepare_test.go`
+| New: K2 on windows off the screen.
+
+| `pkg/snapshot/firstpass_test.go`
+| New before the change: H (T1); with it, the two variants (K1).
+
+| `pkg/ui/firstswitch_bench_test.go`
+| New before the change: L off the screen (T1, K3).
+|===
+
+What must stay: `pkg/ui` and `pkg/carousel` as they are — every frame;
+the snapshots' pictures and the passes' pictures, requests and schedule;
+the tests of `pkg/snapshot` as they are; the configuration.

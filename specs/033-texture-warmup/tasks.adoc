@@ -1,0 +1,14 @@
+= 033 — tasks
+:toc: left
+:toc-title: Contents
+:revdate: 2026-10-08
+
+. [x] T1. Before any change of the code, on the code of `develop`: the
+  first switch off the screen apart from the later ones
+  (`BenchmarkE1FirstSwitch`), the trial of 028 read, the first live pass
+  of a window taken from its frame beside the frames
+  (`BenchmarkFirstPassBeside`) and its steps; the cause (research).
+. [ ] T2. D1 and D2, K2; H and L after the change (K1, K3).
+. [ ] T3. K6 on every commit, in a worktree of its own.
+. [ ] T4. The author's trial on ws2: K7.
+. [ ] T5. The results.
