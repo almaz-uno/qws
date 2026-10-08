@@ -135,12 +135,21 @@ func liveAtRest(t *testing.T, fromFrame bool) {
 	}
 	gl.PixelStorei(gl.PACK_ALIGNMENT, 1)
 
-	// A frame as the selector presents one: the pictures taken, the window's
-	// read, a fence after it for the snapshotter
+	// A frame as the selector presents one: the wakes read before it answered
+	// by it, as liveBegin of pkg/ui takes the picture liveEvent marked wanted,
+	// the pictures taken, the window's read, a fence after it for the
+	// snapshotter. A wake read and answered by no frame would leave the
+	// snapshotter woken, and the switcher at rest would wait for it in vain:
+	// drained once after the steps, as first made, a wake read after their
+	// last frame failed the rest now and then, the frames of the steps 10 ms
+	// apart or more on a busy host (specs/034-live-at-rest-flake)
 	shown := []xproto.Window{win}
 	var drawn uint64
 	var pixels []byte
 	frame := func() bool {
+		for len(woken) > 0 {
+			<-woken
+		}
 		pics := s.BeginFrame(shown)
 		p, ok := pics[win]
 		fresh := ok && p.Gen > drawn
@@ -207,12 +216,10 @@ func liveAtRest(t *testing.T, fromFrame bool) {
 			time.Sleep(7 * time.Millisecond)
 		}
 	}
-	for len(woken) > 0 {
-		<-woken
-	}
 
-	// At rest: a frame only when woken, no sooner than a refresh period
-	// after the one before
+	// At rest: a frame only when woken — by a wake read since the last frame
+	// of the steps, too — no sooner than a refresh period after the one
+	// before
 	const length = 1500 * time.Millisecond
 	end := time.Now().Add(length)
 	frames, pictures := 0, 0
