@@ -1,0 +1,101 @@
+= 035 — frames that slip, by the frame rate
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-13
+:status: draft
+:issue: 104
+
+== What and why
+
+The author, 2026-10-13: on a screen of 144 Hz and more, stepping fast
+through the carousel turns the animation off — `enabled: auto` goes still,
+"Animation still: the frames slip" —; on a screen of 60 Hz it does not.
+ws2's two screens of 2560×1440 run at 164.83 Hz, a period of 6.07 ms; its
+journal of 2026-10-13: still at 13:54, back at the probe at 14:05:34 and
+still again 19 s later, 3 late of 11 frames counted.
+
+The rule of 031 (D5) counts a frame late when its interval is above 1.25
+refresh periods: 7.58 ms at 165 Hz, a slack of 1.5 ms, against 4.2 ms at
+60 Hz. The frames recorded by 031 on ws2 at 165 Hz
+(`pkg/ui/testdata/vnc-a.txt`, `vnc-b.txt`) say what those late frames
+are: their intervals come in pairs — 8.3 ms, then 3.6 ms — the schedule
+of the frames (`frameDue`) catching up; none is above 2 periods, none
+misses its slot, even with a viewer connected; the mean interval is 0.99
+of a period in either batch, 160 fps in the worst window of 30 frames with
+a viewer, 164 without. The rule counts the jitter of the frame timer, not
+frames lost: at 165 Hz the slack is within the jitter, which grows when
+fast steps draw their layers beside the frames.
+
+The specification is a delta to `develop` at `d6d535a` (1.6.1) and to 031.
+Unchanged: the setting and its key; the viewer of D4; the probe of D6; the
+records of D7; which frames are counted (D5 as amended, O1); the pictures.
+
+== Decisions
+
+D1 decided by the author on 2026-10-13; D2–D4 made in the specification,
+their numbers provisional until the research measures them (O1).
+
+D1 (the author's). *By the frame rate.* The frames slip when their mean
+rate falls, not when some intervals are long: the mean of the intervals of
+the frames counted, over a window, against the refresh period. A frame
+late is followed by one early while the schedule catches up, and the two
+cancel in the mean; a slot lost does not.
+
+D2. *A window of time.* The frames counted of the last 0.5 s of
+animation — the intervals of the frames counted whose sum, from the
+latest back, is within 0.5 s —, not the last 60 frames: 60 frames are 1 s
+at 60 Hz and 0.36 s at 165 Hz; a window of time is the same on every
+screen. The window runs on across the activations, as the count of 031.
+The first frame of an animation has no interval and is not counted, as
+now: the pauses between the animations are not in the mean.
+
+D3. *A share of the refresh rate.* Still when the window is full — its
+frames span 0.5 s — and its mean rate is below 75 % of the refresh rate:
+124 fps at 165 Hz, 45 fps at 60 Hz. A pause of 100 ms in a window of
+0.5 s keeps it at some 81 %, one of 150 ms takes it to some 70 %.
+
+D4. *VNC by its viewer.* At 165 Hz the frames of a viewer connected keep
+their rate (research of 031: 160–164 fps); the mean does not see a viewer,
+and D4 of 031 does — on the ports of `vnc_ports`. A viewer on a port not
+listed goes still by the frames only when it costs frames: the second part
+of K7 of 031, not tried there, is given up.
+
+== Acceptance criteria
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| The count: a window of 0.5 s of the frames counted, its mean rate below
+  75 % of the refresh rate makes it still; a window not yet full never;
+  the window carried across activations; the probe starts it anew. Edges
+  in `TestSlipCount`, at 60 and 165 Hz.
+
+| K2
+| The recorded frames replayed (`TestSlipReplay`): batches A and B of 031
+  and the frames of the research of 035 — fast steps at 165 Hz and at
+  60 Hz never still; the frames under load still.
+
+| K3
+| The rest of 031 unchanged: `TestStillViewer`, `TestStillFrames`,
+  `TestAnimationSettings`; the pictures: `TestScenes` with
+  `testdata/scenes.json` as it is, `TestGLXPresenterMatchesCPU`,
+  `TestLayers`.
+
+| K4
+| `go build ./...`, `gofmt -l` empty, `go vet ./...`, `make check-specs`,
+  `go test ./...` on every commit, each in a worktree of its own; `go test
+  -race` of `pkg/ui`, `pkg/carousel`, `pkg/snapshot`, `pkg/x11`.
+
+| K5
+| The author's trial on ws2: fast steps on a screen of 165 Hz, no viewer
+  connected — animated throughout, no "Animation still".
+|===
+
+== Open decisions
+
+. The window and the share of D2 and D3, 0.5 s and 75 %, until the
+  research measures fast steps at 165 and 60 Hz and a load: whether a
+  single pause should make it still, or two windows in a row.
