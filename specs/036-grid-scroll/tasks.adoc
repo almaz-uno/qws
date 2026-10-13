@@ -14,6 +14,6 @@
   windows on E1, into the research.
 . [x] T4. `pkg/ui`: the scroll of the steps and the wheel, the scene, the
   mouse, the live thumbnails in the view; K3.
-. [ ] T5. K6 on every commit, in a worktree of its own.
+. [x] T5. K6 on every commit, in a worktree of its own.
 . [ ] T6. The author's trial on ws1: K7.
 . [ ] T7. The results.
