@@ -51,13 +51,19 @@ func liveScenes(fonts []string) []liveScene {
 	small.ThumbWidth, small.ThumbHeight, small.Spacing, small.FontSize = 256, 256, 300, 14
 
 	grid := sceneConfig(scene{layout: "grid", theme: "dark", width: 2520, height: 1400}, fonts)
+	// The grid of 36 on one screen, as before specs/036-grid-scroll
+	grid.GridMinThumbWidth = 0
 	large := grid
 	large.FontSize = 30
+	// It scrolls, under the header: a row cut by it, one by the bottom
+	scrolled := sceneConfig(scene{layout: "grid", theme: "dark", width: 2520, height: 1400, hostname: "ws1", version: "v0.1.0"}, fonts)
+	scrolled.GridScroll = 400
 	return []liveScene{
 		{"carousel-e1", carousel, 6, e1},
 		{"carousel-defaults", carousel, 6, small},
 		{"grid-e1-36", liveWindows(36, image.Pt(512, 271), image.Pt(512, 160)), 1, grid},
 		{"grid-e1-36-font-30", liveWindows(36, image.Pt(512, 271), image.Pt(512, 160)), 1, large},
+		{"grid-e1-36-scrolled", liveWindows(36, image.Pt(512, 271), image.Pt(512, 160)), 1, scrolled},
 	}
 }
 
@@ -280,7 +286,7 @@ func TestLiveThumbnails(t *testing.T) {
 		if sc.cfg.LayoutMode == "grid" {
 			frame = DrawGridLayout(sc.windows, sc.selected, -1, sc.cfg)
 			want = DrawGridLayout(live, sc.selected, -1, sc.cfg)
-			items = GridLive(sc.windows, sc.cfg)
+			items = GridLiveView(GridLive(sc.windows, sc.cfg), len(sc.windows), sc.cfg.GridScroll, sc.cfg)
 		} else {
 			frame = Draw3DCarouselWithData(sc.windows, sc.selected, -1, 0, sc.cfg)
 			want = Draw3DCarouselWithData(live, sc.selected, -1, 0, sc.cfg)
@@ -466,7 +472,7 @@ func TestLiveCovers(t *testing.T) {
 		if sc.cfg.LayoutMode != "grid" {
 			continue
 		}
-		items := GridLive(sc.windows, sc.cfg)
+		items := GridLiveView(GridLive(sc.windows, sc.cfg), len(sc.windows), sc.cfg.GridScroll, sc.cfg)
 		g := layoutGrid(len(sc.windows), headerBand(sc.cfg), sc.cfg)
 		inside := 0
 		for i := range sc.windows {

@@ -140,7 +140,7 @@ func BenchmarkE1Frame(b *testing.B) {
 
 // BenchmarkE1Grid draws the frame of E1 in the grid, without and with the
 // header, and the tiles layer of the animation for the latter
-// (specs/019-grid-speed)
+// (specs/019-grid-speed),
 func BenchmarkE1Grid(b *testing.B) {
 	goFont := filepath.Join(b.TempDir(), "goregular.ttf")
 	if err := os.WriteFile(goFont, goregular.TTF, 0o644); err != nil {
@@ -152,21 +152,25 @@ func BenchmarkE1Grid(b *testing.B) {
 	for _, s := range scenes() {
 		byName[s.name] = s
 	}
-	for _, name := range []string{"grid-e1-24-second", "grid-e1-header"} {
+	// and the grids that scroll, of 47 and 100 windows: the frame in the
+	// middle, the tiles layer of all the rows (specs/036-grid-scroll)
+	for _, name := range []string{"grid-e1-24-second", "grid-e1-header", "grid-e1-47-middle", "grid-e1-100-middle"} {
 		sc := byName[name]
 		b.Run(name, func(b *testing.B) {
 			for range b.N {
-				drawScene(sc, []string{goFont})
+				Recycle(drawScene(sc, []string{goFont}))
 			}
 		})
 	}
-	sc := byName["grid-e1-header"]
-	cfg := sceneConfig(sc, []string{goFont})
-	b.Run("grid-e1-header-tiles", func(b *testing.B) {
-		for range b.N {
-			GridTiles(sc.windows, cfg)
-		}
-	})
+	for _, name := range []string{"grid-e1-header", "grid-e1-47-middle", "grid-e1-100-middle"} {
+		sc := byName[name]
+		cfg := sceneConfig(sc, []string{goFont})
+		b.Run(name+"-tiles", func(b *testing.B) {
+			for range b.N {
+				Recycle(GridTiles(sc.windows, cfg))
+			}
+		})
+	}
 }
 
 // drawScene draws a scene the way Selector.render does
@@ -202,6 +206,7 @@ func sceneConfig(sc scene, fonts []string) Config {
 		LayoutMode:              sc.layout,
 		GridColumns:             0,
 		GridSpacing:             20,
+		GridMinThumbWidth:       320,
 	}
 	if sc.theme == "light" {
 		cfg.BackgroundColor = "#f5f5f5"
@@ -218,11 +223,17 @@ func sceneConfig(sc scene, fonts []string) Config {
 		cfg.InactiveFrame = "#404050"
 		cfg.UrgentTitleBackground = "#d32f2f"
 	}
+	// The view of a grid that scrolls where the steps from the top take it
+	// to the selection (specs/036-grid-scroll, D4)
+	if sc.layout == "grid" {
+		cfg.GridScroll = GridFollow(len(sc.windows), sc.selected, cfg)
+	}
 	return cfg
 }
 
 func scenes() []scene {
-	many := portableWindows(24)
+	all := portableWindows(100)
+	many := all[:24]
 	special := hostWindows()
 
 	var list []scene
@@ -256,6 +267,20 @@ func scenes() []scene {
 		list = append(list, scene{layout + "-e1-header-no-hint", false, layout, "dark", 2520, 1400, many, 1, -1, "ws1", "v0.1.0", ""})
 		// An overlay too narrow for the hint beside the version: none
 		list = append(list, scene{layout + "-header-narrow", false, layout, "dark", 280, 700, many[:6], 1, -1, "ws1", "v0.1.0", sceneHint(layout)})
+	}
+
+	// Grids that scroll on E1, with the header: the view at the top, in the
+	// middle — a row cut by the header, one by the bottom, a hovered tile —
+	// and at the bottom, where the selection takes it (specs/036-grid-scroll,
+	// K1)
+	for _, n := range []int{47, 100} {
+		for _, at := range []struct {
+			name            string
+			selected, hover int
+		}{{"top", 1, -1}, {"middle", n*2/3 - 1, n*2/3 - 7}, {"bottom", n - 1, -1}} {
+			list = append(list, scene{fmt.Sprintf("grid-e1-%d-%s", n, at.name), false, "grid", "dark", 2520, 1400,
+				all[:n], at.selected, at.hover, "ws1", "v0.1.0", sceneHint("grid")})
+		}
 	}
 	return list
 }

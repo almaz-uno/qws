@@ -119,6 +119,10 @@ type SceneItem struct {
 	WeightB      float64
 	Alpha        float64
 
+	// Clip, when not empty, cuts the item to it: the view of a grid that
+	// scrolls, below the header (specs/036-grid-scroll)
+	Clip Rect
+
 	// Live, when set, is drawn in place of the layers: the live picture of
 	// the card drawn before it, under the cards after it
 	// (specs/020-live-thumbnails)

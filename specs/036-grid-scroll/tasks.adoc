@@ -6,8 +6,8 @@
 . [x] T1. The research: the layout of `develop` on E1, the least and the
   columns, the scenes of Σ that change, the size of the layer and of a
   texture (D9); D1, D3, K1 amended and D9 made in the plan.
-. [ ] T2. The key — K5 — with its documents.
-. [ ] T3. `pkg/carousel`: the layout, the view, the frame with its
+. [x] T2. The key — K5 — with its documents.
+. [x] T3. `pkg/carousel`: the layout, the view, the frame with its
   scrollbar, the layers, the clip, the live items of the rows; the scenes
   of Σ rewritten with `-update` and the diff read against the research;
   K1, K2, K4; the time of the frame and of the tiles layer at 47 and 100

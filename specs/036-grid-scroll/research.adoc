@@ -172,6 +172,29 @@ and nothing of them is needed below 336 windows. A grid taller than 16384
 px is not drawn as a layer: `GridTiles` gives none, and the grid is drawn
 by the CPU frame by frame, its steps at once, as before its layers come.
 
+== The frame and the layer drawn
+
+After T3, `BenchmarkE1Grid` in `pkg/carousel`, the scenes of Σ with the
+header of E1 and the Go font (`go test ./pkg/carousel -run '^$' -bench
+E1Grid -benchtime 20x -count 3 -benchmem`), ws1 — Intel Core i9-7920X, 24
+threads —, 2026-10-14 00:01, load average 6.9–9: ms per drawing, the
+three runs.
+
+[cols="3,2,2"]
+|===
+| Drawing | Frame | Tiles layer
+
+| `grid-e1-header`, 24 windows on one screen | 45.1–45.8 | 52.6–54.7
+| `grid-e1-47-middle`, the view at 446 px | 66.8–69.3 | 85.6–87.5
+| `grid-e1-100-middle`, at 1892 px | 68.0–68.1 | 170.7–175.6
+|===
+
+The frame draws the tiles of the view alone, five rows of six, whatever
+the windows; the layer, all the rows. Its bounds: (19,109)–(2501,2405),
+22.8 MB, at 47; (19,109)–(2501,5008), 48.6 MB, at 100 — as estimated
+above. Until it comes, steps are at once (specification 007); the frame at
+rest of a step is drawn in the background in the time of a frame.
+
 == What the presenter can cut
 
 A scene item is drawn as a quad covering its rectangles (`drawScene`,
