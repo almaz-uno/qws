@@ -1,0 +1,191 @@
+= 036 — research
+:toc: left
+:toc-title: Contents
+:revdate: 2026-10-13
+
+What the grid lays out now, what the least thumbnail gives, whether the
+layer of all the rows fits the presenter (D9), and the figures the
+specification quotes, with where they come from. `develop` at `d6d535a`
+(1.6.1).
+
+== The grid now
+
+`layoutGrid` (`pkg/carousel/renderer-cpu.go`) lays n tiles out in c
+columns and r = ⌈n/c⌉ rows below the band of the header, of height `top`,
+with the spacing s between and around them:
+
+----
+c      = appearance.grid.columns, or when 0: clamp(⌈√(1.5 n)⌉, 2, 6)
+tileW  = min((W − s(c+1)) / c, thumbnail.width + 40)
+tileH  = min((H − top − s(r+1)) / r, thumbnail.height + 60)
+----
+
+the grid centred in the window below the band. Width and height are bound
+each on its own. Of a tile the thumbnail takes a box of (tileW − 20) ×
+(tileH − 60) — 10 px around it, 60 px below it for the title and the
+workspace (`gridThumbnail`) — and the picture is scaled into the box, its
+proportions kept.
+
+The layout on E1 — the overlay 2520×1400, the author's cards of 512×512,
+Noto Sans and DejaVu Sans at 20, the header with `ws1` and the version:
+`layoutGrid` itself, through a throwaway test in `pkg/carousel`,
+2026-10-13. The band of the header is 90 px.
+
+[cols="1,1,2,2"]
+|===
+| Windows | Columns × rows | Tile | Thumbnail box
+
+| 24 | 6 × 4 | 396.7 × 302.5 | 376.7 × 242.5
+| 33 | 6 × 6 | 396.7 × 195.0 | 376.7 × 135.0
+| 47 | 6 × 8 | 396.7 × 141.2 | 376.7 × 81.2
+| 100 | 6 × 17 | 396.7 × 55.9 | 376.7 × 0 — none
+|===
+
+At 47 a picture of 16:9 comes out 144×81; at 100 the box has no height
+left, and the tiles show their titles alone.
+
+== The least thumbnail (D1, D2)
+
+A tile shows a thumbnail at least m wide in the proportions of the overlay
+when its box holds m × m·H/W: tileW − 20 ≥ m and tileH − 60 ≥ m·H/W. On
+E1, m = 320: 320×177.8, the tile 340×237.8.
+
+The tiles of `layoutGrid` are no larger than `appearance.thumbnail` lets
+them: a box of at most (width + 20) × height. A least above that cannot be
+had — with the defaults, 256×256, at most 276 px wide —, and with no grid
+fitting, every grid would scroll and its tiles grow past the bound. The
+least is therefore taken as at most what the bound allows: m′ = min(m,
+width + 20, height·W/H); 320 on E1, 276 with the defaults. An amendment of
+D1 (plan).
+
+== The columns (D3)
+
+As many columns as fit across at the least size: the tiles of m′ + 20 and
+the spacing,
+
+----
+cfit = max(1, ⌊(W − s) / (m′ + 20 + s)⌋)
+----
+
+On E1, ⌊2500 / 360⌋ = 6, not 7 as the draft says: 7 columns leave tiles of
+(2520 − 8·20)/7 = 337.1 px, thumbnails of 317.1. An amendment of D3 and K1
+(plan). On a screen of 1920×1080 less the default padding of 20 px — an
+overlay of 1880×1040 —, ⌊1860 / 360⌋ = 5.
+
+D3 bounds `⌈√(1.5 n)⌉` by cfit in place of 6. Where cfit is the smaller,
+the columns of `develop` give tiles narrower than m′: their grid did not
+fit, and D2 lays it out anew anyway. Where cfit is above 6 — an overlay
+wider than 2540 px at 320 — a grid of more than 24 windows gets more
+columns than in `develop`, by D3.
+
+== The grid that scrolls
+
+Past the least, the columns as D3 gives them, the tiles as wide as they
+come, the thumbnail box in the proportions of the overlay, under the bound
+of `appearance.thumbnail`:
+
+----
+tileW = min((W − s(c+1)) / c, thumbnail.width + 40)
+boxH  = min((tileW − 20)·H/W, thumbnail.height)
+tileH = boxH + 60
+----
+
+the rows from the band of the header down, the first at `top` + s, the
+content `top` + r·tileH + (r+1)·s high, the view from `top` to the bottom
+of the window, the scroll from 0 to the content's excess over the window,
+in whole pixels.
+
+On E1:
+
+[cols="1,1,2,2,1,1"]
+|===
+| Windows | Columns × rows | Tile | Thumbnail box | Rows in view | Scroll at most
+
+| 47 | 6 × 8 | 396.7 × 269.3 | 376.7 × 209.3 | 4.53 | 1025 px
+| 100 | 6 × 17 | 396.7 × 269.3 | 376.7 × 209.3 | 4.53 | 3628 px
+|===
+
+A row is 289.3 px from the next; the view, 1310 px, holds four rows whole
+and a part of a fifth. A picture of 16:9 comes out 372×209.
+
+== The scenes of Σ
+
+`sceneConfig` (`pkg/carousel/scenes_test.go`) spells the defaults out;
+with `min_thumbnail_width` 320 among them, the scenes of the grid whose
+thumbnails come out narrower or lower than the least on one screen are laid
+out anew (D2), the others stay:
+
+[cols="3,2,4"]
+|===
+| Scene | Overlay, windows | Why
+
+| `grid-24-first`, `grid-24-middle-hover`, `grid-24-last`,
+  `grid-24-middle-light`, `grid-header-light`, `grid-header-no-hostname`
+| 1260×700, 24
+| 6 × 4 tiles of 186.7 × 150 in `develop`, boxes of 166.7 × 90 — 127.5
+  and 67.5 high with the header; 3 columns fit (D3), 3 × 8 rows that
+  scroll (D2)
+
+| `grid-header-narrow`
+| 280×700, 6
+| 3 columns of 66.7 px; one fits, of 240 px, a box of 220 under the least:
+  one column that scrolls (D2, D3)
+|===
+
+The scenes of E1 with 24 windows — boxes of 376.7 × 265 and, with the
+header, 242.5 —, `grid-2`, `grid-1`, `grid-host` and `grid-host-light`
+fit and stay.
+
+== The layer of all the rows (D9)
+
+The tiles layer, `GridTiles`, is drawn on a canvas of the window and
+cropped to what it draws (specification 007). The rows of a grid that
+scrolls need a canvas of the content: 2520 × 2425 px at 47 windows on E1,
+2520 × 5028 at 100; cropped to the tiles, x from 20 to 2500 and from the
+first row's top to the last row's bottom, some 2480 × 2295 and 2480 × 4898
+px — 22.8 and 48.6 MB at 4 bytes a pixel, against 14.1 MB of the window.
+
+GL_MAX_TEXTURE_SIZE, the largest side of a texture:
+
+[cols="2,3"]
+|===
+| ws1, NVIDIA GeForce RTX 4080 SUPER, driver 580.105.08 | 32768
+  (`glxinfo -l`, 2026-10-13)
+| ws2 and ws3, NVIDIA T1200 | not measured here; the minimum of OpenGL
+  4.6 core, the context of the presenter, is 16384
+|===
+
+16384 px are 56 rows of E1 at 289.3 px: 336 windows in 6 columns. The
+memory of the GPU — 16 GiB on ws1, 8.1 of them in use on 2026-10-13 —
+takes 48.6 MB more without notice.
+
+While a layer is drawn the CPU holds the canvas of the content, the
+scratch canvas of the heads of the same size (specification 019) and the
+crop: some 150 MB at 100 windows on E1, given back to the free list of
+canvases (specification 030), which drops them as the overlay is unmapped.
+
+*Decision.* One layer of all the rows, its bounds in the coordinates of
+the rows; a scene places it at the scroll and cuts it to the view. Bands
+would bound the canvas and the texture but put the seams of their edges
+through the tiles, more layers in the cache and more items in a scene,
+and nothing of them is needed below 336 windows. A grid taller than 16384
+px is not drawn as a layer: `GridTiles` gives none, and the grid is drawn
+by the CPU frame by frame, its steps at once, as before its layers come.
+
+== What the presenter can cut
+
+A scene item is drawn as a quad covering its rectangles (`drawScene`,
+`pkg/carousel/present_glx_scene.go`); nothing cuts it. The rows that pass
+under the header need a cut at the top of the view: the quad intersected
+with a rectangle of the item, `Clip`, before it is drawn. In whole pixels,
+and with the scroll in whole pixels, the texels of the tiles layer fall
+on the pixels of the frame as at rest, and a scene at a scroll is the
+frame at rest drawn at that scroll up to the rounding of the composition
+(K4). A live item (020) is drawn into its rectangle of pixels: cut to the
+view by cutting that rectangle and its holes.
+
+== The wheel
+
+The overlay asks for `ButtonPress` (`pkg/carousel/window.go`); the X server
+reports a turn of the wheel as a press of button 4, up, or 5, down, at the
+pointer — no events beyond the core protocol.

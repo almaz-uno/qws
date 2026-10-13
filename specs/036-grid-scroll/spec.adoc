@@ -25,12 +25,15 @@ scroll they now bring with them.
 == Decisions
 
 D1, D4 and D5, and D3, decided by the author on 2026-10-13, each as
-recommended; D2 and D6–D9 made in the specification.
+recommended; D2 and D6–D9 made in the specification; D1 and D3 amended and
+D9 made in the plan.
 
 D1 (the author's). *A least thumbnail.* The thumbnail of a tile at least
 `appearance.grid.min_thumbnail_width` wide, 320 px by default, in the
 proportions of the overlay — 320×178 on ws1's 2520×1400. 0: no least,
-the grid on one screen as now.
+the grid on one screen as now. The least is at most what
+`appearance.thumbnail` lets a tile be, a thumbnail of (width + 20) ×
+height: 276 px with the defaults of 256×256 (amended in the plan).
 
 D2. *One screen while it fits.* A grid whose thumbnails come out at least
 that wide on one screen is laid out as now, pixel for pixel; past that,
@@ -39,8 +42,9 @@ rows run below the screen.
 
 D3 (the author's). *As many columns as fit.* With `columns: 0`, the
 columns as now, `ceil(sqrt(1.5 n))`, but not at most 6: at most as many as
-fit across at the least size. On ws1's 2520 px, 7. `columns` set, that
-many, the tiles as wide as they come.
+fit across at the least size. On ws1's 2520 px, 6: 7 would give
+thumbnails of 317 px (amended in the plan). `columns` set, that many, the
+tiles as wide as they come.
 
 D4 (the author's). *The view follows the selection.* A step, by the keys
 or the arrows, that takes the selection to a row out of the view scrolls
@@ -64,9 +68,10 @@ live (020); the others are drawn from their snapshots.
 
 D9. *The layers.* The tiles of the whole grid stay one layer (007), the
 view a window onto it, the scroll a move of it under the header: no tile
-drawn again as the view moves. The research says whether the layer of all
-the rows fits the presenter (its size at 100 windows), or the layer is
-cut in bands.
+drawn again as the view moves. The layer of all the rows fits the
+presenter — 48.6 MB and 4898 px high at 100 windows on E1, against a
+texture of 16384 px at least —, not cut in bands; a grid taller than
+16384 px has no layer and is drawn by the CPU (research, plan).
 
 == Acceptance criteria
 
@@ -77,7 +82,7 @@ cut in bands.
 | K1
 | The layout: the grid of the scenes of Σ unchanged where it fits
   (`TestScenes`, `testdata/scenes.json` as it is for them); new scenes of
-  47 and 100 windows on E1 — 7 columns, thumbnails of 320 px at least, the
+  47 and 100 windows on E1 — 6 columns, thumbnails of 320 px at least, the
   view at the top, at the middle, at the bottom, a scrollbar.
 
 | K2
@@ -112,4 +117,4 @@ cut in bands.
 
 == Open decisions
 
-. D9: one layer of all the rows, or bands, by the research.
+None.
