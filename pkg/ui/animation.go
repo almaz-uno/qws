@@ -40,7 +40,19 @@ type stepAnimation struct {
 	animationLog
 	active bool
 	pos    motion // position of the selection, in windows
-	gx, gy motion // place of the selection frame of the grid, in pixels
+	gx, gy motion // place of the selection frame of the grid, in pixels of its rows at scroll 0
+	sy     motion // the scroll of the view of the grid, in pixels (specs/036-grid-scroll)
+}
+
+// moving reports whether the step moves at now: the selection, or the view
+// of the grid
+func (a *stepAnimation) moving(now time.Time) bool {
+	return a.pos.moving(now) || a.sy.moving(now)
+}
+
+// progress is how far the step is at now, from 0 to 1
+func (a *stepAnimation) progress(now time.Time) float64 {
+	return math.Min(a.pos.progress(now), a.sy.progress(now))
 }
 
 // restDrawing is the frame at rest drawn in the background, one at a time: a
@@ -117,6 +129,7 @@ type restFrame struct {
 	img      *image.RGBA
 	gen      int    // of the layers: the window list and geometry it was drawn for
 	layout   string // the layout mode it was drawn in (specs/028-grid-locate)
+	scroll   int    // the scroll of the view of the grid it was drawn at (specs/036-grid-scroll)
 	selected int
 	hover    int
 	draw     time.Duration
@@ -150,11 +163,12 @@ const (
 	gridHoverShadow             // the shadow of the hovered tile
 	gridHover                   // the hover frame
 	carouselBase                // the canvas and the header of the carousel
-	gridBase                    // of the grid: the hint of the layout key differs (specs/028-grid-locate)
+	gridBase                    // of the grid: the hint of the layout key differs (specs/028-grid-locate), the track of its scrollbar
+	gridThumb                   // the thumb of the scrollbar of a grid that scrolls; none for one that fits (specs/036-grid-scroll)
 )
 
 // gridLayers are the layers of a scene of the grid
-var gridLayers = []cardKey{{index: gridTiles}, {index: gridShadow}, {index: gridSelection}, {index: gridHoverShadow}, {index: gridHover}}
+var gridLayers = []cardKey{{index: gridTiles}, {index: gridShadow}, {index: gridSelection}, {index: gridHoverShadow}, {index: gridHover}, {index: gridThumb}}
 
 type cardLayer struct {
 	id     carousel.LayerID // 0: the card is not drawn at that offset
@@ -237,6 +251,18 @@ func (s *Selector) grid() bool {
 // stepTo moves the selection to target: animated when it can be, at once
 // otherwise — and for a wrap, a step around the list or a column
 func (s *Selector) stepTo(target int, wrap bool, thumbnails []image.Image) {
+	scroll := s.config.GridScroll
+	if s.grid() {
+		// The view follows the selection (specs/036-grid-scroll, D4)
+		scroll = carousel.GridFollow(len(s.windows), target, s.config)
+	}
+	s.moveTo(target, scroll, wrap, causeKey, thumbnails)
+}
+
+// moveTo moves the selection to target and the view of the grid to scroll,
+// for an event of the cause: animated when it can be, at once otherwise —
+// and for a wrap, a step around the list or a column
+func (s *Selector) moveTo(target, scroll int, wrap bool, cause string, thumbnails []image.Image) {
 	// A step ends the convergence of the selection frame, and starts from the
 	// tile (specs/028-grid-locate, D6)
 	s.endLocate()
@@ -245,6 +271,7 @@ func (s *Selector) stepTo(target int, wrap bool, thumbnails []image.Image) {
 		s.cancelStep()
 		s.animOffset = 0
 		s.selectedIndex = target
+		s.config.GridScroll = scroll
 		s.render(thumbnails)
 		s.prefetch()
 		return
@@ -256,24 +283,30 @@ func (s *Selector) stepTo(target int, wrap bool, thumbnails []image.Image) {
 		s.step.begin(s.animations, s.timing.start)
 		s.step.active = true
 		s.step.pos.rest(float64(s.selectedIndex))
-		x, y, _, _ := carousel.GridTile(len(s.windows), s.selectedIndex, s.config)
+		x, y := s.gridRowsTile(s.selectedIndex)
 		s.step.gx.rest(x)
 		s.step.gy.rest(y)
+		s.step.sy.rest(float64(s.config.GridScroll))
 		if !s.fade.active {
 			s.frameDue = time.Time{}
 		}
 	}
-	if s.step.pos.moving(now) {
+	if s.step.moving(now) {
 		s.step.retargets++
 	}
 	s.step.cause = s.timing.start
 	s.step.fresh = true
 	from := s.step.pos.at(now)
 	s.step.pos.moveTo(now, float64(target))
-	x, y, _, _ := carousel.GridTile(len(s.windows), target, s.config)
+	x, y := s.gridRowsTile(target)
 	s.step.gx.moveTo(now, x)
 	s.step.gy.moveTo(now, y)
+	// The view moves as the selection does: by the step's duration, 0 while
+	// still (specs/036-grid-scroll, D4)
+	s.step.sy.d = s.step.pos.d
+	s.step.sy.moveTo(now, float64(scroll))
 	s.selectedIndex = target
+	s.config.GridScroll = scroll
 
 	s.ensureBase()
 	if !s.grid() {
@@ -281,7 +314,47 @@ func (s *Selector) stepTo(target int, wrap bool, thumbnails []image.Image) {
 	}
 	s.prefetch()
 	s.rest.awaited = false
-	s.requestRest(causeKey)
+	s.requestRest(cause)
+}
+
+// gridRowsTile is the top-left corner of tile i of the grid in its rows: at
+// scroll 0
+func (s *Selector) gridRowsTile(i int) (float64, float64) {
+	cfg := s.config
+	cfg.GridScroll = 0
+	x, y, _, _ := carousel.GridTile(len(s.windows), i, cfg)
+	return x, y
+}
+
+// gridScrollAt is the scroll of the view of the grid at now, in whole
+// pixels: of the step while it moves
+func (s *Selector) gridScrollAt(now time.Time) int {
+	if s.step.active {
+		return int(math.Round(s.step.sy.at(now)))
+	}
+	return s.config.GridScroll
+}
+
+// followSelection scrolls the view of the grid the least that shows the
+// selection, within the ends of a list that may have changed
+// (specs/036-grid-scroll, D4)
+func (s *Selector) followSelection() {
+	s.config.GridScroll = carousel.GridFollow(len(s.windows), s.selectedIndex, s.config)
+}
+
+// scrollGrid scrolls the view of the grid by rows, within its ends — the
+// selection where it is — as a step moves it (specs/036-grid-scroll, D5)
+func (s *Selector) scrollGrid(rows int, thumbnails []image.Image) bool {
+	if !s.grid() || len(s.windows) == 0 {
+		return false
+	}
+	view := carousel.GridViewOf(len(s.windows), s.config)
+	scroll := min(max(s.config.GridScroll+rows*int(math.Round(view.Row)), 0), view.MaxScroll)
+	if scroll == s.config.GridScroll {
+		return false
+	}
+	s.moveTo(s.selectedIndex, scroll, false, causeEvent, thumbnails)
+	return true
 }
 
 // requestRest draws the frame at rest of the current selection and hover in
@@ -393,7 +466,7 @@ func (s *Selector) startRest() {
 	s.rest.busy, s.rest.want = true, false
 	data := s.prepareWindowData()
 	cfg := s.config
-	frame := restFrame{gen: s.layers.gen, layout: cfg.LayoutMode, selected: s.selectedIndex, hover: s.hoverIndex}
+	frame := restFrame{gen: s.layers.gen, layout: cfg.LayoutMode, scroll: cfg.GridScroll, selected: s.selectedIndex, hover: s.hoverIndex}
 	renderer, results := s.renderer, s.rest.results
 	go func() {
 		fonts := fontSets.get()
@@ -414,7 +487,7 @@ func (s *Selector) startRest() {
 // current target, or else the start of the drawing of that target
 func (s *Selector) collectRest(r restFrame) {
 	s.rest.busy = false
-	if r.gen == s.layers.gen && r.layout == s.config.LayoutMode && r.selected == s.selectedIndex && r.hover == s.hoverIndex {
+	if r.gen == s.layers.gen && r.layout == s.config.LayoutMode && r.scroll == s.config.GridScroll && r.selected == s.selectedIndex && r.hover == s.hoverIndex {
 		s.dropRest()
 		s.rest.ready, s.rest.want = &r, false
 		s.rest.staged, s.rest.failed = false, false
@@ -433,7 +506,7 @@ func (s *Selector) ensureBase() {
 	if s.base() != 0 {
 		return
 	}
-	s.setLayer(layerResult{s.layers.gen, baseKey(s.config.LayoutMode), carousel.CarouselBase(s.config)})
+	s.setLayer(layerResult{s.layers.gen, baseKey(s.config.LayoutMode), drawLayer(s.prepareWindowData(), baseKey(s.config.LayoutMode), s.config)})
 }
 
 // motionLayers are the card layers a motion from p to target passes
@@ -496,13 +569,14 @@ func (s *Selector) carouselReady() bool {
 }
 
 // gridReady reports whether the animator holds the layers of a scene of the
-// grid, and its base, whichever layout is shown
+// grid, and its base, whichever layout is shown: the thumb of the scrollbar
+// drawn, none for a grid that fits (specs/036-grid-scroll)
 func (s *Selector) gridReady() bool {
 	if s.layers.cards[baseKey("grid")].id == 0 {
 		return false
 	}
 	for _, key := range gridLayers {
-		if l, ok := s.layers.cards[key]; !ok || l.id == 0 {
+		if l, ok := s.layers.cards[key]; !ok || l.id == 0 && key.index != gridThumb {
 			return false
 		}
 	}
@@ -517,8 +591,13 @@ func drawLayer(data []carousel.WindowData, key cardKey, cfg carousel.Config) *im
 	if key.index >= 0 {
 		return carousel.CardLayer(data, key.index, key.offset, cfg)
 	}
-	if key.index == carouselBase || key.index == gridBase {
+	switch key.index {
+	case carouselBase:
 		return carousel.CarouselBase(cfg)
+	case gridBase:
+		return carousel.GridBase(len(data), cfg)
+	case gridThumb:
+		return carousel.GridScrollThumb(len(data), cfg)
 	}
 	_, _, w, h := carousel.GridTile(len(data), 0, cfg)
 	switch key.index {
@@ -724,8 +803,8 @@ func (s *Selector) frame() {
 	stepped, atRest := false, false // a frame of the step; its last
 	drawStart, drawEnd := now, now
 	switch {
-	case s.step.active && s.step.pos.moving(now) || hovering || locating:
-		stepped = s.step.active && s.step.pos.moving(now)
+	case s.step.active && s.step.moving(now) || hovering || locating:
+		stepped = s.step.active && s.step.moving(now)
 		items := s.sceneItems(now)
 		drawEnd = time.Now()
 		err = s.animator.PresentScene(s.base(), items, fade)
@@ -767,7 +846,7 @@ func (s *Selector) frame() {
 		}
 	}
 	if stepped {
-		counts(s.config.LayoutMode, s.logAnimationFrame(&s.step.animationLog, s.config.LayoutMode, s.step.pos.progress(now), atRest, drawStart, drawEnd, end))
+		counts(s.config.LayoutMode, s.logAnimationFrame(&s.step.animationLog, s.config.LayoutMode, s.step.progress(now), atRest, drawStart, drawEnd, end))
 	}
 	if s.fade.active {
 		done := !s.fade.level.moving(now)
@@ -818,10 +897,24 @@ func (s *Selector) sceneItems(now time.Time) []carousel.SceneItem {
 // selection where it is on its way while a step moves, the hover frames at
 // their levels — of the tile under the pointer, and of those it left while
 // they go
+//
+// The tiles of a grid that scrolls are placed at the scroll of the view at
+// now, the shadows and frames at their tiles, the thumb of the scrollbar at
+// its offset, each cut to the view (specs/036-grid-scroll).
 func (s *Selector) gridItems(now time.Time) []carousel.SceneItem {
-	x, y, w, h := carousel.GridTile(len(s.windows), s.selectedIndex, s.config)
+	n := len(s.windows)
+	scroll := s.gridScrollAt(now)
+	clip := carousel.GridViewOf(n, s.config).Clip(s.config)
+	// tile is the rectangle of tile i in the window at the scroll
+	tile := func(i int) (x, y, w, h float64) {
+		cfg := s.config
+		cfg.GridScroll = 0
+		x, y, w, h = carousel.GridTile(n, i, cfg)
+		return x, y - float64(scroll), w, h
+	}
+	x, y, w, h := tile(s.selectedIndex)
 	if s.step.active {
-		x, y = s.step.gx.at(now), s.step.gy.at(now)
+		x, y = s.step.gx.at(now), s.step.gy.at(now)-float64(scroll)
 	}
 	// The selection frame and the shadow converging onto the tile after a
 	// switch, about its centre (specs/028-grid-locate)
@@ -841,21 +934,22 @@ func (s *Selector) gridItems(now time.Time) []carousel.SceneItem {
 		}
 		b := l.bounds
 		r := carousel.Rect{X: dx + float64(b.Min.X), Y: dy + float64(b.Min.Y), W: float64(b.Dx()), H: float64(b.Dy())}
-		items = append(items, carousel.SceneItem{A: l.id, Alpha: f.Alpha, RectA: zoomRect(r, cx, cy, f.Scale)})
+		items = append(items, carousel.SceneItem{A: l.id, Alpha: f.Alpha, RectA: zoomRect(r, cx, cy, f.Scale), Clip: clip})
 	}
 	hovered := func(key cardKey) {
 		for _, h := range hovers {
-			hx, hy, w, hh := carousel.GridTile(len(s.windows), h.index, s.config)
+			hx, hy, w, hh := tile(h.index)
 			add(key, hx, hy, s.hoverLook(h.v), hx+w/2, hy+hh/2)
 		}
 	}
 	add(cardKey{index: gridShadow}, x, y, look, cx, cy)
 	hovered(cardKey{index: gridHoverShadow})
-	add(cardKey{index: gridTiles}, 0, 0, carousel.Opaque, 0, 0)
+	add(cardKey{index: gridTiles}, 0, -float64(scroll), carousel.Opaque, 0, 0)
 	// The live thumbnails over the tiles, under the frames
-	items = append(items, s.liveTiles()...)
+	items = append(items, s.liveTiles(scroll)...)
 	hovered(cardKey{index: gridHover})
 	add(cardKey{index: gridSelection}, x, y, look, cx, cy)
+	add(cardKey{index: gridThumb}, 0, float64(carousel.GridThumbOffset(n, scroll, s.config)), carousel.Opaque, 0, 0)
 	return items
 }
 

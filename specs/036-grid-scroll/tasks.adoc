@@ -12,7 +12,7 @@
   of Σ rewritten with `-update` and the diff read against the research;
   K1, K2, K4; the time of the frame and of the tiles layer at 47 and 100
   windows on E1, into the research.
-. [ ] T4. `pkg/ui`: the scroll of the steps and the wheel, the scene, the
+. [x] T4. `pkg/ui`: the scroll of the steps and the wheel, the scene, the
   mouse, the live thumbnails in the view; K3.
 . [ ] T5. K6 on every commit, in a worktree of its own.
 . [ ] T6. The author's trial on ws1: K7.

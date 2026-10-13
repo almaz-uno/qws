@@ -65,12 +65,13 @@ type frameRecorder struct {
 type recordedFrame struct {
 	layout, hint string
 	selected     int
+	scroll       int // of the view of the grid (specs/036-grid-scroll)
 }
 
 func (r *frameRecorder) record(layout string, selected int, cfg carousel.Config) *image.RGBA {
 	r.Lock()
 	defer r.Unlock()
-	r.frames = append(r.frames, recordedFrame{layout, cfg.LayoutHint, selected})
+	r.frames = append(r.frames, recordedFrame{layout, cfg.LayoutHint, selected, cfg.GridScroll})
 	return image.NewRGBA(image.Rect(0, 0, cfg.Width, cfg.Height))
 }
 
