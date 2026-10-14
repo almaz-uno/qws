@@ -3,7 +3,7 @@
 :toc-title: Contents
 :sectnums:
 :revdate: 2026-10-14
-:status: draft
+:status: implemented
 :issue: 104
 
 == What and why
@@ -213,12 +213,44 @@ The layers of the cards uploaded in the pause before a frame, 1.2–1.3 MB,
 cost it 10–12 ms of presenting on ws1 at 144 Hz, two slots lost (research,
 "Finding"): a real stall, left for a later specification.
 
+== Results
+
+Off the screen: the tests on ws1, the commits `ff4e870` to `3bdbe23`, each
+in a worktree of its own; checked again on `3bdbe23`, `go test -count=1
+./...`. On the desktop: the author's trial on ws2 on 2026-10-14, 16:23,
+the build of `3bdbe23` (`v1.6.1-20-g3bdbe23`) on Alt+F11 beside the
+service, `--log-level debug` (`~/.cache/qws-035/log-k7.txt` on ws2);
+before it a pass on ws1 with no activation.
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | Met. `TestAnimationToggle`, `TestAnimationToggleFlag`,
+  `TestRoundTrip`, `TestTagNames`, `TestJoinedKeys`; `config show` of the
+  build on the files of ws1 and ws2: no warning, `animation_toggle: a`,
+  `enabled: auto`.
+| K2 | Met. `TestAnimationKeyViewer`, `TestAnimationKeyStep`,
+  `TestAnimationKeySettings`, `TestAnimationKeyRepeat`.
+| K3 | Met. `TestAnimationKeyHint`, `TestAnimationHint`.
+| K4 | Met. `TestScenes`: no digest of before changed; six scenes new, the
+  two narrow equal to the `-header-narrow` digests.
+| K5 | Met. `TestStillViewer`, `TestAnimationSettings`,
+  `TestViewerWhileDrawn`, `TestTCPLines`, `TestViewerConnected`; the tests
+  of the frames that slip removed.
+| K6 | Met. Every commit in a worktree of its own; `-race` of `pkg/ui`,
+  `pkg/carousel`, `pkg/snapshot`, `pkg/x11`.
+| K7 | Met without a viewer; over VNC not tried. Three activations on the
+  screen of 165 Hz, no viewer connected: 1373 frames of the steps of the
+  carousel, 612 of the grid — its view following the selection, animated
+  —, 67 of the convergence, none made still by them; the key four times,
+  "Animation toggled off by the key" and "on" in turn, once a change; no
+  warning or error. The author: "выглядит хорошо". The viewer's part rests
+  on `TestAnimationKeyViewer` and on D4 of 031, unchanged.
+|===
+
 == Open decisions
 
-O1. *Across activations or to the end of one* (D2): the specification has
-the key hold until qws restarts; for the author to confirm at the trial
-(K7).
-
-O2. *The pictures of `README.md`*: `console/readme-demo` draws the hint of
-the animation key on, as the switcher does by default, but the images of
-`doc/images` are not drawn anew in this change (`make readme-images`).
+None. O1 confirmed by the author on 2026-10-14 ("да, это ок"): the key
+holds until qws restarts. O2 done: the images of `doc/images` drawn anew
+by `make readme-images`, the carousel showing `A — animation on`.
