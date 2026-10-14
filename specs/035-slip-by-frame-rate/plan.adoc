@@ -1,0 +1,62 @@
+= 035 — plan
+:toc: left
+:toc-title: Contents
+:revdate: 2026-10-14
+
+== Approach
+
+*The window* (D2, D3). `autoAnimation` keeps, in place of the ring of 60
+lateness flags and its count, a ring of the intervals of the frames
+counted, `slipFrames` (512) long, with their number and their sum.
+`frame(interval, period)` adds the interval, drops the oldest while the
+others still span `slipSpan` (0.5 s) — and the oldest when the ring is
+full —, and makes it still when the window spans `slipSpan` or more and
+`frames × period < slipShare × span`, `slipShare` 0.75: the mean rate
+below 75 % of the refresh rate, in integers of nanoseconds but for the
+share. The period is the one passed with the frame, as now. `begin`
+starts the window anew at the probe, as it started the ring. Which frames
+are counted, and once at the longest interval of their records, stays in
+`Selector.frame` (`pkg/ui/animation.go`) as it is; its comment on the
+third late is changed.
+
+*The record* (D5). `become` logs "Animation still: the frames slip" with
+`fps` — frames over span —, `refresh_hz`, `frames` and `window_ms`; the
+period it needs is kept by `frame` when it makes it still.
+
+*The tests.* `TestSlipCount` builds windows at the periods of 60, 144 and
+165 Hz: a pause of 100 ms and of 150 ms among on-time frames, a pause on
+either side of the edge of 75 % — the window exactly 0.5 s of m on-time
+frames and the pause, (m + 1)·period against 0.75 × 0.5 s —, a load of
+30 ms from an empty window, a window not yet full, 512 frames in less
+than 0.5 s, the window across activations, the probe, the kinds, off.
+`TestSlipReplay` replays A, B, `fast-ws1.txt` as recorded and after a
+window of on-time frames, B scaled to 60 Hz, and B followed by a load,
+reporting the lowest share of a full window. `TestStillFrames` fills the
+window with on-time frames of 7 ms before each step it trips at a period
+of 1 ns: the first frame counted makes it still.
+
+== Files
+
+[cols="2,5"]
+|===
+| File | What changes
+
+| `pkg/ui/auto.go`
+| The constants, the window in `autoAnimation`, `frame`, `begin`, the
+  record of `become`.
+
+| `pkg/ui/animation.go`
+| The comment at the call of `frame`.
+
+| `pkg/ui/auto_test.go`, `pkg/ui/testdata/fast-ws1.txt`
+| K1–K3; the frames of ws1.
+
+| `doc/configuration.asciidoc`
+| `enabled: auto`: the mean rate of the last 0.5 s, not 3 late of 60.
+|===
+
+`README.md` says "when its frames slip" and stays as it is.
+
+What must stay: everything of 031 but the count — the key, the viewer,
+the probe after five minutes, the still activation, the kinds counted;
+`pkg/carousel` as it is.

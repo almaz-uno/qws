@@ -1,0 +1,226 @@
+= 035 — research
+:toc: left
+:toc-title: Contents
+:revdate: 2026-10-14
+
+The frames the decision rests on, the rule of 031 and the candidates of D2
+and D3 replayed over them, and the window and the share chosen (O1).
+`develop` at `d6d535a` (1.6.1).
+
+== The frames of ws1
+
+ws1, 2026-10-14, 00:44–09:20: 2560×1440 at 144 Hz (a period of
+6.944525 ms, the `period_ms` of every record), i3, the `glx` renderer,
+44 windows. A
+trial build — 1.6.1 with the grid scroll of 036 — beside the service on
+Alt+F11, `--log-level debug`; the author stepped through the carousel and
+the grid by hand, fast steps among them. The log, the colours of the
+console writer stripped, is kept on ws1 at
+`~/.cache/qws-035/research/ws1-2026-10-14.txt` (2.6 MB, 27 509 lines, 420
+records "Animation frame"); it is not committed: of it the count needs the
+intervals, which `pkg/ui/testdata/fast-ws1.txt` holds (section "The frames
+as test data").
+
+The count of 031 made it still twice, both falsely:
+
+. 07:56, "Animation still: the frames slip frames=35 late=3". The frames
+  counted are those of one step at 00:55 (activation 3, 22 intervals) and
+  of the convergence of the grid at 07:56 (activation 4, 13 intervals);
+  the three late are 13.1 ms in the step — 1276 KB of layers uploaded in
+  the pause before it, presented in 6.6 ms — and 9.6 ms at its end, the
+  scene at the target presented while the frame at rest was drawn, and,
+  seven hours later, 12.7 ms in the convergence — 630 KB uploaded,
+  presented in 6.1 ms. The ring of 60 carried the first two across the
+  seven hours. The rates of the two runs: 142 fps of 144 each.
+. 09:20, the probe — the first activation five minutes after, 84
+  minutes later — and the count anew, "Animation still: the frames slip
+  frames=11 late=3", in the first step of activation 10, fast steps:
+  6.8, 6.9, 6.9, 6.9, *18.8*, 0.37, 1.5, *17.4*, 0.42, 3.2, *8.8* ms. Each
+  long interval follows a pause that uploaded the layers of the cards,
+  1260–1287 KB, and is presented in 12.1, 10.6 and 2.1 ms; the schedule
+  of the frames (`frameDue`) starts anew and the frames that follow come
+  at once, 0.4–3 ms after. The 11 intervals sum to 78.1 ms: 141 fps.
+
+Of the 46 frames counted while animated, the 4 presented in more than
+5 ms had layers uploaded before them, 630 KB or more; of the 10 with 1 MB
+or more uploaded, 3; of the 31 with nothing uploaded, none. The rest of
+the log is still: its steps at once, their records at rest 30–190 ms after
+the frame before — the time the frame at rest takes to draw, presented by
+`uploadIdle` and not counted, nor counted while still.
+
+=== Finding: the layers of the cards uploaded stall the frames
+
+Not changed here, a candidate for a later specification. An upload of
+1.2–1.3 MB of the layers of the cards in the pause before a frame costs
+that frame 10–12 ms of presenting on ws1 at 144 Hz — two slots lost, a
+real stall, not the jitter of the timer — in 2 of the 10 frames counted
+with as much uploaded, and 6.6 ms in a third. The uploads of a pause stop
+at 1 MB (`pauseUpload` of `waitFrame`), but a layer taken below it goes
+whole. 031 found
+the uploads not making the frames late on ws2 at 165 Hz ("The count
+replayed": 1 of 416 such frames late in B); on ws1 they do.
+
+== The rules replayed
+
+The count over the records of the batches in their order, as
+`TestSlipReplay` replays them: the intervals of the records of the kinds
+counted — the steps, the hover, the convergence; not the fades —, the
+first frame of an animation, without an interval, not among them; the
+window carried across the activations; no probe — once still, the replay
+ends. The rules:
+
+* *3 late of 60* — 031, D5: an interval above 1.25 periods late, still at
+  the third of the last 60 frames counted.
+* *W s, S %* — the window of D2: the latest frames counted whose
+  intervals sum to W or more, the fewest such; full once they reach W;
+  still when it is full and its mean rate — its frames over the sum of
+  their intervals — is below S % of the refresh rate.
+* *W s, S %, two* — the same, and the window before it, of the frames
+  just older, below S % as well: two windows in a row.
+
+The batches: A and B of 031 (ws2, 165 Hz; A with a VNC viewer), the
+frames of ws1 above — as recorded, and after a window of on-time frames,
+since as recorded they span 0.33 s and fill no window —, B with every
+interval and the period scaled to 60 Hz. Synthetic: a load — every
+interval 30 or 50 ms — from an empty window and after a full window of
+on-time frames; every other slot lost — every interval two periods —;
+every third — one period and two, in turn —; a pause of 100–300 ms,
+followed by a frame at once (0.4 ms) as the schedule starts anew, among
+on-time frames; the stalls of activation 10 of ws1 after every four
+on-time frames, over 3 s. A cell is the time of animation counted until
+it goes still — for the load after B, since the load began; for a pause,
+since the pause began —, or "never" with the lowest share of the refresh
+rate of a full window.
+
+[cols="4,2,3,3,3,3,3,3",options="header"]
+|===
+| Case | 3 late of 60 | 0.5 s, 75 % | 0.5 s, 75 %, two | 0.5 s, 66 % | 0.5 s, 66 %, two | 1 s, 75 % | 1 s, 66 %
+| A, 165 Hz, a viewer | 0.18 s | never (98.7 %) | never (98.7 %) | never (98.7 %) | never (98.7 %) | never (99.9 %) | never (99.9 %)
+| B, 165 Hz | never | never (99.8 %) | never (99.8 %) | never (99.8 %) | never (99.8 %) | never (100.3 %) | never (100.3 %)
+| ws1, 144 Hz | 0.25 s | never | never | never | never | never | never
+| ws1, the window full before | 0.25 s | never (97.0 %) | never (97.0 %) | never (97.0 %) | never (97.0 %) | never (98.5 %) | never (98.5 %)
+| B scaled to 60 Hz | never | never (99.3 %) | never (99.3 %) | never (99.3 %) | never (99.3 %) | never (99.8 %) | never (99.8 %)
+| B, then a load of 30 ms | 0.09 s | 0.18 s | 0.69 s | 0.24 s | 0.75 s | 0.33 s | 0.45 s
+| 144 Hz, a load of 30 ms | 0.09 s | 0.51 s | 1.02 s | 0.51 s | 1.02 s | 1.02 s | 1.02 s
+| 144 Hz, a load of 30 ms, the window full | 0.09 s | 0.18 s | 0.69 s | 0.24 s | 0.75 s | 0.33 s | 0.45 s
+| 144 Hz, a load of 50 ms | 0.15 s | 0.55 s | 1.10 s | 0.55 s | 1.10 s | 1.00 s | 1.00 s
+| 144 Hz, a load of 50 ms, the window full | 0.15 s | 0.15 s | 0.70 s | 0.20 s | 0.75 s | 0.30 s | 0.40 s
+| 144 Hz, every other slot lost | 0.04 s | 0.26 s | 0.76 s | 0.35 s | 0.85 s | 0.51 s | 0.68 s
+| 144 Hz, every third slot lost | 0.06 s | 0.40 s | 0.90 s | never (66.7 %) | never (66.7 %) | 0.77 s | never (66.7 %)
+| 144 Hz, a pause of 100 ms | never | never (81.5 %) | never (81.5 %) | never (81.5 %) | never (81.5 %) | never (90.7 %) | never (90.7 %)
+| 144 Hz, a pause of 150 ms | never | 0.15 s | never (71.6 %) | never (71.6 %) | never (71.6 %) | never (85.8 %) | never (85.8 %)
+| 144 Hz, a pause of 200 ms | never | 0.20 s | never (61.8 %) | 0.20 s | never (61.8 %) | never (80.8 %) | never (80.8 %)
+| 144 Hz, a pause of 300 ms | never | 0.30 s | never (41.6 %) | 0.30 s | never (41.6 %) | 0.30 s | never (70.7 %)
+| 60 Hz, a load of 30 ms | 0.09 s | 0.51 s | 1.02 s | 0.51 s | 1.02 s | 1.02 s | 1.02 s
+| 60 Hz, a load of 30 ms, the window full | 0.09 s | 0.30 s | 0.81 s | 0.39 s | 0.90 s | 0.57 s | 0.78 s
+| 60 Hz, a load of 50 ms | 0.15 s | 0.55 s | 1.10 s | 0.55 s | 1.10 s | 1.00 s | 1.00 s
+| 60 Hz, a load of 50 ms, the window full | 0.15 s | 0.20 s | 0.75 s | 0.30 s | 0.85 s | 0.40 s | 0.55 s
+| 60 Hz, every other slot lost | 0.10 s | 0.27 s | 0.80 s | 0.37 s | 0.90 s | 0.50 s | 0.70 s
+| 60 Hz, every third slot lost | 0.15 s | 0.40 s | 0.92 s | 0.55 s | never (65.6 %) | 0.75 s | never (66.7 %)
+| 60 Hz, a pause of 100 ms | never | never (83.9 %) | never (83.9 %) | never (83.9 %) | never (83.9 %) | never (91.7 %) | never (91.7 %)
+| 60 Hz, a pause of 150 ms | never | 0.15 s | never (74.2 %) | never (74.2 %) | never (74.2 %) | never (86.7 %) | never (86.7 %)
+| 60 Hz, a pause of 200 ms | never | 0.20 s | never (64.5 %) | 0.20 s | never (64.5 %) | never (81.7 %) | never (81.7 %)
+| 60 Hz, a pause of 300 ms | never | 0.30 s | never (45.2 %) | 0.30 s | never (45.2 %) | 0.30 s | never (71.7 %)
+| 144 Hz, the stalls of ws1 over and over | 0.08 s | never (95.5 %) | never (95.5 %) | never (95.5 %) | never (95.5 %) | never (96.5 %) | never (96.5 %)
+|===
+
+The script prints the synthetic cases at 165 Hz too: they differ from
+those at 144 Hz by 0.02 s and 0.4 % at most; 1 s with two windows in a row is left out of the table: a
+load of 30 ms from an empty window does not make it still within the 2 s
+of the case.
+
+The rule of 031 replayed over the frames of ws1 goes still where the log
+says: at the 13th frame counted of activation 4, the 35th of the window;
+started anew at activation 10, as the probe started it, at its 11th.
+
+What the table says:
+
+* No rule of the mean makes the recorded frames still — A, B, ws1, at
+  165, 144 and 60 Hz: the lowest window keeps 97.0 % of the refresh rate
+  or more, the long intervals and the catch-up after them cancelling in
+  the mean (D1). Neither the stalls of the uploads above, made a pattern
+  — 95.5 % —: two slots lost in eleven.
+* A viewer is no longer seen by the frames: A keeps 98.7 % — 162.7 fps —
+  in its worst window of 0.5 s. K2 of 031 — batch A goes still within
+  its first three activations — no longer holds; nor the second part of
+  its K7, a viewer on a port not listed going still by the frames. The
+  viewer is told by its port (D4).
+* A load: still in the time the window takes to fill, 0.51–0.55 s, from
+  an empty window — after the probe, or a start —; and from a window full
+  of on-time frames, once a share 1 − S of the window is lost:
+  W·(1 − S)/(1 − p/L) of a load of intervals L at a period p — 0.16 s of
+  30 ms at 144 Hz, 0.28 s at 60 Hz. Two windows in a row take 0.69–1.1
+  s, at the edge of the second asked for.
+* A single pause, among on-time frames, makes it still above
+  W·(1 − S) + p: 132 ms at 144 Hz, 131 ms at 165 Hz, 142 ms at 60 Hz for
+  0.5 s and 75 %; 177–187 ms for 66 %; 257–267 ms for 1 s and 75 %. Two
+  windows in a row are not made still by any single pause.
+* 66 % keeps a display that loses every third slot animated — 66.7 % of
+  the refresh rate, judder on every third frame.
+
+The rounding of the test data to the microsecond moves the sum of a
+window by half a microsecond a frame at most: no share above by less than
+0.01 %.
+
+== The choice (O1)
+
+0.5 s and 75 %, one window, as D2 and D3 first said. Of the candidates it
+is the one that makes a load still within 0.5 s of animation from an
+empty window and keeps every recorded frame animated; it loses to the
+others on a single pause: one of 150 ms makes it still — 0.15 s in the
+table, at 144 and at 60 Hz —, one of 100 ms does not, the edge some
+132–142 ms. A frozen frame of 150 ms is 21 slots lost at 144 Hz, 9 at
+60 Hz; still for five minutes after it is the price of seeing a load
+within the window. 1 s would keep pauses up to 257 ms but take 1 s of
+animation — seven steps of 150 ms — from an empty window; two windows in
+a row would keep any pause and take up to 1.1 s; 66 % would keep every
+third slot lost.
+
+The frames the window holds are bounded, 512: that many within 0.5 s are
+above 1000 fps, never below 75 % of a refresh rate of 1365 Hz or less; a
+window that holds 512 frames and spans less than 0.5 s is not full.
+
+== The frames as test data
+
+`pkg/ui/testdata/fast-ws1.txt` holds of the log of ws1 what the count
+needs, in the form of `vnc-a.txt` and `vnc-b.txt` (031, "The batches as
+test data"): of each record "Animation frame" with an interval while
+animated — none between "Animation still" and "Animation back" —, its
+activation, its kind and its interval in microseconds, a line a run of
+records of one kind in one activation, in their order, and the period in
+a comment. Made on ws1 in the clone of the branch:
+
+[source,sh]
+----
+{
+  printf '# The frames of the trial of specs/035-slip-by-frame-rate, research: ws1,\n'
+  printf '# 2560x1440 at 144 Hz, 2026-10-14; the records "Animation frame" with an\n'
+  printf '# interval while animated, in their order. A line is a run of records of\n'
+  printf '# one kind in one activation: the activation, the kind, the intervals in\n'
+  printf '# microseconds.\n'
+  printf '# period_us 6944.525\n'
+  sed 's/\x1b\[[0-9;]*m//g' research/ws1-2026-10-14.txt |
+  awk '/Animation still/ { still = 1; next }
+    /Animation back/ { still = 0; next }
+    /Animation frame/ && !still {
+      a = k = i = ""
+      for (n = 1; n <= NF; n++) {
+        split($n, f, "=")
+        if (f[1] == "activation") a = f[2]
+        else if (f[1] == "kind") k = f[2]
+        else if (f[1] == "interval_ms") i = f[2]
+      }
+      if (i == "") next
+      us = sprintf("%.0f", i * 1000)
+      if (a == pa && k == pk) { line = line " " us; next }
+      if (line != "") print line
+      line = a " " k " " us; pa = a; pk = k
+    }
+    END { if (line != "") print line }'
+} > pkg/ui/testdata/fast-ws1.txt
+----
+
+The table above is printed by `replay.py`, next to this document, from
+the root of the repository: `python3
+specs/035-slip-by-frame-rate/replay.py pkg/ui/testdata/vnc-a.txt
+pkg/ui/testdata/vnc-b.txt pkg/ui/testdata/fast-ws1.txt`.

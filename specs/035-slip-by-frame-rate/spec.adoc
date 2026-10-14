@@ -2,7 +2,7 @@
 :toc: left
 :toc-title: Contents
 :sectnums:
-:revdate: 2026-10-13
+:revdate: 2026-10-14
 :status: draft
 :issue: 104
 
@@ -27,14 +27,22 @@ a viewer, 164 without. The rule counts the jitter of the frame timer, not
 frames lost: at 165 Hz the slack is within the jitter, which grows when
 fast steps draw their layers beside the frames.
 
+ws1, 2026-10-14, 144 Hz (research): the count went still twice, both
+falsely — at 3 late of 35 frames counted, two of them from a step seven
+hours before the third; and after the probe at 3 late of 11, in a fast
+step whose long intervals, after layers of the cards uploaded, are each
+followed by frames at once: the 11 at 141 fps of 144.
+
 The specification is a delta to `develop` at `d6d535a` (1.6.1) and to 031.
-Unchanged: the setting and its key; the viewer of D4; the probe of D6; the
-records of D7; which frames are counted (D5 as amended, O1); the pictures.
+Unchanged, of 031: the setting and its key; the viewer of D4; the probe
+of D6; the records of D7, but the fields of one (D5 here); which frames
+are counted (its D5 as amended, its O1); the pictures.
 
 == Decisions
 
-D1 decided by the author on 2026-10-13; D2–D4 made in the specification,
-their numbers provisional until the research measures them (O1).
+D1 decided by the author on 2026-10-13, with the numbers of D2 and D3 as
+a draft; D2–D5 made in the specification, the numbers settled by the
+research on 2026-10-14 (O1).
 
 D1 (the author's). *By the frame rate.* The frames slip when their mean
 rate falls, not when some intervals are long: the mean of the intervals of
@@ -43,23 +51,41 @@ late is followed by one early while the schedule catches up, and the two
 cancel in the mean; a slot lost does not.
 
 D2. *A window of time.* The frames counted of the last 0.5 s of
-animation — the intervals of the frames counted whose sum, from the
-latest back, is within 0.5 s —, not the last 60 frames: 60 frames are 1 s
-at 60 Hz and 0.36 s at 165 Hz; a window of time is the same on every
-screen. The window runs on across the activations, as the count of 031.
-The first frame of an animation has no interval and is not counted, as
-now: the pauses between the animations are not in the mean.
+animation — the latest frames counted whose intervals sum to 0.5 s or
+more, the fewest such —, not the last 60 frames: 60 frames are 1 s at
+60 Hz and 0.36 s at 165 Hz; a window of time is the same on every screen.
+The window runs on across the activations, as the count of 031, and the
+probe of D6 starts it anew. The first frame of an animation has no
+interval and is not counted, as now: the pauses between the animations
+are not in the mean. The window holds 512 frames at most: as many within
+0.5 s are above 1000 fps; holding them in less, it is not full.
 
-D3. *A share of the refresh rate.* Still when the window is full — its
-frames span 0.5 s — and its mean rate is below 75 % of the refresh rate:
-124 fps at 165 Hz, 45 fps at 60 Hz. A pause of 100 ms in a window of
-0.5 s keeps it at some 81 %, one of 150 ms takes it to some 70 %.
+D3. *A share of the refresh rate, one window.* Still when the window is
+full — its frames span 0.5 s — and its mean rate — its frames over the
+sum of their intervals — is below 75 % of the refresh rate: 124 fps at
+165 Hz, 108 fps at 144 Hz, 45 fps at 60 Hz; at 75 % not. A load goes
+still once the window is full, in 0.51–0.55 s of animation from an empty
+window, 0.15–0.3 s from one full of on-time frames. A single pause among on-time
+frames goes still above some 132 ms at 144 and 165 Hz, 142 ms at 60 Hz:
+one of 100 ms keeps the window at 81–84 %, one of 150 ms takes it to
+71–74 % and makes it still (research, "The choice"). Rejected: 1 s,
+which keeps pauses up to some 257 ms but takes 1 s of animation to fill;
+66 %, which keeps a display losing every third slot animated; two windows
+in a row, which keep any single pause but take up to 1.1 s on a load.
 
 D4. *VNC by its viewer.* At 165 Hz the frames of a viewer connected keep
-their rate (research of 031: 160–164 fps); the mean does not see a viewer,
-and D4 of 031 does — on the ports of `vnc_ports`. A viewer on a port not
-listed goes still by the frames only when it costs frames: the second part
-of K7 of 031, not tried there, is given up.
+their rate — batch A of 031 98.7 % of it, 162.7 fps, in its worst window
+(research) —; the mean does not see a viewer, and D4 of 031 does — on the
+ports of `vnc_ports`. K2 of 031 — batch A goes still within its first
+three activations — no longer holds. A viewer on a port not listed goes
+still by the frames only when it costs frames: the second part of K7 of
+031, not tried there, is given up.
+
+D5. *The record.* "Animation still: the frames slip" carries the mean rate
+of the window, `fps`, the refresh rate, `refresh_hz`, the frames of the
+window, `frames`, and its span, `window_ms`, instead of the late frames
+and the frames counted of 031; the other records of D7 of 031 as they
+are.
 
 == Acceptance criteria
 
@@ -68,19 +94,27 @@ of K7 of 031, not tried there, is given up.
 | # | Criterion and method
 
 | K1
-| The count: a window of 0.5 s of the frames counted, its mean rate below
-  75 % of the refresh rate makes it still; a window not yet full never;
-  the window carried across activations; the probe starts it anew. Edges
-  in `TestSlipCount`, at 60 and 165 Hz.
+| The count (D2, D3): a window of 0.5 s of the frames counted, its mean
+  rate below 75 % of the refresh rate makes it still, at 75 % not; a
+  window not yet full never, nor one of 512 frames in less than 0.5 s;
+  the window carried across activations; the probe starts it anew; the
+  kinds counted as in 031. Edges in `TestSlipCount`, at 60, 144 and
+  165 Hz: a pause either side of the edge of 75 %, one of 100 ms not
+  still, one of 150 ms still; a load of 30 ms still at the frame that
+  fills an empty window.
 
 | K2
-| The recorded frames replayed (`TestSlipReplay`): batches A and B of 031
-  and the frames of the research of 035 — fast steps at 165 Hz and at
-  60 Hz never still; the frames under load still.
+| The recorded frames replayed (`TestSlipReplay`): batches A and B of 031,
+  the frames of ws1 of the research (`testdata/fast-ws1.txt`) as recorded
+  and after a window of on-time frames, and B scaled to 60 Hz — never
+  still, the lowest window above 95 % of the refresh rate; B followed by a
+  load of 30 ms — still within 0.2 s of the load.
 
 | K3
-| The rest of 031 unchanged: `TestStillViewer`, `TestStillFrames`,
-  `TestAnimationSettings`; the pictures: `TestScenes` with
+| The rest of 031 as it was: `TestStillViewer`, `TestStillFrames` — the
+  window filled with on-time frames before the steps it trips, so that the
+  first frame counted of a step makes it still, not the fourth; the record
+  of D5 —, `TestAnimationSettings`; the pictures: `TestScenes` with
   `testdata/scenes.json` as it is, `TestGLXPresenterMatchesCPU`,
   `TestLayers`.
 
@@ -94,8 +128,16 @@ of K7 of 031, not tried there, is given up.
   connected — animated throughout, no "Animation still".
 |===
 
+== Outside this change
+
+The layers of the cards uploaded in the pause before a frame, 1.2–1.3 MB,
+cost it 10–12 ms of presenting on ws1 at 144 Hz, two slots lost (research,
+"Finding"): a real stall, which the mean of D1 tolerates, left for a later
+specification.
+
 == Open decisions
 
-. The window and the share of D2 and D3, 0.5 s and 75 %, until the
-  research measures fast steps at 165 and 60 Hz and a load: whether a
-  single pause should make it still, or two windows in a row.
+O1. *The window and the share of D2 and D3.* Settled by the research on
+2026-10-14: 0.5 s and 75 %, one window, as the draft said; a single pause
+of 150 ms makes it still, one of 100 ms does not (research, "The
+choice"). Open for the author until the trial (K5).
