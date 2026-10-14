@@ -6,7 +6,7 @@
 . [x] T1. Before any code, the frames of ws1 extracted and the rule of 031
   and the candidates of D2 and D3 replayed over them, A, B and the
   synthetic cases; O1 settled (research).
-. [ ] T2. The window and the record — D2, D3, D5 — in `autoAnimation`,
+. [x] T2. The window and the record — D2, D3, D5 — in `autoAnimation`,
   the tests of 031 that it changes; the documentation; K3.
 . [ ] T3. The edges and the replay: K1, K2.
 . [ ] T4. K4 on every commit, in a worktree of its own.

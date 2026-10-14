@@ -799,7 +799,8 @@ func (s *Selector) frame() {
 	}
 	s.frameDue = s.frameDue.Add(s.period)
 
-	// The third late of the last 60: still from the next frame
+	// The mean rate of the last 0.5 s below 75 % of the refresh rate: still
+	// from the next frame (specs/035-slip-by-frame-rate)
 	if slip > 0 && s.auto.frame(slip, s.period) {
 		s.stillNow()
 	}

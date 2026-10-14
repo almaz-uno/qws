@@ -11,14 +11,16 @@ import (
 // The setting auto of appearance.animation.enabled (specs/031-animation-auto):
 // an activation is animated, or still — as with enabled: false, and without
 // the live thumbnails — while a VNC viewer is connected (D4) or once the
-// frames slip (D5), and then animated again at a probe five minutes later
-// (D6); each change is said in the log once (D7).
+// frames slip (D5) — their mean rate over the last 0.5 s of animation below
+// 75 % of the refresh rate (specs/035-slip-by-frame-rate) —, and then
+// animated again at a probe five minutes later (D6); each change is said in
+// the log once (D7).
 
 const (
-	slipWindow = 60              // the last frames counted that the count looks at (D5)
-	slipLate   = 3               // late frames among them that make it still
-	slipFactor = 1.25            // a frame is late above this many refresh periods
-	probeAfter = 5 * time.Minute // still for the frames this long, the next activation is animated again (D6)
+	slipSpan   = 500 * time.Millisecond // the window: the latest frames counted whose intervals span this (D2 of 035)
+	slipShare  = 0.75                   // still when the mean rate of a full window is below this share of the refresh rate (D3 of 035)
+	slipFrames = 512                    // the most frames the window holds: as many within slipSpan are above 1000 fps
+	probeAfter = 5 * time.Minute        // still for the frames this long, the next activation is animated again (D6)
 )
 
 // Why an activation is still
@@ -48,10 +50,11 @@ type autoAnimation struct {
 	viewer func([]int) (int, bool) // the check for a viewer on the ports; nil: viewerConnected
 	clock  func() time.Time        // the time of the probe; nil: time.Now
 
-	late   [slipWindow]bool // the last frames counted, a ring: whether each was late
-	frames int              // frames in the ring, up to slipWindow
-	next   int              // where the next frame counted goes in it
-	count  int              // late frames in it
+	window [slipFrames]time.Duration // the intervals of the frames counted, a ring: the window
+	frames int                       // frames in the window, up to slipFrames
+	next   int                       // where the next frame counted goes in the ring
+	span   time.Duration             // the sum of their intervals
+	period time.Duration             // the refresh period when the frames slipped, for the record
 
 	slipped time.Time       // when the frames slipped; zero: they did not, or a probe started since
 	reason  string          // why the activation is still: stillNot, stillViewer, stillFrames
@@ -93,7 +96,7 @@ func (a *autoAnimation) begin() bool {
 			return true
 		}
 		a.slipped = time.Time{}
-		a.late, a.frames, a.next, a.count = [slipWindow]bool{}, 0, 0, 0
+		a.frames, a.next, a.span = 0, 0, 0
 	}
 	a.become(stillNot, 0)
 	return false
@@ -146,36 +149,56 @@ func (a *autoAnimation) viewerOn() (int, bool) {
 // frame counts a frame of an animation presented interval after the frame
 // before it of its animation, at the refresh period period, while the
 // activation is animated. It reports whether the frames now slip — the
-// third late of the last slipWindow counted, across activations (D5) —
-// and the activation is still from then.
+// window full, its frames spanning slipSpan, and their mean rate below
+// slipShare of the refresh rate (D2, D3 of 035), the window carried across
+// activations — and the activation is still from then.
 func (a *autoAnimation) frame(interval, period time.Duration) bool {
 	if !a.on || a.reason != stillNot {
 		return false
 	}
-	late := float64(interval) > slipFactor*float64(period)
-	if a.frames == slipWindow {
-		if a.late[a.next] {
-			a.count--
-		}
-	} else {
-		a.frames++
+	if a.frames == slipFrames {
+		a.dropOldest()
 	}
-	a.late[a.next] = late
-	if late {
-		a.count++
+	a.window[a.next] = interval
+	a.next = (a.next + 1) % slipFrames
+	a.frames++
+	a.span += interval
+	// The fewest of the latest frames that span the window
+	for a.frames > 1 && a.span-a.window[a.oldest()] >= slipSpan {
+		a.dropOldest()
 	}
-	a.next = (a.next + 1) % slipWindow
-	if a.count < slipLate {
+	if a.span < slipSpan || float64(a.frames)*float64(period) >= slipShare*float64(a.span) {
 		return false
 	}
 	a.slipped = a.now()
+	a.period = period
 	a.become(stillFrames, 0)
 	return true
 }
 
+// oldest is where the oldest frame of the window is in the ring
+func (a *autoAnimation) oldest() int {
+	return (a.next - a.frames + slipFrames) % slipFrames
+}
+
+// dropOldest drops the oldest frame of the window
+func (a *autoAnimation) dropOldest() {
+	a.span -= a.window[a.oldest()]
+	a.frames--
+}
+
+// rate is the mean rate of the window, frames a second
+func (a *autoAnimation) rate() float64 {
+	if a.span <= 0 {
+		return 0
+	}
+	return float64(a.frames) / a.span.Seconds()
+}
+
 // become makes reason why the activation is still, and logs it when it
-// changes, at info level (D7): the port of a viewer, the late frames of the
-// count and the frames counted
+// changes, at info level (D7): the port of a viewer; the mean rate of the
+// window, the refresh rate, the frames of the window and its span (D5 of
+// 035)
 func (a *autoAnimation) become(reason string, port int) {
 	if reason == a.reason {
 		return
@@ -186,7 +209,12 @@ func (a *autoAnimation) become(reason string, port int) {
 	case stillViewer:
 		log.Info().Int("port", port).Msg("Animation still: a VNC viewer connected")
 	case stillFrames:
-		log.Info().Int("late", a.count).Int("frames", a.frames).Msg("Animation still: the frames slip")
+		log.Info().
+			Float64("fps", a.rate()).
+			Float64("refresh_hz", float64(time.Second)/float64(a.period)).
+			Int("frames", a.frames).
+			Dur("window_ms", a.span).
+			Msg("Animation still: the frames slip")
 	default:
 		log.Info().Str("was", was).Msg("Animation back")
 	}
