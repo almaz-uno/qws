@@ -152,48 +152,85 @@ func replayBatch(a *autoAnimation, period time.Duration, runs []frameRun) replay
 	return r
 }
 
-// TestSlipReplay checks K2 of specs/035-slip-by-frame-rate: the frames of
-// the batches of 031 replayed into the count never make it still — batch A,
-// with a VNC viewer connected, no more than B (D4 of 035) —, their lowest
-// windows as the research of 035 has them
+// TestSlipReplay checks K2 of specs/035-slip-by-frame-rate: the frames
+// recorded replayed into the count never make it still — batches A and B
+// of 031 at 165 Hz, A with a VNC viewer connected no more than B (D4 of
+// 035); the frames of ws1 at 144 Hz, as recorded and after a window of
+// frames on time; B scaled to 60 Hz —, their lowest windows as the research
+// of 035 has them; B followed by a load of 30 ms is still within 0.2 s of
+// the load
 func TestSlipReplay(t *testing.T) {
 	quietLog(t)
-	for _, c := range []struct {
-		batch  string
-		frames int     // counted, as research "The count replayed" of 031 has them
-		lowest float64 // the lowest window, research "The rules replayed" of 035
-	}{
-		{"vnc-a.txt", 1495, 0.987},
-		{"vnc-b.txt", 1499, 0.998},
-	} {
-		period, runs := readBatch(t, c.batch)
-		got := replayBatch(newCount(), period, runs)
-		t.Logf("%s: %d frames counted; still in activation %d at its frame %d; the lowest window %.2f %% of the refresh rate",
-			c.batch, got.frames, got.activation, got.frame, 100*got.lowest)
-		if got.activation != 0 || got.frames != c.frames || got.lowest < c.lowest-0.0005 || got.lowest > c.lowest+0.0005 {
-			t.Errorf("%s: %+v; want never still, %d frames, the lowest window %.3f", c.batch, got, c.frames, c.lowest)
+	// scaled is a batch with its intervals and its period scaled to the
+	// refresh rate hz
+	scaled := func(name string, hz float64) (time.Duration, []frameRun) {
+		period, runs := readBatch(t, name)
+		to := time.Duration(float64(time.Second) / hz)
+		k := float64(to) / float64(period)
+		var out []frameRun
+		for _, run := range runs {
+			r := frameRun{activation: run.activation, kind: run.kind}
+			for _, d := range run.intervals {
+				r.intervals = append(r.intervals, time.Duration(float64(d)*k))
+			}
+			out = append(out, r)
 		}
+		return to, out
+	}
+	for _, c := range []struct {
+		name   string
+		batch  func() (time.Duration, []frameRun)
+		full   bool    // the window full of frames on time before the batch
+		frames int     // counted, as research "The count replayed" of 031 has them for A and B
+		lowest float64 // the lowest window, research "The rules replayed" of 035; 0: none full
+	}{
+		{"A", func() (time.Duration, []frameRun) { return readBatch(t, "vnc-a.txt") }, false, 1495, 0.987},
+		{"B", func() (time.Duration, []frameRun) { return readBatch(t, "vnc-b.txt") }, false, 1499, 0.998},
+		{"ws1", func() (time.Duration, []frameRun) { return readBatch(t, "fast-ws1.txt") }, false, 46, 0},
+		{"ws1, the window full before", func() (time.Duration, []frameRun) { return readBatch(t, "fast-ws1.txt") }, true, 46, 0.970},
+		{"B scaled to 60 Hz", func() (time.Duration, []frameRun) { return scaled("vnc-b.txt", 60) }, false, 1499, 0.993},
+	} {
+		period, runs := c.batch()
+		a := newCount()
+		if c.full {
+			fillWindow(a, period)
+		}
+		got := replayBatch(a, period, runs)
+		t.Logf("%s: %d frames counted; still in activation %d at its frame %d; the lowest window %.2f %% of the refresh rate",
+			c.name, got.frames, got.activation, got.frame, 100*got.lowest)
+		if got.activation != 0 || got.frames != c.frames || got.lowest < c.lowest-0.0005 || got.lowest > c.lowest+0.0005 {
+			t.Errorf("%s: %+v; want never still, %d frames, the lowest window %.3f", c.name, got, c.frames, c.lowest)
+		}
+	}
+
+	// B, then a load: the window full of B's frames, every frame of the load
+	// 30 ms
+	period, runs := readBatch(t, "vnc-b.txt")
+	a := newCount()
+	replayBatch(a, period, runs)
+	a.begin()
+	var load time.Duration
+	for i := 0; i < 100 && a.reason == stillNot; i++ {
+		load += 30 * time.Millisecond
+		a.frame(30*time.Millisecond, period)
+	}
+	t.Logf("B, then a load of 30 ms: still after %v of the load", load)
+	if a.reason != stillFrames || load > 200*time.Millisecond {
+		t.Errorf("B, then a load of 30 ms: still for %q after %v of the load, want the frames within 0.2 s", a.reason, load)
 	}
 }
 
-// TestSlipCount checks the edges of K1 of specs/035-slip-by-frame-rate: a
-// window of 0.5 s, its mean rate below 75 % of the refresh rate, makes the
-// activation still, at 75 % not; a window not yet full never; the window is
-// carried across activations; the fades are not counted (D5 of 031, O1);
-// while still, or off, nothing is counted
+// TestSlipCount checks the edges of K1 of specs/035-slip-by-frame-rate, at
+// 60, 144 and 165 Hz: a window of 0.5 s, its mean rate below 75 % of the
+// refresh rate, makes the activation still, at 75 % not; a pause among
+// frames on time on either side of the edge, one of 100 ms not still, one of
+// 150 ms still; a load of 30 ms still at the frame that fills an empty
+// window, a window not yet full never, nor one of 512 frames in less than
+// 0.5 s. And: the window is carried across activations; the probe starts it
+// anew; the fades are not counted (D5 of 031, O1); while still, or off,
+// nothing is counted.
 func TestSlipCount(t *testing.T) {
 	quietLog(t)
-	const period = 8 * time.Millisecond
-	// frames counts the intervals; it reports the frame that made it still,
-	// from 1, or 0
-	frames := func(a *autoAnimation, intervals ...time.Duration) int {
-		for i, d := range intervals {
-			if a.frame(d, period) {
-				return i + 1
-			}
-		}
-		return 0
-	}
 	repeat := func(d time.Duration, n int) []time.Duration {
 		s := make([]time.Duration, n)
 		for i := range s {
@@ -202,26 +239,99 @@ func TestSlipCount(t *testing.T) {
 		return s
 	}
 
-	// On time, and at 75 % exactly — 3 frames in 4 periods —: never
-	a := newCount()
-	if n := frames(a, repeat(period, 1000)...); n != 0 || a.span < slipSpan {
-		t.Errorf("frames on time: still at %d, the window %v", n, a.span)
+	for _, hz := range []float64{60, 144, 165} {
+		period := time.Duration(float64(time.Second) / hz)
+		// frames counts the intervals; it reports the frame that made it
+		// still, from 1, or 0
+		frames := func(a *autoAnimation, intervals ...time.Duration) int {
+			for i, d := range intervals {
+				if a.frame(d, period) {
+					return i + 1
+				}
+			}
+			return 0
+		}
+		onTime := repeat(period, int(time.Second/period))
+
+		// On time; at 75 % — every interval 4/3 of the period, to the
+		// nanosecond below —: never; a nanosecond longer: still at the frame
+		// that fills the window
+		a := newCount()
+		if n := frames(a, onTime...); n != 0 || a.span < slipSpan {
+			t.Errorf("%v Hz, frames on time: still at %d, the window %v", hz, n, a.span)
+		}
+		d := period * 4 / 3
+		a = newCount()
+		if n := frames(a, repeat(d, 1000)...); n != 0 {
+			t.Errorf("%v Hz, frames at 75 %% of the refresh rate, %v: still at %d", hz, d, n)
+		}
+		a = newCount()
+		if n, want := frames(a, repeat(d+1, 1000)...), int((slipSpan+d)/(d+1)); n != want {
+			t.Errorf("%v Hz, frames below 75 %% of the refresh rate, %v: still at %d, want %d", hz, d+1, n, want)
+		}
+
+		// A pause among frames on time, the window full before it
+		for _, c := range []struct {
+			pause time.Duration
+			still bool
+		}{{100 * time.Millisecond, false}, {150 * time.Millisecond, true}} {
+			a = newCount()
+			fillWindow(a, period)
+			n := frames(a, append([]time.Duration{c.pause}, onTime...)...)
+			if (n == 1) != c.still || (!c.still && n != 0) {
+				t.Errorf("%v Hz, a pause of %v: still at %d, want still %v at the pause", hz, c.pause, n, c.still)
+			}
+		}
+
+		// The edge: the window exactly 0.5 s, m frames on time and a pause;
+		// still while its m + 1 frames are fewer than 75 % of the refresh
+		// periods of 0.5 s
+		m := 0
+		for time.Duration(m+1)*period < slipSpan*3/4 {
+			m++
+		}
+		for _, c := range []struct {
+			m     int
+			still bool
+		}{{m, false}, {m - 1, true}} {
+			pause := slipSpan - time.Duration(c.m)*period
+			a = newCount()
+			fillWindow(a, period)
+			if n := frames(a, pause); (n == 1) != c.still || a.span != slipSpan || a.frames != c.m+1 {
+				t.Errorf("%v Hz, a pause of %v after %d frames on time: still %v, the window %d frames in %v; want still %v, %d frames in %v",
+					hz, pause, c.m, n == 1, a.frames, a.span, c.still, c.m+1, slipSpan)
+			}
+		}
+
+		// A load from an empty window: never until the window is full, then
+		// at once — 17 frames of 30 ms are 0.51 s
+		a = newCount()
+		if n := frames(a, repeat(30*time.Millisecond, 100)...); n != 17 || a.reason != stillFrames {
+			t.Errorf("%v Hz, a load of 30 ms: still at %d for %q, want 17", hz, n, a.reason)
+		}
+		if n := frames(a, repeat(time.Second, 3)...); n != 0 {
+			t.Errorf("%v Hz: frames counted while still", hz)
+		}
+
+		// 512 frames in less than 0.5 s: not full, never still
+		a = newCount()
+		if n := frames(a, repeat(100*time.Microsecond, 2000)...); n != 0 || a.frames != slipFrames || a.span >= slipSpan {
+			t.Errorf("%v Hz, frames of 0.1 ms: still at %d, the window %d frames in %v", hz, n, a.frames, a.span)
+		}
 	}
-	a = newCount()
-	if n := frames(a, repeat(period*4/3, 1000)...); n != 0 {
-		t.Errorf("frames at 75 %% of the refresh rate: still at %d", n)
-	}
-	// Below: still at the frame that fills the window, 0.5 s of 11 ms
-	a = newCount()
-	if n := frames(a, repeat(11*time.Millisecond, 100)...); n != 46 || a.reason != stillFrames {
-		t.Errorf("frames at 73 %% of the refresh rate: still at %d for %q, want 46", n, a.reason)
-	}
-	if n := frames(a, repeat(time.Second, 3)...); n != 0 {
-		t.Error("frames counted while still")
+
+	const period = 8 * time.Millisecond
+	frames := func(a *autoAnimation, intervals ...time.Duration) int {
+		for i, d := range intervals {
+			if a.frame(d, period) {
+				return i + 1
+			}
+		}
+		return 0
 	}
 
 	// Carried across activations: half a window in one, the rest in the next
-	a = newCount()
+	a := newCount()
 	frames(a, repeat(11*time.Millisecond, 23)...)
 	if a.begin() {
 		t.Fatal("half a window: the next activation still")
@@ -231,6 +341,26 @@ func TestSlipCount(t *testing.T) {
 	}
 	if !a.begin() {
 		t.Error("the activation after the frames slipped animated")
+	}
+
+	// The probe: five minutes after, the window anew — half a window of slow
+	// frames is not enough
+	now := time.Unix(1000, 0)
+	a = &autoAnimation{on: true, clock: func() time.Time { return now }}
+	frames(a, repeat(11*time.Millisecond, 46)...)
+	now = now.Add(probeAfter - time.Second)
+	if !a.begin() {
+		t.Error("before the probe: animated")
+	}
+	now = now.Add(time.Second)
+	if a.begin() || a.frames != 0 || a.span != 0 {
+		t.Errorf("the probe: still %v, the window %d frames in %v; want animated, the window empty", a.reason, a.frames, a.span)
+	}
+	if n := frames(a, repeat(11*time.Millisecond, 45)...); n != 0 {
+		t.Errorf("the probe, 45 slow frames: still at %d", n)
+	}
+	if n := frames(a, 11*time.Millisecond); n != 1 {
+		t.Error("the probe, the window full of slow frames: animated")
 	}
 
 	// The kinds counted: the steps, the hover, the convergence; not the fades

@@ -8,7 +8,7 @@
   synthetic cases; O1 settled (research).
 . [x] T2. The window and the record — D2, D3, D5 — in `autoAnimation`,
   the tests of 031 that it changes; the documentation; K3.
-. [ ] T3. The edges and the replay: K1, K2.
+. [x] T3. The edges and the replay: K1, K2.
 . [ ] T4. K4 on every commit, in a worktree of its own.
 . [ ] T5. The author's trial on ws2 at 165 Hz: K5, O1.
 . [ ] T6. The results.
