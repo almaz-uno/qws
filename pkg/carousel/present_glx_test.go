@@ -90,6 +90,9 @@ func TestGLXPresenterMatchesCPU(t *testing.T) {
 			checkLayerScene(t, p, sc, fonts)
 			checkStaged(t, p, sc, fonts, frame)
 		}
+		if sc.layout == "grid" {
+			checkGridScroll(t, p, sc, fonts)
+		}
 		// After a scene, the frame at rest is the cpu frame again (K1 of
 		// specs/007-animation)
 		if err := p.draw(frame); err != nil {
@@ -129,6 +132,50 @@ func checkLayerScene(t *testing.T, p *glxPresenter, sc scene, fonts []string) {
 	draw.Draw(want, card.Rect, card, card.Rect.Min, draw.Over)
 	if n, worst := compare(got, want); worst > 2 {
 		t.Errorf("%s: the scene differs from the CPU composition in %d pixels, by up to %d", sc.name, n, worst)
+	}
+}
+
+// checkGridScroll draws a grid that scrolls as a scene of its layers — its
+// base, the tiles of all its rows at minus the scroll and the thumb of the
+// scrollbar at its offset, cut to the view — and compares it with the same
+// layers composed on the CPU, up to rounding (specs/036-grid-scroll, K4)
+func checkGridScroll(t *testing.T, p *glxPresenter, sc scene, fonts []string) {
+	cfg := sceneConfig(sc, fonts)
+	n := len(sc.windows)
+	view := GridViewOf(n, cfg)
+	if view.MaxScroll == 0 {
+		return
+	}
+	clip := view.Clip(cfg)
+	tiles, thumb := GridTiles(sc.windows, cfg), GridScrollThumb(n, cfg)
+	if tiles == nil || thumb == nil {
+		t.Fatalf("%s: no tiles layer or thumb", sc.name)
+	}
+	if err := p.SetLayer(1, GridBase(n, cfg)); err != nil {
+		t.Fatal(err)
+	}
+	defer p.DropLayers()
+	want := GridBase(n, cfg)
+	cut := image.Rect(int(clip.X), int(clip.Y), int(clip.X+clip.W), int(clip.Y+clip.H))
+	var items []SceneItem
+	for k, l := range []struct {
+		img *image.RGBA
+		dy  int
+	}{{tiles, -cfg.GridScroll}, {thumb, GridThumbOffset(n, cfg.GridScroll, cfg)}} {
+		id := LayerID(2 + k)
+		if err := p.SetLayer(id, l.img); err != nil {
+			t.Fatal(err)
+		}
+		r := l.img.Rect.Add(image.Pt(0, l.dy))
+		items = append(items, SceneItem{A: id, Alpha: 1, Clip: clip,
+			RectA: Rect{float64(r.Min.X), float64(r.Min.Y), float64(r.Dx()), float64(r.Dy())}})
+		draw.Draw(want, r.Intersect(cut), l.img, l.img.Rect.Min.Add(r.Intersect(cut).Min.Sub(r.Min)), draw.Over)
+	}
+	if err := p.drawScene(1, items, Opaque); err != nil {
+		t.Fatal(err)
+	}
+	if n, worst := compare(p.readBack(), want); worst > 2 {
+		t.Errorf("%s: the scene at scroll %d differs from the CPU composition in %d pixels, by up to %d", sc.name, cfg.GridScroll, n, worst)
 	}
 }
 

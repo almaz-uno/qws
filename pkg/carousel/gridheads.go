@@ -42,6 +42,7 @@ type gridTiles struct {
 	grid            gridLayout
 	canvas          image.Rectangle // the bounds of the canvas they are drawn on
 	heads           []*tileHead     // nil for a head drawn in place
+	shown           []bool          // the tiles drawn: those in the view of a grid that scrolls (specs/036-grid-scroll)
 	scratch         *image.RGBA     // the canvas the heads are drawn into
 	base            chan struct{}   // closed once every head knows the pixel it is drawn on
 }
@@ -60,19 +61,39 @@ type tileHead struct {
 // core, and the other half stays with the drawing of the canvas and the loop
 // of the animation (specs/019-grid-speed, research)
 func startGridTiles(windowData []WindowData, top float64, selected, hoverIndex int, cfg Config) *gridTiles {
+	return startGridTilesOn(image.Rect(0, 0, cfg.Width, cfg.Height), windowData, top, selected, hoverIndex, cfg)
+}
+
+// startGridTilesOn is startGridTiles on a canvas of bounds canvas: of the
+// window, the tiles of a grid that scrolls drawn only where they reach the
+// view below the header; of all the rows, for the tiles layer, every tile
+// (specs/036-grid-scroll)
+func startGridTilesOn(canvas image.Rectangle, windowData []WindowData, top float64, selected, hoverIndex int, cfg Config) *gridTiles {
 	t := &gridTiles{
 		windows:  windowData,
 		selected: selected,
 		hover:    hoverIndex,
 		cfg:      cfg,
 		grid:     layoutGrid(len(windowData), top, cfg),
-		canvas:   image.Rect(0, 0, cfg.Width, cfg.Height),
+		canvas:   canvas,
 		heads:    make([]*tileHead, len(windowData)),
+		shown:    make([]bool, len(windowData)),
 		base:     make(chan struct{}),
 	}
 	g := t.grid
+	view := canvas
+	if g.maxScroll > 0 && canvas.Dy() == cfg.Height {
+		view.Min.Y = g.top
+	}
+	// What a tile draws reaches beyond it by its frames and its shadow
+	reach := 8 + math.Abs(cfg.ShadowOffset)
 	for i := range windowData {
 		x, y := g.tile(i)
+		t.shown[i] = g.maxScroll == 0 ||
+			y+g.tileH+reach > float64(view.Min.Y) && y-reach < float64(view.Max.Y)
+		if !t.shown[i] {
+			continue
+		}
 		r, ok := gridHeadBounds(t.canvas, &windowData[i], x, y, g.tileW, g.tileH, i == selected, i == hoverIndex, cfg)
 		if ok && !r.Empty() {
 			t.heads[i] = &tileHead{bounds: r}
@@ -132,6 +153,9 @@ func (t *gridTiles) draw(dc *gg.Context) (inPlace int) {
 
 	g := t.grid
 	for i := range t.windows {
+		if !t.shown[i] {
+			continue
+		}
 		x, y := g.tile(i)
 		head := t.heads[i]
 		if head != nil {

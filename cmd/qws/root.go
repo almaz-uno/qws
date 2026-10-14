@@ -83,6 +83,7 @@ func init() {
 	rootCmd.PersistentFlags().Float64("appearance-perspective", defaultCfg.Appearance.Perspective, "perspective effect factor (0.0-1.0)")
 	rootCmd.PersistentFlags().Int("appearance-grid-columns", defaultCfg.Appearance.Grid.Columns, "number of columns in grid layout (0 = auto)")
 	rootCmd.PersistentFlags().Float64("appearance-grid-spacing", defaultCfg.Appearance.Grid.Spacing, "spacing between tiles in grid layout")
+	rootCmd.PersistentFlags().Int("appearance-grid-min-thumbnail-width", defaultCfg.Appearance.Grid.MinThumbnailWidth, "least width of a thumbnail of the grid; past it the grid scrolls (0 = none)")
 	rootCmd.PersistentFlags().Float64("appearance-shadow-offset", defaultCfg.Appearance.Shadow.Offset, "shadow offset in pixels")
 	rootCmd.PersistentFlags().Float64("appearance-shadow-blur", defaultCfg.Appearance.Shadow.Blur, "shadow blur radius")
 	rootCmd.PersistentFlags().StringSlice("appearance-font-paths", defaultCfg.Appearance.Font.Paths, "font paths (primary first, then fallbacks)")
@@ -223,6 +224,9 @@ func applyFlags() {
 	}
 	if rootCmd.PersistentFlags().Changed("appearance-grid-spacing") {
 		cfg.Appearance.Grid.Spacing, _ = rootCmd.PersistentFlags().GetFloat64("appearance-grid-spacing")
+	}
+	if rootCmd.PersistentFlags().Changed("appearance-grid-min-thumbnail-width") {
+		cfg.Appearance.Grid.MinThumbnailWidth, _ = rootCmd.PersistentFlags().GetInt("appearance-grid-min-thumbnail-width")
 	}
 	if rootCmd.PersistentFlags().Changed("appearance-shadow-offset") {
 		cfg.Appearance.Shadow.Offset, _ = rootCmd.PersistentFlags().GetFloat64("appearance-shadow-offset")

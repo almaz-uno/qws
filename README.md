@@ -83,7 +83,7 @@ with a 32-bit ARGB visual; without one qws says so and draws with the CPU.
 | `q` | toggle the carousel and the grid, in the next frame; in the grid the selection frame converges onto the selected tile; the top right of the header says what `q` does now |
 | `c`, `g` | the carousel, the grid |
 | `Ctrl` | only the current workspace, or all of them, against `windows.workspace` |
-| mouse | hover to highlight, click to switch |
+| mouse | hover to highlight, click to switch; the wheel scrolls the grid by a row |
 
 The modifier, the key, `q` and the rest are configurable
 (`keybindings.*`); the next activation opens in `appearance.layout` again.
@@ -116,6 +116,10 @@ The modifier, the key, `q` and the rest are configurable
   default it stands still while a VNC viewer is connected or when its
   frames slip, and tries again five minutes later
   ([031](specs/031-animation-auto/spec.adoc)).
+- **A grid of many windows scrolls** rather than shrink its thumbnails
+  below `appearance.grid.min_thumbnail_width`, 320 px: the view follows
+  the selection, the wheel scrolls it
+  ([036](specs/036-grid-scroll/spec.adoc)).
 - **Workspaces:** all windows, the current workspace's, or all but it;
   `Ctrl` inverts the choice while the switcher is shown.
 - **The monitor under the pointer** gets the switcher.

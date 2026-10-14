@@ -461,6 +461,13 @@ log:
 | `0.6`
 | Perspective effect factor (0.0-1.0)
 
+| `appearance.grid.min_thumbnail_width`
+| `--appearance-grid-min-thumbnail-width`
+| `QWS_APPEARANCE_GRID_MIN_THUMBNAIL_WIDTH`
+| `int`
+| `320`
+| The least width of a thumbnail of the grid, in the proportions of the overlay — 320×178 on an overlay of 2520×1400 —, but no more than `appearance.thumbnail` lets a tile be: a thumbnail of (width + 20) × height, so 276 with the defaults. A grid whose thumbnails come out that large on one screen is laid out as before; past that its rows run below the screen and it scrolls: the tiles as wide as the columns make them, the thumbnails in the proportions of the overlay, a thin scrollbar at its right edge, the rows cut by the edges of the view drawn cut. The view follows the selection — the least scroll that brings its row in whole, moving as a step does —, the mouse wheel scrolls it by a row, and only the tiles in the view are live. With `appearance.grid.columns: 0` the columns are at most as many as fit across at this width — 6 on 2520 px —, without the bound of 6 they had. `0`: no least, the grid on one screen as in 1.6.1. A negative width is reported and the default used (specification `036-grid-scroll`)
+
 | `appearance.shadow.offset`
 | `--appearance-shadow-offset`
 | `QWS_APPEARANCE_SHADOW_OFFSET`

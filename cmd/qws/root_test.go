@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -105,6 +106,21 @@ func TestLocateFlags(t *testing.T) {
 
 	if a := cfg.Appearance.Animation; a.LocateDuration != 650*time.Millisecond || a.LocateZoom != 2.4 {
 		t.Errorf("flags: %v, %v; want 650ms, 2.4", a.LocateDuration, a.LocateZoom)
+	}
+}
+
+// TestGridFlags checks K5 of specs/036-grid-scroll: the least width of a
+// thumbnail of the grid is read from its flag, 0 too
+func TestGridFlags(t *testing.T) {
+	for _, value := range []string{"480", "0"} {
+		if err := rootCmd.PersistentFlags().Set("appearance-grid-min-thumbnail-width", value); err != nil {
+			t.Fatal(err)
+		}
+		cfg = config.Default()
+		applyFlags()
+		if got := cfg.Appearance.Grid.MinThumbnailWidth; fmt.Sprint(got) != value {
+			t.Errorf("flag %s: %d", value, got)
+		}
 	}
 }
 

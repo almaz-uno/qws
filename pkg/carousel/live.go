@@ -75,7 +75,7 @@ func CardLive(windowData []WindowData, index int, offset float64, cfg Config) (L
 	if !ok {
 		return LiveItem{}, false
 	}
-	return liveItem(windowData[index].Thumbnail, card.thumbnailMatrix(), cardBorderHalf(card), cfg)
+	return liveItem(windowData[index].Thumbnail, card.thumbnailMatrix(), cardBorderHalf(card), image.Rect(0, 0, cfg.Width, cfg.Height))
 }
 
 // CarouselLive is the live item, but its texture, of every card of the
@@ -99,11 +99,14 @@ func CarouselLive(windowData []WindowData, selected, hover int, cfg Config) []Li
 // GridLive is the live item, but its texture, of every tile of the grid, by
 // window; a zero item where a tile has none. Its holes are where the icon,
 // the title, the workspace and the urgent bar of the tile may lie over the
-// thumbnail.
+// thumbnail. The items of a grid that scrolls are of all its rows, at scroll
+// 0, as the tiles layer: GridLiveView shows them in the view
+// (specs/036-grid-scroll).
 func GridLive(windowData []WindowData, cfg Config) []LiveItem {
 	items := make([]LiveItem, len(windowData))
+	cfg.GridScroll = 0
 	g := layoutGrid(len(windowData), headerBand(cfg), cfg)
-	canvas := image.Rect(0, 0, cfg.Width, cfg.Height)
+	canvas := image.Rect(0, 0, cfg.Width, cfg.Height+g.maxScroll)
 	for i := range windowData {
 		win := &windowData[i]
 		if win.Thumbnail == nil {
@@ -111,7 +114,7 @@ func GridLive(windowData []WindowData, cfg Config) []LiveItem {
 		}
 		x, y := g.tile(i)
 		thumbX, thumbY, _, _, scale := gridThumbnail(win.Thumbnail.Bounds(), g.tileW, g.tileH)
-		item, ok := liveItem(win.Thumbnail, gridImageMatrix(x, y, thumbX, thumbY, scale), tileBorderHalf, cfg)
+		item, ok := liveItem(win.Thumbnail, gridImageMatrix(x, y, thumbX, thumbY, scale), tileBorderHalf, canvas)
 		if !ok {
 			continue
 		}
@@ -143,10 +146,41 @@ func GridLive(windowData []WindowData, cfg Config) []LiveItem {
 	return items
 }
 
+// GridLiveView is the items of GridLive of a grid of n tiles in its view at
+// the scroll: moved up by it, their rectangles and holes cut to the view —
+// a zero item where nothing is left; the items themselves for a grid that
+// fits on one screen (specs/036-grid-scroll)
+func GridLiveView(items []LiveItem, n, scroll int, cfg Config) []LiveItem {
+	cfg.GridScroll = scroll
+	g := layoutGrid(n, headerBand(cfg), cfg)
+	if g.maxScroll == 0 {
+		return items
+	}
+	view := image.Rect(0, g.top, cfg.Width, cfg.Height)
+	d := image.Pt(0, -g.scroll)
+	out := make([]LiveItem, len(items))
+	for k, it := range items {
+		r := it.Rect.Add(d).Intersect(view)
+		if it.Rect.Empty() || r.Empty() {
+			continue
+		}
+		m := it.Matrix
+		m[5] -= float64(g.scroll)
+		var holes []image.Rectangle
+		for _, h := range it.Holes {
+			if h = h.Add(d).Intersect(r); !h.Empty() {
+				holes = append(holes, h)
+			}
+		}
+		out[k] = LiveItem{Texture: it.Texture, Size: it.Size, Matrix: m, Rect: r, Holes: holes}
+	}
+	return out
+}
+
 // liveItem is the item of a thumbnail drawn under the matrix m, its live
-// rectangle the pixels of the frame inside it and clear of a border of half
-// width border on its edges
-func liveItem(thumb image.Image, m gg.Matrix, border float64, cfg Config) (LiveItem, bool) {
+// rectangle the pixels of the canvas inside it and clear of a border of
+// half width border on its edges
+func liveItem(thumb image.Image, m gg.Matrix, border float64, canvas image.Rectangle) (LiveItem, bool) {
 	b := thumb.Bounds()
 	if b.Empty() {
 		return LiveItem{}, false
@@ -163,7 +197,7 @@ func liveItem(thumb image.Image, m gg.Matrix, border float64, cfg Config) (LiveI
 		}
 	}
 	r := image.Rect(int(math.Ceil(x0+border)), int(math.Ceil(y0+border)),
-		int(math.Floor(x1-border)), int(math.Floor(y1-border))).Intersect(image.Rect(0, 0, cfg.Width, cfg.Height))
+		int(math.Floor(x1-border)), int(math.Floor(y1-border))).Intersect(canvas)
 	if r.Empty() {
 		return LiveItem{}, false
 	}

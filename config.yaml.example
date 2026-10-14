@@ -18,7 +18,8 @@ appearance:
   #   - Press 'c' to switch to carousel
   #   - Press 'g' to switch to grid
   #   - Press keybindings.layout_toggle ('q') to toggle them
-  # In the grid, Up and Down move the selection a row within its column.
+  # In the grid, Up and Down move the selection a row within its column,
+  # and the mouse wheel scrolls the grid that does not fit on one screen.
   layout: carousel
 
   # Renderer backend: how frames reach the screen; both show the same picture
@@ -55,6 +56,11 @@ appearance:
   grid:
     columns: 4    # Number of columns (0 = auto-calculate based on window count)
     spacing: 20   # Spacing between tiles in pixels
+    # The least width of a thumbnail, in the proportions of the overlay; past
+    # it the grid scrolls: the view follows the selection, the mouse wheel
+    # scrolls it by a row. With columns: 0, as many columns as fit at it.
+    # 0: the grid on one screen, its thumbnails as small as they come.
+    min_thumbnail_width: 320
 
   shadow:
     offset: 10

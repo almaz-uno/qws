@@ -134,8 +134,20 @@ func (t Thumbnail) LivePeriod() (time.Duration, string) {
 
 // Grid contains grid layout configuration
 type Grid struct {
-	Columns int     `mapstructure:"columns" yaml:"columns"` // Number of columns (0 = auto)
-	Spacing float64 `mapstructure:"spacing" yaml:"spacing"` // Spacing between tiles in grid mode
+	Columns           int     `mapstructure:"columns" yaml:"columns"`                         // Number of columns (0 = auto)
+	Spacing           float64 `mapstructure:"spacing" yaml:"spacing"`                         // Spacing between tiles in grid mode
+	MinThumbnailWidth int     `mapstructure:"min_thumbnail_width" yaml:"min_thumbnail_width"` // The least width of a thumbnail, in the proportions of the overlay; past it the grid scrolls; 0: none (specs/036-grid-scroll)
+}
+
+// MinThumbWidth is the least width of a thumbnail of the grid, and a
+// warning when it is negative: then the default is used
+// (specs/036-grid-scroll)
+func (g Grid) MinThumbWidth() (int, string) {
+	if g.MinThumbnailWidth < 0 {
+		def := Default().Appearance.Grid.MinThumbnailWidth
+		return def, fmt.Sprintf("appearance.grid.min_thumbnail_width %d is negative: %d is used", g.MinThumbnailWidth, def)
+	}
+	return g.MinThumbnailWidth, ""
 }
 
 // Shadow contains shadow effect configuration
@@ -257,8 +269,9 @@ func Default() *Config {
 			Spacing:     300,
 			Perspective: 0.6,
 			Grid: Grid{
-				Columns: 0,  // Auto-calculate
-				Spacing: 20, // Default grid spacing
+				Columns:           0,   // Auto-calculate
+				Spacing:           20,  // Default grid spacing
+				MinThumbnailWidth: 320, // past it the grid scrolls (specs/036-grid-scroll)
 			},
 			Shadow: Shadow{
 				Offset: 10,
@@ -490,6 +503,7 @@ func setDefaults(v *viper.Viper, cfg *Config) {
 	v.SetDefault("appearance.thumbnail.live", cfg.Appearance.Thumbnail.Live)
 	v.SetDefault("appearance.thumbnail.live_interval", cfg.Appearance.Thumbnail.LiveInterval)
 	v.SetDefault("appearance.spacing", cfg.Appearance.Spacing)
+	v.SetDefault("appearance.grid.min_thumbnail_width", cfg.Appearance.Grid.MinThumbnailWidth)
 	v.SetDefault("appearance.perspective", cfg.Appearance.Perspective)
 	v.SetDefault("appearance.shadow.offset", cfg.Appearance.Shadow.Offset)
 	v.SetDefault("appearance.shadow.blur", cfg.Appearance.Shadow.Blur)

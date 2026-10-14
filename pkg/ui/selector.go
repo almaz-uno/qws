@@ -146,6 +146,12 @@ func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, window
 		GridColumns:             appearance.Grid.Columns,
 		GridSpacing:             appearance.Grid.Spacing,
 	}
+	// The least thumbnail of the grid (specs/036-grid-scroll)
+	least, warning := appearance.Grid.MinThumbWidth()
+	if warning != "" {
+		log.Warn().Msg(warning)
+	}
+	carouselConfig.GridMinThumbWidth = least
 
 	// Resolve theme and apply colors
 	activeTheme := config.ResolveTheme(ctx, appearance.Colors.Theme)
@@ -478,6 +484,11 @@ func (s *Selector) Show() (*x11.WindowInfo, error) {
 		thumbnails = s.prepareThumbnails()
 	}
 
+	// The view of the grid at the top, or where it shows the selection
+	// (specs/036-grid-scroll, D4)
+	s.config.GridScroll = 0
+	s.followSelection()
+
 	// If primary modifier is not pressed (quick key press), close immediately after rendering
 	if !s.modifierPressed {
 		// Initial render
@@ -609,6 +620,10 @@ func (s *Selector) switchLayout(mode string, thumbnails []image.Image) {
 	log.Debug().Str("layout", mode).Bool("layers", held).Msg("Switching layout")
 	s.cancelStep()
 	s.setLayout(mode)
+	if mode == "grid" {
+		// The selection may have moved in the carousel
+		s.followSelection()
+	}
 	locates := mode == "grid" && s.locates()
 	if !held {
 		s.render(thumbnails)
@@ -733,6 +748,7 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 					if s.selectedIndex >= len(s.windows) {
 						s.selectedIndex = 0
 					}
+					s.followSelection()
 					s.dropLayers()
 					s.render(s.prepareThumbnails())
 					s.prefetch()
@@ -781,6 +797,12 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 			}
 
 		case xproto.ButtonPressEvent:
+			// The wheel scrolls the grid by a row, up or down, and the hover
+			// is the tile under the pointer then (specs/036-grid-scroll, D5)
+			if e.Detail == 4 || e.Detail == 5 {
+				s.wheel(e, thumbnails)
+				continue
+			}
 			// Left mouse button (button 1)
 			if e.Detail == 1 {
 				windowIndex := s.getWindowIndexAtPosition(int(e.EventX), int(e.EventY))
@@ -940,6 +962,7 @@ func (s *Selector) handleKeyPressSimple(e xproto.KeyPressEvent, thumbnails []ima
 					s.selectedIndex = 0
 				}
 			}
+			s.followSelection()
 			s.dropLayers()
 			s.render(s.prepareThumbnails())
 			s.prefetch()
@@ -1269,11 +1292,31 @@ func (s *Selector) getWindowIndexAtPositionCarousel(mouseX, mouseY int) int {
 	return -1
 }
 
+// wheel scrolls the grid by a row for a press of button 4, up, or 5, down,
+// and finds the hover anew at the pointer
+func (s *Selector) wheel(e xproto.ButtonPressEvent, thumbnails []image.Image) {
+	rows := 1
+	if e.Detail == 4 {
+		rows = -1
+	}
+	if !s.scrollGrid(rows, thumbnails) {
+		return
+	}
+	if hover := s.getWindowIndexAtPosition(int(e.EventX), int(e.EventY)); hover != s.hoverIndex {
+		s.hoverIndex = hover
+		s.hoverChanged(thumbnails)
+	}
+}
+
 // getWindowIndexAtPositionGrid is the tile of the grid under the mouse, or
 // -1: each tile where the grid draws it, below the band of the header
-// (specs/027-grid-mouse)
+// (specs/027-grid-mouse), at the scroll of the view, none under the header
+// (specs/036-grid-scroll)
 func (s *Selector) getWindowIndexAtPositionGrid(mouseX, mouseY int) int {
 	px, py := float64(mouseX), float64(mouseY)
+	if view := carousel.GridViewOf(len(s.windows), s.config); view.MaxScroll > 0 && py < float64(view.Top) {
+		return -1
+	}
 	for i := range s.windows {
 		x, y, w, h := carousel.GridTile(len(s.windows), i, s.config)
 		if px >= x && px <= x+w && py >= y && py <= y+h {
