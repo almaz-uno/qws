@@ -139,6 +139,21 @@ func TestLayoutToggleFlag(t *testing.T) {
 	}
 }
 
+// TestAnimationToggleFlag checks K1 of specs/035-slip-by-frame-rate: the
+// animation key is read from its flag, an empty name too
+func TestAnimationToggleFlag(t *testing.T) {
+	for _, name := range []string{"F4", ""} {
+		if err := rootCmd.PersistentFlags().Set("keybindings-animation-toggle", name); err != nil {
+			t.Fatal(err)
+		}
+		cfg = config.Default()
+		applyFlags()
+		if got := cfg.Keybindings.AnimationToggle; got != name {
+			t.Errorf("flag %q: %q", name, got)
+		}
+	}
+}
+
 // TestAnimationEnabledFlag checks K1 of specs/031-animation-auto: the flag of
 // appearance.animation.enabled takes auto, true, false, on and off; alone it
 // is true, as the bool flag it was; and the ports of the VNC server are read

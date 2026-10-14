@@ -1,0 +1,81 @@
+= 035 — plan
+:toc: left
+:toc-title: Contents
+:revdate: 2026-10-14
+
+== Approach
+
+*No detector* (D1). `autoAnimation` keeps the look for a viewer, `begin`
+and the records of the viewer; the ring of the frames, `frame`, the probe
+and its clock, `countsSlips` and the record of the frames go. `frame` of
+`pkg/ui/animation.go` no longer counts; `logAnimationFrame` no longer
+returns the interval it logs.
+
+*The state* (D2). The selector keeps the setting, `animMode`, what the key
+left, `forced` — none, on, off —, and what the activation is, `animState`:
+on — the animations of the configuration —; off — none, the live
+thumbnails as when animated, `enabled: false` —; still — none, no live
+thumbnails. `setAnimation` sets it with `anim`, `still`, the durations of
+the step and the fade and the hint, as `setStill` did. Under `false` the
+animations are read as under `true`, for the key to turn them on;
+`parseAnimation` stays as it is. `beginAnimation` sets the state the key
+and the setting give before the first frame — under auto that of the last
+activation — and looks for a viewer only when the key does not hold;
+`decideAnimation` decides it as the first frame is drawn and reports
+whether the hint changed, and `render` then draws the frame again before
+presenting it (D6).
+
+*The key* (D2, D4). `keybindings.animation_toggle` in `config.Keybindings`,
+`Default()`, `setDefaults`, the flag of `cmd/qws` — as `layout_toggle`. The
+name resolved by `parseToggle`, shared with `parseLayoutToggle`, each with
+its warnings; the keys taken those of the layout key and the layout key.
+`handleKeyPressSimple` takes the press after every other key, without the
+workspace modifier, on a presenter that composes: the key down. The loop
+takes the release: if the key was pressed in the activation and the server
+has it up — `QueryKeymap`, a hook for the tests —, `toggleAnimation`: on to
+still by `stillNow`, off or still to on; the key holds; the layers dropped
+and the frame drawn anew with the new hint; the live thumbnails asked for
+when on. `beginAnimation` forgets a press of the last activation.
+
+*The hint* (D3, D5). `carousel.Config.AnimationHint`, set by `setAnimation`
+from the key's name and the state, none without the header, the key or a
+presenter that composes. `drawHints` of `pkg/carousel` draws the layout
+key's and then the animation key's in a row from the right, `hintGap`
+32 px apart, stopping at the first that does not fit; the band as it is.
+
+== Files
+
+[cols="2,5"]
+|===
+| File | What changes
+
+| `pkg/carousel/renderer-cpu.go`
+| `AnimationHint`, `hintGap`, `drawHints` in place of `drawLayoutHint`.
+
+| `pkg/carousel/scenes_test.go`, `hint_test.go`, `testdata/scenes.json`
+| The six scenes (spec, "The scenes"); `TestAnimationHint`.
+
+| `internal/config/config.go`, `cmd/qws/root.go`
+| The key, its default and its flag.
+
+| `pkg/ui/auto.go`
+| The detector removed; the state, the key, the hint.
+
+| `pkg/ui/selector.go`, `animation.go`, `timing.go`
+| The key's fields and its parse; the press and the release; the first
+  frame drawn again; no counting.
+
+| `pkg/ui/auto_test.go`, `toggle_test.go`, `keys_test.go`, `scroll_test.go`,
+  `internal/config/config_test.go`, `cmd/qws/root_test.go`
+| K1–K5; the tests of the detector and `pkg/ui/testdata` removed.
+
+| `console/readme-demo/demo.go`
+| The hint of the animation key, on.
+
+| `README.md`, `doc/configuration.asciidoc`, `config.yaml.example`
+| The key; auto by the viewer alone.
+|===
+
+What must stay: the viewer of 031 and what still is; `true` and `false`;
+the layout key and its hint, the scenes of Σ with their digests; the
+animations when they run.

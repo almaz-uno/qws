@@ -30,7 +30,11 @@ func scrollSelector(t *testing.T, n int, animated bool) (*Selector, *frameRecord
 	a := &sceneAnimator{livePresenter: livePresenter{&fakePresenter{}}}
 	s.presenter, s.animator = a, a
 	s.animated, _ = parseAnimation(appearance.Animation)
-	s.setStill(!animated)
+	if animated {
+		s.setAnimation(animOn)
+	} else {
+		s.setAnimation(animStill)
+	}
 	s.dropLayers()
 	s.config.GridScroll = 0
 	s.followSelection()

@@ -82,10 +82,11 @@ with a 32-bit ARGB visual; without one qws says so and draws with the CPU.
 | `↑` `↓` | in the grid: a row up or down within the column, around it |
 | `q` | toggle the carousel and the grid, in the next frame; in the grid the selection frame converges onto the selected tile; the top right of the header says what `q` does now |
 | `c`, `g` | the carousel, the grid |
+| `a` | turn the animation on or off, as it is released, until qws restarts or `a` again; the header says which, left of the hint of `q` |
 | `Ctrl` | only the current workspace, or all of them, against `windows.workspace` |
 | mouse | hover to highlight, click to switch; the wheel scrolls the grid by a row |
 
-The modifier, the key, `q` and the rest are configurable
+The modifier, the key, `q`, `a` and the rest are configurable
 (`keybindings.*`); the next activation opens in `appearance.layout` again.
 
 ## Features
@@ -113,9 +114,10 @@ The modifier, the key, `q` and the rest are configurable
   to taste (`appearance.animation`), or none. After a switch to the grid the
   selection frame comes in larger and shrinks onto the selected tile, so the
   eye finds it at once ([028](specs/028-grid-locate/spec.adoc)). By
-  default it stands still while a VNC viewer is connected or when its
-  frames slip, and tries again five minutes later
-  ([031](specs/031-animation-auto/spec.adoc)).
+  default it stands still while a VNC viewer is connected
+  ([031](specs/031-animation-auto/spec.adoc)); `A` turns it on and off
+  while the switcher is shown, until qws restarts, and the header says
+  which ([035](specs/035-slip-by-frame-rate/spec.adoc)).
 - **A grid of many windows scrolls** rather than shrink its thumbnails
   below `appearance.grid.min_thumbnail_width`, 320 px: the view follows
   the selection, the wheel scrolls it
@@ -182,6 +184,7 @@ keybindings:
   modifier: Alt
   key: Tab
   layout_toggle: q          # "" for none
+  animation_toggle: a       # "" for none
 
 appearance:
   layout: carousel          # or grid
@@ -192,7 +195,7 @@ appearance:
   colors:
     theme: auto             # auto, dark, light
   animation:
-    enabled: auto           # true, false; auto: still over VNC or when the frames slip
+    enabled: auto           # true, false; auto: still over VNC
     duration: 150ms
     show: [fade, zoom]      # fade, zoom, both, or none
     hide: [fade, zoom]

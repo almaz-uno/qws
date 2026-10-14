@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"image"
 	"math"
@@ -30,6 +31,8 @@ type keyConfig struct {
 	cancelKeysym          uint32 // Cancel key keysym (Escape)
 	layoutToggleKeysym    uint32 // Key that toggles the carousel and the grid; 0: none (specs/026-layout-keys)
 	layoutToggleName      string // Its name as configured, for the hint of the header
+	animationToggleKeysym uint32 // Key that turns the animation on and off; 0: none (specs/035-slip-by-frame-rate)
+	animationToggleName   string // Its name as configured, for the hint of the header
 }
 
 // Selector provides a graphical carousel interface for window selection
@@ -72,8 +75,13 @@ type Selector struct {
 	hover               hoverAnimation                  // The levels of the hover frames
 	anim                animationOptions                // The animations of the activation (specs/010-animation-options): animated, or none while still
 	animated            animationOptions                // The animations of the configuration
-	still               bool                            // The activation is still under auto: a VNC viewer connected, or the frames slipped (specs/031-animation-auto)
-	auto                autoAnimation                   // What decides it
+	still               bool                            // The activation is still: under auto a VNC viewer connected (specs/031-animation-auto), or by the animation key (specs/035-slip-by-frame-rate)
+	animState           animState                       // Animated, off or still
+	animMode            config.AnimationMode            // appearance.animation.enabled
+	forced              int                             // The animation as the animation key left it: forcedNot, forcedOn, forcedOff
+	animKeyDown         bool                            // The animation key pressed while shown, not yet released
+	keyHeld             func(xproto.Keycode) bool       // Whether the server has a key down; nil: asked (keyDown)
+	auto                autoAnimation                   // What decides it under auto
 	deciding            bool                            // The first frame of the activation decides whether it is still
 	frameDue            time.Time                       // When the next frame of an animation is due
 	uploaded            int                             // Bytes uploaded in the pause before that frame
@@ -213,6 +221,11 @@ func NewSelector(ctx context.Context, conn *xgb.Conn, root xproto.Window, window
 	// main keys, c, g and the arrows
 	keyConf.layoutToggleKeysym, keyConf.layoutToggleName = parseLayoutToggle(keybindings.LayoutToggle,
 		0xFF0D, keyConf.cancelKeysym, keyConf.mainKeysym, 0x0063, 0x0067, 0xFF51, 0xFF52, 0xFF53, 0xFF54)
+	// The animation key cannot be any of them, nor the layout key
+	// (specs/035-slip-by-frame-rate)
+	keyConf.animationToggleKeysym, keyConf.animationToggleName = parseAnimationToggle(keybindings.AnimationToggle,
+		0xFF0D, keyConf.cancelKeysym, keyConf.mainKeysym, 0x0063, 0x0067, 0xFF51, 0xFF52, 0xFF53, 0xFF54,
+		keyConf.layoutToggleKeysym)
 
 	s := &Selector{
 		ctx:                 ctx,
@@ -554,22 +567,40 @@ func (s *Selector) restoreInitialLayoutMode() {
 // the switcher, which keep their meaning — the last two reported
 // (specs/026-layout-keys)
 func parseLayoutToggle(name string, taken ...uint32) (uint32, string) {
+	keysym, err := parseToggle(name, taken...)
+	switch {
+	case err == errToggleTaken:
+		log.Warn().Str("layout_toggle", strings.TrimSpace(name)).Msg("Layout toggle key is another key of the switcher, no layout toggle")
+	case err != nil:
+		log.Warn().Err(err).Str("layout_toggle", strings.TrimSpace(name)).Msg("Failed to parse layout toggle key, no layout toggle")
+	}
+	if keysym == 0 {
+		return 0, ""
+	}
+	return keysym, strings.TrimSpace(name)
+}
+
+// errToggleTaken is the error of parseToggle for a key of the switcher
+var errToggleTaken = errors.New("another key of the switcher")
+
+// parseToggle is the keysym of a toggle key named name: 0 for an empty name,
+// one keygrab does not know — its error —, or one of the keys taken —
+// errToggleTaken; a key taken of 0 is none
+func parseToggle(name string, taken ...uint32) (uint32, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return 0, ""
+		return 0, nil
 	}
 	keysym, err := keygrab.GetKeysym(name)
 	if err != nil {
-		log.Warn().Err(err).Str("layout_toggle", name).Msg("Failed to parse layout toggle key, no layout toggle")
-		return 0, ""
+		return 0, err
 	}
 	for _, k := range taken {
-		if keysym == k {
-			log.Warn().Str("layout_toggle", name).Msg("Layout toggle key is another key of the switcher, no layout toggle")
-			return 0, ""
+		if k != 0 && keysym == k {
+			return 0, errToggleTaken
 		}
 	}
-	return keysym, name
+	return keysym, nil
 }
 
 // layoutHint is the hint at the top right of the header of what the layout
@@ -729,6 +760,12 @@ func (s *Selector) handleEventsSync(thumbnails []image.Image) *x11.WindowInfo {
 			}
 
 		case xproto.KeyReleaseEvent:
+			// The animation key released turns the animation over
+			// (specs/035-slip-by-frame-rate, D2)
+			if s.releaseAnimationKey(e, thumbnails) {
+				continue
+			}
+
 			// Check if workspace modifier was released
 			if s.isModifierKeycode(e.Detail, workspaceKeycodes) {
 				if s.workspacePressed {
@@ -858,21 +895,28 @@ func (s *Selector) render(thumbnails []image.Image) {
 	// Prepare window data with icons and titles
 	windowData := s.prepareWindowData()
 
-	var img *image.RGBA
-	// Choose rendering mode based on configuration
-	if s.config.LayoutMode == "grid" {
-		img = s.renderer.DrawGridLayout(windowData, s.selectedIndex, s.hoverIndex, s.config)
-	} else {
+	draw := func() *image.RGBA {
+		// Choose rendering mode based on configuration
+		if s.config.LayoutMode == "grid" {
+			return s.renderer.DrawGridLayout(windowData, s.selectedIndex, s.hoverIndex, s.config)
+		}
 		// Default to carousel
-		img = s.renderer.Draw3DCarouselWithData(windowData, s.selectedIndex, s.hoverIndex, s.animOffset, s.config)
+		return s.renderer.Draw3DCarouselWithData(windowData, s.selectedIndex, s.hoverIndex, s.animOffset, s.config)
 	}
+	img := draw()
 	drawEnd := time.Now()
 
 	// The first frame of an activation starts its appearance, when the
 	// activation is animated — decided now, the viewer looked for while the
 	// frame was drawn (specs/031-animation-auto); while a fade runs, a frame
-	// drawn in full is presented through it
-	s.decideAnimation()
+	// drawn in full is presented through it. Decided otherwise than the hint
+	// of the animation key drawn says — a viewer come or gone since the last
+	// activation —, the frame is drawn again (specs/035-slip-by-frame-rate).
+	if s.decideAnimation() {
+		s.recycleFrame(img)
+		img = draw()
+		drawEnd = time.Now()
+	}
 	appears := s.fade.pending && s.anim.show.any()
 	s.fade.pending = false
 	if appears {
@@ -1047,6 +1091,10 @@ func (s *Selector) handleKeyPressSimple(e xproto.KeyPressEvent, thumbnails []ima
 		}
 		return false
 	}
+
+	// The animation key, after them all: it acts as it is released
+	// (specs/035-slip-by-frame-rate, D2)
+	s.pressAnimationKey(keycode, state)
 
 	return false
 }

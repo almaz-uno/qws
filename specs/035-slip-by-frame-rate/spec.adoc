@@ -1,0 +1,256 @@
+= 035 — animation auto by the viewer, and a key to toggle it
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-14
+:status: implemented
+:issue: 104
+
+== What and why
+
+The author, 2026-10-13: on a screen of 144 Hz and more, stepping fast
+through the carousel turns the animation off — `enabled: auto` goes still,
+"Animation still: the frames slip" —; on a screen of 60 Hz it does not.
+ws2's two screens of 2560×1440 run at 164.83 Hz, a period of 6.07 ms; its
+journal of 2026-10-13: still at 13:54, back at the probe at 14:05:34 and
+still again 19 s later, 3 late of 11 frames counted. On ws1 at 144 Hz on
+2026-10-14 the count went still twice, both falsely (research, "Measured
+and dropped").
+
+The rule of 031 (D5) counts a frame late when its interval is above 1.25
+refresh periods: at 165 Hz a slack of 1.5 ms, within the jitter of the
+frame timer; the frames recorded by 031 keep 0.99 of the refresh rate in
+the mean, a viewer connected or not. A rule by the mean rate over 0.5 s
+was measured and would have kept every recorded frame animated (research);
+the author chose the simpler design instead: no detector of the frames at
+all, and a key the user turns the animation on and off with.
+
+The specification is a delta to `develop` at `f1cfb59` (1.6.1 with 036)
+and to 031. Unchanged, of 031: the setting `appearance.animation.enabled`
+and its values, `true` and `false` as they are; `vnc_ports`; the viewer of
+D4 and what still is (D3); the records of the viewer (D7). Removed, of 031:
+the frames that slip (D5, its O1), the probe (D6), the record "Animation
+still: the frames slip". Unchanged, of 026: the layout key, its hint, its
+rule of modifiers.
+
+== Decisions
+
+D1–D3 decided by the author on 2026-10-14; D4–D8 made in the
+specification.
+
+D1 (the author's). *Auto by the viewer alone.* `enabled: auto` is still
+only while a VNC viewer is connected on a port of `vnc_ports` (D4 of 031).
+The frames are not counted: nothing goes still by the frames, nothing is
+probed. `true` and `false` as now.
+
+D2 (the author's). *The key.* `keybindings.animation_toggle`, `a` by
+default, with the flag `--keybindings-animation-toggle` and the variable
+`QWS_KEYBINDINGS_ANIMATION_TOGGLE`, as the layout key of 026 has them; its
+name resolved as that key's, the same rule of modifiers — not with the
+workspace modifier —; an empty name no toggle and no hint; a name `keygrab`
+cannot resolve, or one of another key of the switcher — Enter, the cancel
+and main keys, `c`, `g`, the arrows, the layout key — a warning, no toggle,
+no hint. Pressed and released while the switcher is shown, it turns the
+animation over from what it is now — animated to still, still or off to
+animated — over whatever the setting says: auto with a viewer, on; auto
+without one, off; `true` off, `false` on. At once in the activation:
+turned off, what moves is at its target and the live thumbnails stop, as
+still is (D3 of 031); turned on, the next steps move and the live
+thumbnails start. It holds for the next activations until qws restarts or
+the key is pressed again — the author's words "можно включить
+принудительно … можно выключить принудительно"; that it holds across
+activations, not to the end of one, is the specification's choice, and
+nothing is written to disk.
+
+D3 (the author's). *The indicator.* In the header, beside the hint of the
+layout key (026, D3): `A — animation on` or `A — animation off`, what the
+activation is now — the key's name as configured, one letter upper-cased,
+any other as written —; the face, the colour and the baseline of the
+version, as the hint of 026. None with the header off, with the key empty
+or unresolvable (D3 of 026).
+
+D4. *On release.* The key acts as it is released — "нажав (и отпустив)" —
+not as it is pressed. A key held repeats on X as a release and a press,
+the release with the key still down: as a release comes, qws asks the
+server whether the key is down (`QueryKeymap`, a round trip, once a
+release of the key) and ignores it if it is. The press is taken only while
+the switcher is shown: a key pressed in one activation and released in the
+next does nothing.
+
+D5. *The two hints in a row.* The hints are laid out from the right edge:
+the layout key's ending at the margin of the header, as now; the animation
+key's left of it, ending 32 px — twice the gap of the header — before it,
+or at the margin without the layout key's hint. A hint that would come
+closer than the gap of the header to the version (026, D6) is not drawn,
+nor any left of it: an overlay too narrow for both draws the layout key's
+alone. The band of the header and the grid are as without the hints.
+Rejected: the animation hint right of the layout key's, which would move
+the hint of 026 with the state.
+
+D6. *The first frame.* The first frame of an activation is drawn while the
+viewer is looked for (D4 of 031) and before it is known: it shows the hint
+of the state the last activation was decided to, the key's if it holds.
+When the look says otherwise — a viewer come or gone since —, the frame is
+drawn again with the right hint before it is presented: one frame more in
+the activation after a viewer comes or goes, none otherwise. With the key
+holding, no viewer is looked for.
+
+D7. *The records.* At info level, once a change: "Animation still: a VNC
+viewer connected", "Animation back" as in 031 — not while the key holds,
+since no viewer is looked for then —, and "Animation toggled on by the
+key", "Animation toggled off by the key".
+
+D8. *Under cpu.* Nothing moves under `cpu` whatever the keys say (031):
+no toggle and no hint.
+
+== Behavior
+
+=== The key
+
+[cols="2,1,5"]
+|===
+| Key | Default | Meaning
+
+| `keybindings.animation_toggle`
+| `a`
+| While the switcher is shown, pressed and released, turns the animation
+  on and off over `appearance.animation.enabled`, until qws restarts or it
+  is pressed again. A key name as for `keybindings.key`. Empty: none.
+|===
+
+=== Existing configurations
+
+No key, variable or flag is renamed or removed, and no default changes. A
+configuration without the key gets `a` and its hint, and `a` that did
+nothing while the switcher was shown turns the animation over: a change
+the user sees, with a new key — a minor version (constitution, "Releases
+and versions"). `animation_toggle: ""` takes the toggle and the hint away.
+A configuration whose layout or cancel key is `a` keeps it, with a warning
+and no animation key. `enabled: auto` no longer goes still by the frames:
+a configuration that relied on it — a VNC viewer on a port not listed in
+`vnc_ports` — is animated, and the key turns it off.
+
+=== The scenes
+
+The scenes of Σ keep their digests: the hint of the animation key is a
+field of `carousel.Config` of its own, `AnimationHint`, empty in them, and
+their frames are those with `animation_toggle: ""`. Six scenes are new:
+`carousel-e1-header-animation-on`, `-off`, `grid-e1-header-animation-on`,
+`-off` — the frame of E1 with both hints —, and
+`carousel-header-narrow-animation`, `grid-header-narrow-animation` — 280 px,
+no hint, with the digests of the `-header-narrow` scenes.
+
+== Acceptance criteria
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| Configuration: `TestAnimationToggle` in `internal/config` — `a` by
+  default, as `config init` writes it, and from a file without the key;
+  `F2` and `""` from a file; the variable over the file.
+  `TestAnimationToggleFlag` in `cmd/qws`: `F4` and `""` from the flag.
+  `TestRoundTrip`, `TestTagNames` and `TestJoinedKeys` with the key. The key
+  in `README.md`, `doc/configuration.asciidoc` and `config.yaml.example`.
+
+| K2
+| The toggle on the presenter of the tests of `pkg/ui`:
+  `TestAnimationKeyViewer` — auto with a viewer, still; the key: animated,
+  the steps moving, the live thumbnails asked for; the next activation
+  animated, no viewer looked for; the key again: still, and the next
+  activation still with the viewer gone; one record a change.
+  `TestAnimationKeyStep` — auto without a viewer, the key in the middle of
+  a step: at its target at once, the next steps at once, the live passes
+  stopped, the next activation still; the key again: animated, the next
+  activation too. `TestAnimationKeySettings` — over `true` still, over
+  `false` animated. `TestAnimationKeyRepeat` — repeats of a key held change
+  nothing, the release after them turns it over once; with the workspace
+  modifier nothing; a press of the last activation nothing.
+
+| K3
+| The hint: `TestAnimationKeyHint` in `pkg/ui` — `A — animation on`, `off`,
+  `F2 — …` as written; none with the header off, with no key, under `cpu`;
+  a name of another key of the switcher or unknown, one warning, no key;
+  the first frame drawn once when the state is that of the last
+  activation, twice when a viewer came or went (D6). `TestAnimationHint` in
+  `pkg/carousel`, both layouts, the frame of E1: the hint within its place
+  left of the layout key's and within the band, at the margin alone; drawn
+  from the width where it starts 16 px after the version, not a pixel
+  narrower, the layout key's drawn either way; none without the header;
+  the band and the grid as without it.
+
+| K4
+| The pictures: `TestScenes` — every scene of `testdata/scenes.json` with
+  its digest, the six new recorded, the two narrow ones equal to the
+  `-header-narrow` digests; `TestLayoutHint` as it is;
+  `TestGLXPresenterMatchesCPU`, `TestLayers` over Σ where an X display, GLX
+  and a compositor are, skipped otherwise as they are.
+
+| K5
+| The rest of 031: `TestStillViewer`, `TestAnimationSettings`,
+  `TestViewerWhileDrawn`, `TestTCPLines`, `TestViewerConnected`; its tests
+  of the frames that slip — `TestSlipCount`, `TestSlipReplay`,
+  `TestStillFrames` — removed with the detector, and the batches of
+  `pkg/ui/testdata` they read with them.
+
+| K6
+| `go build ./...`, `gofmt -l` empty, `go vet ./...`, `make check-specs`,
+  `go test ./...` on every commit, each in a worktree of its own; `go test
+  -race` of `pkg/ui`, `pkg/carousel`, `pkg/snapshot`, `pkg/x11`.
+
+| K7
+| The author's trial: on ws1 or ws2 without a viewer, `a` in the switcher —
+  the header says `A — animation off`, steps at once, the next activations
+  too; `a` again — animated, `A — animation on`. Connected by VNC: still,
+  `A — animation off`; `a` — animated over VNC. Holding `a` turns it over
+  once, as it is released. A record per change.
+|===
+
+== Outside this change
+
+The layers of the cards uploaded in the pause before a frame, 1.2–1.3 MB,
+cost it 10–12 ms of presenting on ws1 at 144 Hz, two slots lost (research,
+"Finding"): a real stall, left for a later specification.
+
+== Results
+
+Off the screen: the tests on ws1, the commits `ff4e870` to `3bdbe23`, each
+in a worktree of its own; checked again on `3bdbe23`, `go test -count=1
+./...`. On the desktop: the author's trial on ws2 on 2026-10-14, 16:23,
+the build of `3bdbe23` (`v1.6.1-20-g3bdbe23`) on Alt+F11 beside the
+service, `--log-level debug` (`~/.cache/qws-035/log-k7.txt` on ws2);
+before it a pass on ws1 with no activation.
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | Met. `TestAnimationToggle`, `TestAnimationToggleFlag`,
+  `TestRoundTrip`, `TestTagNames`, `TestJoinedKeys`; `config show` of the
+  build on the files of ws1 and ws2: no warning, `animation_toggle: a`,
+  `enabled: auto`.
+| K2 | Met. `TestAnimationKeyViewer`, `TestAnimationKeyStep`,
+  `TestAnimationKeySettings`, `TestAnimationKeyRepeat`.
+| K3 | Met. `TestAnimationKeyHint`, `TestAnimationHint`.
+| K4 | Met. `TestScenes`: no digest of before changed; six scenes new, the
+  two narrow equal to the `-header-narrow` digests.
+| K5 | Met. `TestStillViewer`, `TestAnimationSettings`,
+  `TestViewerWhileDrawn`, `TestTCPLines`, `TestViewerConnected`; the tests
+  of the frames that slip removed.
+| K6 | Met. Every commit in a worktree of its own; `-race` of `pkg/ui`,
+  `pkg/carousel`, `pkg/snapshot`, `pkg/x11`.
+| K7 | Met without a viewer; over VNC not tried. Three activations on the
+  screen of 165 Hz, no viewer connected: 1373 frames of the steps of the
+  carousel, 612 of the grid — its view following the selection, animated
+  —, 67 of the convergence, none made still by them; the key four times,
+  "Animation toggled off by the key" and "on" in turn, once a change; no
+  warning or error. The author: "выглядит хорошо". The viewer's part rests
+  on `TestAnimationKeyViewer` and on D4 of 031, unchanged.
+|===
+
+== Open decisions
+
+None. O1 confirmed by the author on 2026-10-14 ("да, это ок"): the key
+holds until qws restarts. O2 done: the images of `doc/images` drawn anew
+by `make readme-images`, the carousel showing `A — animation on`.

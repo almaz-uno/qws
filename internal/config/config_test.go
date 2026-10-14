@@ -425,6 +425,49 @@ func TestLayoutToggle(t *testing.T) {
 	}
 }
 
+// Criteria of specs/035-slip-by-frame-rate
+
+// TestAnimationToggle checks K1: the animation key is a by default, as
+// config init writes it and config show prints it, and in a file without it;
+// it is read from a file, an empty name too, and from its QWS_ variable over
+// the file
+func TestAnimationToggle(t *testing.T) {
+	if got := Default().Keybindings.AnimationToggle; got != "a" {
+		t.Errorf("default %q, want a", got)
+	}
+	data, err := yaml.Marshal(Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "\n    animation_toggle: a\n") {
+		t.Errorf("config init writes no animation_toggle: a under keybindings:\n%s", data)
+	}
+
+	clearEnvironment(t)
+	for _, c := range []struct{ file, want string }{
+		{"keybindings:\n  cancel: Escape\n", "a"},
+		{"keybindings:\n  animation_toggle: F2\n", "F2"},
+		{"keybindings:\n  animation_toggle: \"\"\n", ""},
+	} {
+		cfg, warnings, err := Load(writeFile(t, c.file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Keybindings.AnimationToggle != c.want || len(warnings) != 0 {
+			t.Errorf("%q: %q, warnings %v; want %q, none", c.file, cfg.Keybindings.AnimationToggle, warnings, c.want)
+		}
+	}
+
+	t.Setenv("QWS_KEYBINDINGS_ANIMATION_TOGGLE", "z")
+	cfg, _, err := Load(writeFile(t, "keybindings:\n  animation_toggle: F2\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Keybindings.AnimationToggle != "z" {
+		t.Errorf("environment: %q, want z", cfg.Keybindings.AnimationToggle)
+	}
+}
+
 // Criteria of specs/028-grid-locate
 
 // TestLocateKeys checks K5: the selection frame converges in 400 ms from 1.6
@@ -608,7 +651,7 @@ func TestVNCPorts(t *testing.T) {
 // default
 func changedConfig(t *testing.T) *Config {
 	cfg := &Config{
-		Keybindings: Keybindings{Modifier: "Super", Key: "grave", Backward: "Ctrl", WorkspaceModifier: "Shift", Cancel: "q", LayoutToggle: ""},
+		Keybindings: Keybindings{Modifier: "Super", Key: "grave", Backward: "Ctrl", WorkspaceModifier: "Shift", Cancel: "q", LayoutToggle: "", AnimationToggle: "F4"},
 		Appearance: Appearance{
 			Layout:      "grid",
 			Renderer:    "none", // neither default, cpu here or glx after 001
