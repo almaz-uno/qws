@@ -2,63 +2,46 @@ package ui
 
 import (
 	"fmt"
+	"image"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/almaz-uno/qws/internal/config"
+	"github.com/jezek/xgb/xproto"
 	"github.com/rs/zerolog/log"
 )
 
 // The setting auto of appearance.animation.enabled (specs/031-animation-auto):
 // an activation is animated, or still — as with enabled: false, and without
-// the live thumbnails — while a VNC viewer is connected (D4) or once the
-// frames slip (D5) — their mean rate over the last 0.5 s of animation below
-// 75 % of the refresh rate (specs/035-slip-by-frame-rate) —, and then
-// animated again at a probe five minutes later (D6); each change is said in
-// the log once (D7).
+// the live thumbnails — while a VNC viewer is connected (D4); each change is
+// said in the log once (D7). The frames that slip no longer make it still,
+// and the key of keybindings.animation_toggle turns the animation on and off
+// over the setting (specs/035-slip-by-frame-rate).
 
-const (
-	slipSpan   = 500 * time.Millisecond // the window: the latest frames counted whose intervals span this (D2 of 035)
-	slipShare  = 0.75                   // still when the mean rate of a full window is below this share of the refresh rate (D3 of 035)
-	slipFrames = 512                    // the most frames the window holds: as many within slipSpan are above 1000 fps
-	probeAfter = 5 * time.Minute        // still for the frames this long, the next activation is animated again (D6)
-)
-
-// Why an activation is still
+// Why an activation is still under auto
 const (
 	stillNot    = ""       // animated
 	stillViewer = "viewer" // a VNC viewer connected
-	stillFrames = "frames" // the frames slipped
 )
 
-// countsSlips reports whether the frames of an animation of kind, as the frame
-// records name it, are counted: those of the steps of the carousel and of the
-// grid, of the hover and of the convergence of the selection frame; not those
-// of the fades, which miss without a viewer too (D5, O1)
-func countsSlips(kind string) bool {
-	switch kind {
-	case "carousel", "grid", "hover", "locate":
-		return true
-	}
-	return false
-}
+// The animation as the key of keybindings.animation_toggle left it
+// (specs/035-slip-by-frame-rate, D2)
+const (
+	forcedNot = iota // as the setting says
+	forcedOn         // animated, whatever the setting and the viewer
+	forcedOff        // still
+)
 
-// autoAnimation decides whether an activation is animated or still. The zero
-// value is off: every activation animated.
+// autoAnimation decides whether an activation is animated or still under
+// auto. The zero value is off: every activation animated.
 type autoAnimation struct {
 	on     bool                    // appearance.animation.enabled is auto, on a presenter that composes
 	ports  []int                   // appearance.animation.vnc_ports; none: no viewer is looked for
 	viewer func([]int) (int, bool) // the check for a viewer on the ports; nil: viewerConnected
-	clock  func() time.Time        // the time of the probe; nil: time.Now
 
-	window [slipFrames]time.Duration // the intervals of the frames counted, a ring: the window
-	frames int                       // frames in the window, up to slipFrames
-	next   int                       // where the next frame counted goes in the ring
-	span   time.Duration             // the sum of their intervals
-	period time.Duration             // the refresh period when the frames slipped, for the record
-
-	slipped time.Time       // when the frames slipped; zero: they did not, or a probe started since
-	reason  string          // why the activation is still: stillNot, stillViewer, stillFrames
-	look    chan viewerLook // the viewer looked for in the background for the activation; nil: none
+	reason string          // why the activation is still: stillNot, stillViewer
+	look   chan viewerLook // the viewer looked for in the background for the activation; nil: none
 }
 
 // viewerLook is a viewer looked for: its port, whether it is connected, and
@@ -69,19 +52,9 @@ type viewerLook struct {
 	took time.Duration
 }
 
-// now is the time of the clock
-func (a *autoAnimation) now() time.Time {
-	if a.clock != nil {
-		return a.clock()
-	}
-	return time.Now()
-}
-
 // begin decides at the start of an activation, before its first frame,
-// whether it is still: while a viewer is connected (D4) — the look of
-// lookForViewer waited for, if one runs —; else within probeAfter of when the
-// frames slipped — past it the activation is animated, its count started
-// anew: the probe (D6). Off, never.
+// whether it is still: while a viewer is connected (D4 of 031) — the look of
+// lookForViewer waited for, if one runs. Off, never.
 func (a *autoAnimation) begin() bool {
 	if !a.on {
 		return false
@@ -90,22 +63,14 @@ func (a *autoAnimation) begin() bool {
 		a.become(stillViewer, port)
 		return true
 	}
-	if !a.slipped.IsZero() {
-		if a.now().Sub(a.slipped) < probeAfter {
-			a.become(stillFrames, 0)
-			return true
-		}
-		a.slipped = time.Time{}
-		a.frames, a.next, a.span = 0, 0, 0
-	}
 	a.become(stillNot, 0)
 	return false
 }
 
 // lookForViewer starts looking for a viewer connected on the ports, when
 // there are any, in the background: the tables take some 5 ms to read on ws1,
-// the kernel walking its hash of connections for each (research), and they
-// are read while the first frame of the activation is drawn
+// the kernel walking its hash of connections for each (research of 031), and
+// they are read while the first frame of the activation is drawn
 func (a *autoAnimation) lookForViewer() {
 	a.look = nil
 	if !a.on || len(a.ports) == 0 {
@@ -146,59 +111,8 @@ func (a *autoAnimation) viewerOn() (int, bool) {
 	return r.port, r.ok
 }
 
-// frame counts a frame of an animation presented interval after the frame
-// before it of its animation, at the refresh period period, while the
-// activation is animated. It reports whether the frames now slip — the
-// window full, its frames spanning slipSpan, and their mean rate below
-// slipShare of the refresh rate (D2, D3 of 035), the window carried across
-// activations — and the activation is still from then.
-func (a *autoAnimation) frame(interval, period time.Duration) bool {
-	if !a.on || a.reason != stillNot {
-		return false
-	}
-	if a.frames == slipFrames {
-		a.dropOldest()
-	}
-	a.window[a.next] = interval
-	a.next = (a.next + 1) % slipFrames
-	a.frames++
-	a.span += interval
-	// The fewest of the latest frames that span the window
-	for a.frames > 1 && a.span-a.window[a.oldest()] >= slipSpan {
-		a.dropOldest()
-	}
-	if a.span < slipSpan || float64(a.frames)*float64(period) >= slipShare*float64(a.span) {
-		return false
-	}
-	a.slipped = a.now()
-	a.period = period
-	a.become(stillFrames, 0)
-	return true
-}
-
-// oldest is where the oldest frame of the window is in the ring
-func (a *autoAnimation) oldest() int {
-	return (a.next - a.frames + slipFrames) % slipFrames
-}
-
-// dropOldest drops the oldest frame of the window
-func (a *autoAnimation) dropOldest() {
-	a.span -= a.window[a.oldest()]
-	a.frames--
-}
-
-// rate is the mean rate of the window, frames a second
-func (a *autoAnimation) rate() float64 {
-	if a.span <= 0 {
-		return 0
-	}
-	return float64(a.frames) / a.span.Seconds()
-}
-
 // become makes reason why the activation is still, and logs it when it
-// changes, at info level (D7): the port of a viewer; the mean rate of the
-// window, the refresh rate, the frames of the window and its span (D5 of
-// 035)
+// changes, at info level (D7 of 031): the port of a viewer
 func (a *autoAnimation) become(reason string, port int) {
 	if reason == a.reason {
 		return
@@ -208,13 +122,6 @@ func (a *autoAnimation) become(reason string, port int) {
 	switch reason {
 	case stillViewer:
 		log.Info().Int("port", port).Msg("Animation still: a VNC viewer connected")
-	case stillFrames:
-		log.Info().
-			Float64("fps", a.rate()).
-			Float64("refresh_hz", float64(time.Second)/float64(a.period)).
-			Int("frames", a.frames).
-			Dur("window_ms", a.span).
-			Msg("Animation still: the frames slip")
 	default:
 		log.Info().Str("was", was).Msg("Animation back")
 	}
@@ -237,18 +144,26 @@ func parseVNCPorts(ports []int) ([]int, []string) {
 
 // initAnimations reads the animations of the configuration, and the setting
 // that decides whether an activation is animated: auto only on a presenter
-// that composes — under cpu nothing moves
+// that composes — under cpu nothing moves. Under false the animations are
+// read as under true, for the key to turn them on
+// (specs/035-slip-by-frame-rate, D2).
 func (s *Selector) initAnimations(a config.Animation) {
 	anim, warnings := parseAnimation(a)
 	mode, _ := a.Mode() // its warning is among those of parseAnimation
+	if mode == config.AnimationOff {
+		on := a
+		on.Enabled = string(config.AnimationOn)
+		anim, _ = parseAnimation(on)
+	}
 	ports, w := parseVNCPorts(a.VNCPorts)
 	warnings = append(warnings, w...)
 	for _, w := range warnings {
 		log.Warn().Msg(w)
 	}
 	s.animated = anim
+	s.animMode = mode
 	s.auto = autoAnimation{on: mode == config.AnimationAuto && s.animator != nil, ports: ports}
-	s.setStill(false)
+	s.setAnimation(s.settled())
 	log.Debug().
 		Bool("composes", s.animator != nil).
 		Str("enabled", string(mode)).
@@ -266,44 +181,89 @@ func (s *Selector) initAnimations(a config.Animation) {
 		Msg("Animations")
 }
 
+// animState is what an activation is: animated; off — nothing moves, the
+// live thumbnails as when animated: enabled: false —; or still — nothing
+// moves, no live thumbnails: auto with a viewer (D3 of 031), or the key
+type animState int
+
+const (
+	animOn animState = iota
+	animOff
+	animStill
+)
+
+// settled is the state the key and the setting give an activation before it
+// is decided: the key's; the setting's; under auto the one the last
+// activation was decided to — the viewer is looked for while the first frame
+// is drawn, and that frame shows the hint of this state
+func (s *Selector) settled() animState {
+	switch {
+	case s.forced == forcedOn:
+		return animOn
+	case s.forced == forcedOff:
+		return animStill
+	case s.animMode == config.AnimationOff:
+		return animOff
+	case s.auto.reason == stillViewer:
+		return animStill
+	}
+	return animOn
+}
+
 // beginAnimation starts deciding, at the start of an activation, whether it
 // is animated or still: the viewer is looked for while the first frame is
-// drawn, and render decides before it presents it (decideAnimation)
+// drawn — not when the key decided —, and render decides before it presents
+// it (decideAnimation). The animation key is up.
 func (s *Selector) beginAnimation() {
-	s.auto.lookForViewer()
+	s.animKeyDown = false
+	if s.forced == forcedNot {
+		s.auto.lookForViewer()
+	}
 	s.deciding = true
+	s.setAnimation(s.settled())
 }
 
 // decideAnimation decides, before the first frame of the activation is
-// presented, whether the activation is animated or still
-func (s *Selector) decideAnimation() {
+// presented, whether the activation is animated or still: by the key, else
+// by the setting and, under auto, the viewer. It reports whether the hint of
+// the animation key changed: the frame drawn with the hint before is drawn
+// again.
+func (s *Selector) decideAnimation() bool {
 	if !s.deciding {
-		return
+		return false
 	}
 	s.deciding = false
-	s.setStill(s.auto.begin())
+	hint := s.config.AnimationHint
+	if s.forced == forcedNot && s.auto.begin() {
+		s.setAnimation(animStill)
+	} else {
+		s.setAnimation(s.settled())
+	}
+	return s.config.AnimationHint != hint
 }
 
-// setStill makes the animations of the activation those of the
-// configuration, or none while still — as enabled: false gives —, with the
-// durations of the motions of the step and of the fade
-func (s *Selector) setStill(still bool) {
-	s.still = still
+// setAnimation makes the activation animated, off or still: its animations
+// those of the configuration, or none, with the durations of the motions of
+// the step and of the fade; the hint of the animation key for it
+func (s *Selector) setAnimation(state animState) {
+	s.animState = state
+	s.still = state == animStill
 	o := s.animated
-	if still {
+	if state != animOn {
 		o = animationOptions{}
 	}
 	s.anim = o
 	s.step.pos.d, s.step.gx.d, s.step.gy.d, s.step.sy.d = o.step, o.step, o.step, o.step
 	s.fade.level.d = o.duration
+	s.config.AnimationHint = s.animationHint()
 }
 
-// stillNow makes the activation still in its middle, the frames having
-// slipped (D5): what moves — the step, the hover levels, the convergence of
-// the selection frame, a fade-in — is at its target in the next frame; a
-// fade-out ends at once, the overlay unmapped; the live passes stop
+// stillNow makes the activation still in its middle: what moves — the step,
+// the hover levels, the convergence of the selection frame, a fade-in — is at
+// its target in the next frame; a fade-out ends at once, the overlay
+// unmapped; the live passes stop
 func (s *Selector) stillNow() {
-	s.setStill(true)
+	s.setAnimation(animStill)
 	s.locate.level.d = 0
 	for i, m := range s.hover.levels {
 		m.d = 0
@@ -313,4 +273,106 @@ func (s *Selector) stillNow() {
 		s.fade.active = false
 	}
 	s.setLive(false)
+}
+
+// parseAnimationToggle is the keysym of the animation key named by
+// keybindings.animation_toggle and the name its hint shows; 0 and "" for no
+// key: an empty name, one keygrab does not know, or one of the keys taken by
+// the switcher, which keep their meaning — the last two reported
+// (specs/035-slip-by-frame-rate, D2, as parseLayoutToggle of 026)
+func parseAnimationToggle(name string, taken ...uint32) (uint32, string) {
+	keysym, err := parseToggle(name, taken...)
+	switch {
+	case err == errToggleTaken:
+		log.Warn().Str("animation_toggle", name).Msg("Animation toggle key is another key of the switcher, no animation toggle")
+	case err != nil:
+		log.Warn().Err(err).Str("animation_toggle", name).Msg("Failed to parse animation toggle key, no animation toggle")
+	}
+	if keysym == 0 {
+		return 0, ""
+	}
+	return keysym, strings.TrimSpace(name)
+}
+
+// animationHint is the hint of the animation key in the header, the state
+// the activation is in: "A — animation on", "A — animation off", a name of
+// one letter upper-cased, any other as written; none without the key, the
+// header or a presenter that composes (specs/035-slip-by-frame-rate, D3)
+func (s *Selector) animationHint() string {
+	key := s.keyConfig.animationToggleName
+	if key == "" || !s.appearance.Header.Enabled || s.animator == nil {
+		return ""
+	}
+	if r := []rune(key); len(r) == 1 && unicode.IsLetter(r[0]) {
+		key = strings.ToUpper(key)
+	}
+	if s.animState == animOn {
+		return key + " — animation on"
+	}
+	return key + " — animation off"
+}
+
+// pressAnimationKey takes a press of the animation key, without the
+// workspace modifier, on a presenter that composes: the key is down. The
+// presses the server repeats while it is held change nothing.
+func (s *Selector) pressAnimationKey(keycode xproto.Keycode, state uint16) bool {
+	if s.keyConfig.animationToggleKeysym == 0 || s.animator == nil ||
+		state&s.keyConfig.workspaceModifierMask != 0 || !s.isKeycode(keycode, s.keyConfig.animationToggleKeysym) {
+		return false
+	}
+	s.animKeyDown = true
+	return true
+}
+
+// releaseAnimationKey takes a release of the animation key pressed while the
+// switcher is shown and turns the animation over (D2). A release the server
+// makes while the key is held, repeating it, is none: the key is down when
+// the server is asked.
+func (s *Selector) releaseAnimationKey(e xproto.KeyReleaseEvent, thumbnails []image.Image) bool {
+	if !s.animKeyDown || !s.isKeycode(e.Detail, s.keyConfig.animationToggleKeysym) {
+		return false
+	}
+	held := s.keyHeld
+	if held == nil {
+		held = s.keyDown
+	}
+	if held(e.Detail) {
+		return true
+	}
+	s.animKeyDown = false
+	s.toggleAnimation(thumbnails)
+	return true
+}
+
+// keyDown reports whether the server has the key of keycode down
+func (s *Selector) keyDown(keycode xproto.Keycode) bool {
+	reply, err := xproto.QueryKeymap(s.conn).Reply()
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to query the keymap")
+		return false
+	}
+	return reply.Keys[keycode/8]&(1<<(keycode%8)) != 0
+}
+
+// toggleAnimation turns the animation of the activation over, and of the
+// next ones until qws restarts or the key is pressed again (D2): animated
+// becomes still at once — what moves at its target, the live thumbnails
+// off —; off or still becomes animated — the next steps move, the live
+// thumbnails on. The frame is drawn anew, with the hint of the new state.
+func (s *Selector) toggleAnimation(thumbnails []image.Image) {
+	if s.animState == animOn {
+		s.forced = forcedOff
+		log.Info().Msg("Animation toggled off by the key")
+		s.stillNow()
+	} else {
+		s.forced = forcedOn
+		log.Info().Msg("Animation toggled on by the key")
+		s.setAnimation(animOn)
+	}
+	s.dropLayers()
+	s.render(thumbnails)
+	s.prefetch()
+	if s.animState == animOn && !s.fade.active {
+		s.setLive(true)
+	}
 }

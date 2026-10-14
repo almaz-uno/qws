@@ -7,7 +7,7 @@
   the author for the key (research, "Measured and dropped").
 . [x] T2. The hint of the animation key in `pkg/carousel`, the scenes; K3,
   K4.
-. [ ] T3. The detector removed; the key, its state and its hint in
+. [x] T3. The detector removed; the key, its state and its hint in
   `pkg/ui`, its configuration, the documents; K1, K2, K3, K5.
 . [ ] T4. K6 on every commit, in a worktree of its own.
 . [ ] T5. The author's trial: K7, O1.

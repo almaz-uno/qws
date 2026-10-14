@@ -69,6 +69,7 @@ func init() {
 	rootCmd.PersistentFlags().String("keybindings-workspace-modifier", defaultCfg.Keybindings.WorkspaceModifier, "modifier to filter current workspace")
 	rootCmd.PersistentFlags().String("keybindings-cancel", defaultCfg.Keybindings.Cancel, "key to cancel selection")
 	rootCmd.PersistentFlags().String("keybindings-layout-toggle", defaultCfg.Keybindings.LayoutToggle, "key to toggle the carousel and the grid while the switcher is shown (empty = none)")
+	rootCmd.PersistentFlags().String("keybindings-animation-toggle", defaultCfg.Keybindings.AnimationToggle, "key to turn the animation on and off while the switcher is shown (empty = none)")
 
 	// Appearance
 	rootCmd.PersistentFlags().StringP("appearance-layout", "l", defaultCfg.Appearance.Layout, "layout mode (carousel, grid)")
@@ -183,6 +184,9 @@ func applyFlags() {
 	}
 	if rootCmd.PersistentFlags().Changed("keybindings-layout-toggle") {
 		cfg.Keybindings.LayoutToggle, _ = rootCmd.PersistentFlags().GetString("keybindings-layout-toggle")
+	}
+	if rootCmd.PersistentFlags().Changed("keybindings-animation-toggle") {
+		cfg.Keybindings.AnimationToggle, _ = rootCmd.PersistentFlags().GetString("keybindings-animation-toggle")
 	}
 
 	// Appearance

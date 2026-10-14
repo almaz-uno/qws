@@ -42,6 +42,7 @@ var testKeysyms = []uint32{
 	0xFF52, // Up
 	0xFF54, // Down
 	0xFFBF, // F2
+	0x0061, // a
 }
 
 // testKeycode is the keycode of a key of the test keyboard
@@ -65,13 +66,14 @@ type frameRecorder struct {
 type recordedFrame struct {
 	layout, hint string
 	selected     int
-	scroll       int // of the view of the grid (specs/036-grid-scroll)
+	scroll       int    // of the view of the grid (specs/036-grid-scroll)
+	animHint     string // the hint of the animation key (specs/035-slip-by-frame-rate)
 }
 
 func (r *frameRecorder) record(layout string, selected int, cfg carousel.Config) *image.RGBA {
 	r.Lock()
 	defer r.Unlock()
-	r.frames = append(r.frames, recordedFrame{layout, cfg.LayoutHint, selected, cfg.GridScroll})
+	r.frames = append(r.frames, recordedFrame{layout, cfg.LayoutHint, selected, cfg.GridScroll, cfg.AnimationHint})
 	return image.NewRGBA(image.Rect(0, 0, cfg.Width, cfg.Height))
 }
 

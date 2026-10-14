@@ -114,13 +114,8 @@ func (s *Selector) logFrame(drawStart, drawEnd, end time.Time) {
 // logAnimationFrame logs a frame of an animation: its progress, the time
 // since the previous frame, for the first frame after the event that set its
 // target the time since that event, and for its last frame, at rest, its
-// duration (metrics A1–A3 of specs/007-animation). It returns the time since
-// the previous frame, 0 for the first (specs/031-animation-auto).
-func (s *Selector) logAnimationFrame(a *animationLog, kind string, progress float64, atRest bool, drawStart, drawEnd, end time.Time) time.Duration {
-	var interval time.Duration
-	if !a.lastP.IsZero() {
-		interval = end.Sub(a.lastP)
-	}
+// duration (metrics A1–A3 of specs/007-animation)
+func (s *Selector) logAnimationFrame(a *animationLog, kind string, progress float64, atRest bool, drawStart, drawEnd, end time.Time) {
 	lag := s.takeLag()
 	e := log.Debug()
 	if e.Enabled() {
@@ -139,7 +134,7 @@ func (s *Selector) logAnimationFrame(a *animationLog, kind string, progress floa
 			Dur("period_ms", s.period).
 			Int("uploaded_kb", s.uploaded/1024)
 		if !a.lastP.IsZero() {
-			e = e.Dur("interval_ms", interval)
+			e = e.Dur("interval_ms", end.Sub(a.lastP))
 		}
 		if a.fresh {
 			e = e.Dur("response_ms", end.Sub(a.cause))
@@ -159,7 +154,6 @@ func (s *Selector) logAnimationFrame(a *animationLog, kind string, progress floa
 	if a.first.IsZero() {
 		a.first = end
 	}
-	return interval
 }
 
 // logRefresh logs a refresh presented between presentStart and end

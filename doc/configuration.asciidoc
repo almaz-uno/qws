@@ -147,6 +147,10 @@ viper.BindPFlag("keybindings.workspace_modifier",
 | `layout_toggle`
 | `q`
 | Key that toggles the carousel and the grid while the switcher is shown; empty: none
+
+| `animation_toggle`
+| `a`
+| Key that turns the animation on and off while the switcher is shown; empty: none
 |===
 
 .Proposed CLI flags
@@ -167,6 +171,7 @@ keybindings:
   workspace_modifier: Ctrl  # Filter to current workspace when held
   cancel: Escape
   layout_toggle: q          # Toggles the carousel and the grid; "" for none
+  animation_toggle: a       # Turns the animation on and off; "" for none
 ----
 
 === Appearance — Carousel
@@ -323,6 +328,7 @@ keybindings:
   workspace_modifier: Ctrl
   cancel: Escape
   layout_toggle: q
+  animation_toggle: a
 
 appearance:
   thumbnail:
@@ -411,6 +417,13 @@ log:
 | `string`
 | `q`
 | Key that toggles the carousel and the grid while the switcher is shown, without the workspace modifier, as `c` (carousel) and `g` (grid) choose one; the next activation opens in `appearance.layout` again. A key name as for `keybindings.key`. With the header shown, its top right says what the key does now: `Q — grid` in the carousel, `Q — carousel` in the grid (a name of one letter upper-cased, any other as written). Empty: no toggle and no hint; set it so in the file or with the flag, since an empty environment variable counts as unset. A name qws does not know is reported, and there is no toggle. A key the switcher already uses — Enter, the cancel and main keys, `c`, `g`, the arrows — keeps its meaning: then there is no toggle and no hint, which is reported (specification `026-layout-keys`)
+
+| `keybindings.animation_toggle`
+| `--keybindings-animation-toggle`
+| `QWS_KEYBINDINGS_ANIMATION_TOGGLE`
+| `string`
+| `a`
+| Key that turns the animation of the `glx` renderer on and off while the switcher is shown, without the workspace modifier: pressed and released — the repeats of a key held change nothing — it turns over what the activation is now, animated to still, still or `enabled: false` to animated, over whatever `appearance.animation.enabled` says and whether a VNC viewer is connected. At once: turned off, what moves is at its target and the live thumbnails stop; turned on, the next steps move and the live thumbnails start. It holds for the next activations until qws restarts or the key is pressed again; nothing is written to disk. Logged at info level: "Animation toggled on by the key", "Animation toggled off by the key". With the header shown, its top right says the state, left of the hint of `layout_toggle`: `A — animation on`, `A — animation off` (a name of one letter upper-cased, any other as written). A key name as for `keybindings.key`. Empty: no toggle and no hint; set it so in the file or with the flag. A name qws does not know is reported, and there is no toggle. A key the switcher already uses — Enter, the cancel and main keys, `c`, `g`, the arrows, `layout_toggle` — keeps its meaning: then there is no toggle and no hint, which is reported. Under `cpu` nothing moves: no toggle and no hint (specification `035-slip-by-frame-rate`)
 
 | `appearance.renderer`
 | `--appearance-renderer` / `-r`
@@ -585,7 +598,7 @@ log:
 | `QWS_APPEARANCE_ANIMATION_ENABLED`
 | `string`
 | `auto`
-| Animations of the `glx` renderer: `true`, always; `false`, never — every change shows at once; `auto`, as `true`, but still — every change at once, no live thumbnails — while a VNC viewer is connected on a port of `vnc_ports`, looked for as each activation starts, and once the frames of the steps, the hover and the convergence of the grid's selection frame come at a mean rate below 75 % of the refresh rate over their last 0.5 s — counted across activations, the first frame of each animation not counted; in the middle of a step too, which then ends at its target —; five minutes after, an activation is animated again, and still again if its frames slip. Each change of `auto` is logged at info level: "Animation still: a VNC viewer connected", "Animation still: the frames slip", "Animation back". `on` and `off` are `true` and `false`, and so are the words a bool took — `1`, `0`, `t`, `FALSE`; a file of earlier versions with `true` or `false` means what it meant; anything else is reported and is `auto`. The flag alone is `true`. `cpu` changes its picture at once whatever these keys say (specifications `010-animation-options`, `031-animation-auto`, `035-slip-by-frame-rate`)
+| Animations of the `glx` renderer: `true`, always; `false`, never — every change shows at once; `auto`, as `true`, but still — every change at once, no live thumbnails — while a VNC viewer is connected on a port of `vnc_ports`, looked for as each activation starts. Each change of `auto` is logged at info level: "Animation still: a VNC viewer connected", "Animation back". The key of `keybindings.animation_toggle` turns the animation on and off over this setting. `on` and `off` are `true` and `false`, and so are the words a bool took — `1`, `0`, `t`, `FALSE`; a file of earlier versions with `true` or `false` means what it meant; anything else is reported and is `auto`. The flag alone is `true`. `cpu` changes its picture at once whatever these keys say (specifications `010-animation-options`, `031-animation-auto`, `035-slip-by-frame-rate`)
 
 | `appearance.animation.duration`
 | `--appearance-animation-duration`
@@ -954,6 +967,10 @@ qws --keybindings-cancel=q
 # Toggle the carousel and the grid with F2 instead of q, or with no key
 qws --keybindings-layout-toggle=F2
 qws --keybindings-layout-toggle=
+
+# Turn the animation on and off with F4 instead of a, or with no key
+qws --keybindings-animation-toggle=F4
+qws --keybindings-animation-toggle=
 ----
 
 .Configuration file example
@@ -966,6 +983,7 @@ keybindings:
   workspace_modifier: Alt # Filter current workspace
   cancel: Escape          # Cancel selection
   layout_toggle: q        # Toggle the carousel and the grid
+  animation_toggle: a     # Turn the animation on and off
 ----
 
 [[phase-3-status]]

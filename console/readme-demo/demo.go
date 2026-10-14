@@ -38,6 +38,7 @@ type demo struct {
 	padX   int
 	padY   int
 	key    string        // the layout key, as configured
+	anim   string        // the animation key, as configured (specs/035-slip-by-frame-rate)
 	step   time.Duration // of a step of the selection
 	header bool
 
@@ -98,6 +99,7 @@ func newDemo(o options, wins []window, desk *image.RGBA) *demo {
 		padX:   padX,
 		padY:   padY,
 		key:    def.Keybindings.LayoutToggle,
+		anim:   def.Keybindings.AnimationToggle,
 		step:   a.Animation.Duration,
 		header: a.Header.Enabled,
 
@@ -112,6 +114,7 @@ func (d *demo) layout(mode string) carousel.Config {
 	cfg := d.cfg
 	cfg.LayoutMode = mode
 	cfg.LayoutHint = layoutHint(d.key, mode, d.header)
+	cfg.AnimationHint = animationHint(d.anim, d.header)
 	return cfg
 }
 
@@ -212,4 +215,16 @@ func overDesktop(desk, overlay *image.RGBA, x, y int) *image.RGBA {
 // buffer: clamped to [0, 1], rounded to nearest
 func toByte(v float64) uint8 {
 	return uint8(math.Round(math.Max(0, math.Min(1, v)) * 255))
+}
+
+// animationHint is the hint of the animation key, as animationHint of pkg/ui
+// makes it with the animation on (specs/035-slip-by-frame-rate)
+func animationHint(key string, header bool) string {
+	if key == "" || !header {
+		return ""
+	}
+	if r := []rune(key); len(r) == 1 && unicode.IsLetter(r[0]) {
+		key = strings.ToUpper(key)
+	}
+	return key + " — animation on"
 }

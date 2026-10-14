@@ -11,6 +11,12 @@ keybindings:
   # With the header shown, its top right says what the key does now:
   # "Q — grid" in the carousel, "Q — carousel" in the grid. "" for none.
   layout_toggle: q
+  # Turns the animation on and off while the switcher is shown, without the
+  # workspace modifier, as it is released, over appearance.animation.enabled
+  # and a VNC viewer; it holds until qws restarts or the key is pressed again.
+  # With the header shown, left of the hint of layout_toggle:
+  # "A — animation on" or "A — animation off". "" for none.
+  animation_toggle: a
 
 appearance:
   # Layout mode: "carousel" (default, 3D perspective) or "grid" (Windows-style tile view)
@@ -101,7 +107,7 @@ appearance:
   # Animations of the "glx" renderer; "cpu" changes its picture at once.
   # An effect list is fade, zoom, both ([fade, zoom] or fade,zoom), or none.
   animation:
-    enabled: auto       # true, false (every change at once), or auto: still while a VNC viewer is connected or the frames slip
+    enabled: auto       # true, false (every change at once), or auto: still while a VNC viewer is connected; keybindings.animation_toggle turns it over
     duration: 150ms     # Time of every animation (0 = at once)
     step: true          # The selection moves to the next card or tile
     show: [fade, zoom]  # How the switcher appears; zoom grows it from overlay_zoom
