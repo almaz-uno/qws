@@ -2,12 +2,43 @@
 :toc: left
 :toc-title: Contents
 :toclevels: 2
-:revdate: 2026-10-04
+:revdate: 2026-10-14
 
 Every minor or major release is a chapter, its patches are subsections, the
 newest come first (link:specs/004-releases/spec.adoc[specification 004]). The
 version of a build is `qws version`. Release files are built on Debian 12:
 they need glibc 2.36 or newer and the OpenGL and X11 libraries.
+
+== 1.7.0 — 2026-10-14
+
+*The grid scrolls* (link:specs/036-grid-scroll/spec.adoc[specification
+036]):
+
+* With many windows the grid no longer shrinks its thumbnails to fit one
+  screen: a thumbnail is at least `appearance.grid.min_thumbnail_width`
+  wide, 320 px by default (0: the grid on one screen, as before), and the
+  rows past the screen scroll. 47 windows on a screen of 2560×1440: 6
+  columns, thumbnails of 377×209 instead of 377×81, four and a half rows in
+  view.
+* The view follows the selection, animated as a step; the mouse wheel
+  scrolls it by a row; a scrollbar and the cut rows say there is more. Up
+  and Down go around a column over all its rows; the hover, the click and
+  the live thumbnails see the tiles where they are drawn.
+* With `appearance.grid.columns: 0` the columns are as many as fit at that
+  width, no longer at most 6.
+
+*The animation by the viewer, and a key to turn it on and off*
+(link:specs/035-slip-by-frame-rate/spec.adoc[specification 035]):
+
+* `enabled: auto` goes still only while a VNC viewer is connected. The
+  detector of slipping frames of 1.6.0 is gone: on screens of 144 Hz and
+  more it took the jitter of the frame timer for lost frames and turned the
+  animation off on fast steps.
+* A key, `keybindings.animation_toggle`, `a` by default, turns the
+  animation on or off while the switcher is shown — over `auto`, `true`
+  and `false`, over a viewer too — until qws restarts or it is pressed
+  again. The header says `A — animation on` or `off`, beside the hint of
+  the layout key.
 
 == 1.6.0 — 2026-10-07
 
