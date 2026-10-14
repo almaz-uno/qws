@@ -1,6 +1,7 @@
-# The count of specs/035-slip-by-frame-rate replayed under the rule of 031
-# and the candidates of D2 and D3 (research, "The rules replayed"): python3
-# replay.py vnc-a.txt vnc-b.txt fast-ws1.txt, the batches of pkg/ui/testdata.
+# The count of the frames replayed under the rule of 031 and the candidates
+# of the first draft of specs/035-slip-by-frame-rate, measured and dropped
+# (research, "The rules replayed"): python3 replay.py vnc-a.txt vnc-b.txt
+# fast-ws1.txt, the batches of pkg/ui/testdata at d77baf7.
 
 import sys
 

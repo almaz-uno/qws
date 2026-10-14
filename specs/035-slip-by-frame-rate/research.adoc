@@ -3,11 +3,33 @@
 :toc-title: Contents
 :revdate: 2026-10-14
 
-The frames the decision rests on, the rule of 031 and the candidates of D2
-and D3 replayed over them, and the window and the share chosen (O1).
-`develop` at `d6d535a` (1.6.1).
+What the decisions rest on. `develop` at `f1cfb59` (1.6.1 with 036).
 
-== The frames of ws1
+== A key held on X
+
+X repeats a key held without the detectable auto-repeat of XKB — which qws
+does not ask for, and `jezek/xgb` has no XKB to ask with — as pairs of a
+release and a press of one time stamp, the key down between them in the
+server: the repeat is made by the server's timer, release and press in one
+pass, before any request of a client is read. A release of the key, then,
+is the key let go when the keymap of the server (`QueryKeymap`) has it up,
+and a repeat when it has it down (D4). A press repeated while the key is
+held finds it already pressed and changes nothing.
+
+== Measured and dropped
+
+A rule of the frames by their mean rate over a window of time, the first
+direction of this specification on 2026-10-13, measured, implemented on
+the branch (`c027e92`, `d77baf7`) and dropped on 2026-10-14: the author
+chose a design without a detector of the frames at all — auto by the
+viewer, and a key (spec, D1, D2). What follows is kept for a later reader
+who would count the frames again. The batches it replays —
+`pkg/ui/testdata/vnc-a.txt`, `vnc-b.txt` of 031 and `fast-ws1.txt` — are
+removed from the tree with the tests that read them; they are at `d77baf7`
+(`git show d77baf7:pkg/ui/testdata/fast-ws1.txt`), and `replay.py` next to
+this document reads them from there.
+
+=== The frames of ws1
 
 ws1, 2026-10-14, 00:44–09:20: 2560×1440 at 144 Hz (a period of
 6.944525 ms, the `period_ms` of every record), i3, the `glx` renderer,
@@ -18,8 +40,8 @@ the grid by hand, fast steps among them. The log, the colours of the
 console writer stripped, is kept on ws1 at
 `~/.cache/qws-035/research/ws1-2026-10-14.txt` (2.6 MB, 27 509 lines, 420
 records "Animation frame"); it is not committed: of it the count needs the
-intervals, which `pkg/ui/testdata/fast-ws1.txt` holds (section "The frames
-as test data").
+intervals, which `pkg/ui/testdata/fast-ws1.txt` held at `d77baf7` (section
+"The frames as test data").
 
 The count of 031 made it still twice, both falsely:
 
@@ -48,7 +70,7 @@ the log is still: its steps at once, their records at rest 30–190 ms after
 the frame before — the time the frame at rest takes to draw, presented by
 `uploadIdle` and not counted, nor counted while still.
 
-=== Finding: the layers of the cards uploaded stall the frames
+==== Finding: the layers of the cards uploaded stall the frames
 
 Not changed here, a candidate for a later specification. An upload of
 1.2–1.3 MB of the layers of the cards in the pause before a frame costs
@@ -60,10 +82,10 @@ whole. 031 found
 the uploads not making the frames late on ws2 at 165 Hz ("The count
 replayed": 1 of 416 such frames late in B); on ws1 they do.
 
-== The rules replayed
+=== The rules replayed
 
 The count over the records of the batches in their order, as
-`TestSlipReplay` replays them: the intervals of the records of the kinds
+`TestSlipReplay` replayed them at `d77baf7`: the intervals of the records of the kinds
 counted — the steps, the hover, the convergence; not the fades —, the
 first frame of an animation, without an interval, not among them; the
 window carried across the activations; no probe — once still, the replay
@@ -71,7 +93,7 @@ ends. The rules:
 
 * *3 late of 60* — 031, D5: an interval above 1.25 periods late, still at
   the third of the last 60 frames counted.
-* *W s, S %* — the window of D2: the latest frames counted whose
+* *W s, S %* — the window of the draft: the latest frames counted whose
   intervals sum to W or more, the fewest such; full once they reach W;
   still when it is full and its mean rate — its frames over the sum of
   their intervals — is below S % of the refresh rate.
@@ -138,13 +160,13 @@ What the table says:
 * No rule of the mean makes the recorded frames still — A, B, ws1, at
   165, 144 and 60 Hz: the lowest window keeps 97.0 % of the refresh rate
   or more, the long intervals and the catch-up after them cancelling in
-  the mean (D1). Neither the stalls of the uploads above, made a pattern
+  the mean. Neither the stalls of the uploads above, made a pattern
   — 95.5 % —: two slots lost in eleven.
 * A viewer is no longer seen by the frames: A keeps 98.7 % — 162.7 fps —
   in its worst window of 0.5 s. K2 of 031 — batch A goes still within
   its first three activations — no longer holds; nor the second part of
   its K7, a viewer on a port not listed going still by the frames. The
-  viewer is told by its port (D4).
+  viewer is told by its port (D4 of 031).
 * A load: still in the time the window takes to fill, 0.51–0.55 s, from
   an empty window — after the probe, or a start —; and from a window full
   of on-time frames, once a share 1 − S of the window is lost:
@@ -162,9 +184,9 @@ The rounding of the test data to the microsecond moves the sum of a
 window by half a microsecond a frame at most: no share above by less than
 0.01 %.
 
-== The choice (O1)
+=== The choice, before it was dropped
 
-0.5 s and 75 %, one window, as D2 and D3 first said. Of the candidates it
+0.5 s and 75 %, one window, as the draft first said. Of the candidates it
 is the one that makes a load still within 0.5 s of animation from an
 empty window and keeps every recorded frame animated; it loses to the
 others on a single pause: one of 150 ms makes it still — 0.15 s in the
@@ -180,7 +202,7 @@ The frames the window holds are bounded, 512: that many within 0.5 s are
 above 1000 fps, never below 75 % of a refresh rate of 1365 Hz or less; a
 window that holds 512 frames and spans less than 0.5 s is not full.
 
-== The frames as test data
+=== The frames as test data
 
 `pkg/ui/testdata/fast-ws1.txt` holds of the log of ws1 what the count
 needs, in the form of `vnc-a.txt` and `vnc-b.txt` (031, "The batches as
@@ -221,6 +243,6 @@ a comment. Made on ws1 in the clone of the branch:
 ----
 
 The table above is printed by `replay.py`, next to this document, from
-the root of the repository: `python3
+the root of a worktree at `d77baf7`: `python3
 specs/035-slip-by-frame-rate/replay.py pkg/ui/testdata/vnc-a.txt
 pkg/ui/testdata/vnc-b.txt pkg/ui/testdata/fast-ws1.txt`.
