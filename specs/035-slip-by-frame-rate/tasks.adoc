@@ -5,7 +5,7 @@
 
 . [x] T1. The rule of the mean rate measured, implemented and dropped by
   the author for the key (research, "Measured and dropped").
-. [ ] T2. The hint of the animation key in `pkg/carousel`, the scenes; K3,
+. [x] T2. The hint of the animation key in `pkg/carousel`, the scenes; K3,
   K4.
 . [ ] T3. The detector removed; the key, its state and its hint in
   `pkg/ui`, its configuration, the documents; K1, K2, K3, K5.

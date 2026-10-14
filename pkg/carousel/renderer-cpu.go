@@ -59,6 +59,7 @@ type Config struct {
 	Hostname                string   // Drawn large at the top left (empty draws none)
 	Version                 string   // Drawn after the hostname (empty draws none)
 	LayoutHint              string   // Drawn at the top right of the header, what the layout key does (specs/026-layout-keys); empty draws none
+	AnimationHint           string   // Drawn left of LayoutHint, whether the animation is on (specs/035-slip-by-frame-rate); empty draws none
 	Fonts                   *FontSet // Faces of a drawing that runs in parallel with others; nil: the shared cache
 }
 
@@ -213,6 +214,7 @@ const (
 	headerMargin = 24.0 // from the left and top edges of the overlay
 	headerGap    = 16.0 // between the hostname and the version, and below the band
 	headerScale  = 2.5  // size of the hostname relative to the font size
+	hintGap      = 32.0 // between the hints of the header, twice the gap (specs/035-slip-by-frame-rate)
 )
 
 // drawHeader draws the header and returns the bottom of its band, or 0 when
@@ -246,27 +248,34 @@ func drawHeader(dc *gg.Context, cfg Config) float64 {
 		width, _ := dc.MeasureString(cfg.Version)
 		end = x + width
 	}
-	drawLayoutHint(dc, cfg, small, baseline, end)
+	drawHints(dc, cfg, small, baseline, end)
 	return headerMargin + float64(metrics.Height)/64 + headerGap
 }
 
-// drawLayoutHint draws the hint of the layout key at the top right of the
-// header: as the version — its face, its colour, its baseline — ending at the
-// margin of the header from the right edge. It is not drawn where it would
-// come closer than the gap of the header to end, where the hostname or the
-// version ends (specs/026-layout-keys).
-func drawLayoutHint(dc *gg.Context, cfg Config, face font.Face, baseline, end float64) {
-	if cfg.LayoutHint == "" {
-		return
+// drawHints draws the hints of the header in a row at its top right, from
+// the right: the hint of the layout key ending at the margin of the header
+// from the right edge (specs/026-layout-keys), then that of the animation key
+// ending hintGap before it, or at the margin without it
+// (specs/035-slip-by-frame-rate). Each as the version — its face, its colour,
+// its baseline. A hint is not drawn where it would come closer than the gap
+// of the header to end, where the hostname or the version ends, and then no
+// hint left of it either.
+func drawHints(dc *gg.Context, cfg Config, face font.Face, baseline, end float64) {
+	right := float64(cfg.Width) - headerMargin
+	for _, hint := range []string{cfg.LayoutHint, cfg.AnimationHint} {
+		if hint == "" {
+			continue
+		}
+		dc.SetFontFace(face)
+		width, _ := dc.MeasureString(hint)
+		x := right - width
+		if x < end+headerGap {
+			return
+		}
+		setColor(dc, cfg.TextColor, 0.6)
+		dc.DrawString(hint, x, baseline)
+		right = x - hintGap
 	}
-	dc.SetFontFace(face)
-	width, _ := dc.MeasureString(cfg.LayoutHint)
-	x := float64(cfg.Width) - headerMargin - width
-	if x < end+headerGap {
-		return
-	}
-	setColor(dc, cfg.TextColor, 0.6)
-	dc.DrawString(cfg.LayoutHint, x, baseline)
 }
 
 // headerBand is the bottom of the band drawHeader takes, without drawing it

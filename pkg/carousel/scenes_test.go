@@ -51,6 +51,7 @@ type scene struct {
 	hostname string // the header of specs/005-host-and-version
 	version  string
 	hint     string // the hint of the layout key in the header (specs/026-layout-keys)
+	animHint string // the hint of the animation key beside it (specs/035-slip-by-frame-rate)
 }
 
 func TestScenes(t *testing.T) {
@@ -190,6 +191,7 @@ func sceneConfig(sc scene, fonts []string) Config {
 		Hostname:                sc.hostname,
 		Version:                 sc.version,
 		LayoutHint:              sc.hint,
+		AnimationHint:           sc.animHint,
 		Width:                   sc.width,
 		Height:                  sc.height,
 		ThumbWidth:              512,
@@ -238,12 +240,12 @@ func scenes() []scene {
 
 	var list []scene
 	add := func(name string, host bool, layout, theme string, w, h int, windows []WindowData, selected, hover int) {
-		list = append(list, scene{name, host, layout, theme, w, h, windows, selected, hover, "", "", ""})
+		list = append(list, scene{name, host, layout, theme, w, h, windows, selected, hover, "", "", "", ""})
 	}
 	// The header with the hint of the default layout key, q, as the selector
 	// draws it (specs/026-layout-keys)
 	addHeader := func(name, layout, theme string, w, h int, selected int, hostname string) {
-		list = append(list, scene{name, false, layout, theme, w, h, many, selected, -1, hostname, "v0.1.0", sceneHint(layout)})
+		list = append(list, scene{name, false, layout, theme, w, h, many, selected, -1, hostname, "v0.1.0", sceneHint(layout), ""})
 	}
 	for _, layout := range []string{"carousel", "grid"} {
 		// The frame of E1: 2520×1400, 24 windows, Alt+Tab selects the second
@@ -264,9 +266,19 @@ func scenes() []scene {
 
 		// Without the layout key: the header of specs/005-host-and-version
 		// alone, the frames of the scenes above before specs/026-layout-keys
-		list = append(list, scene{layout + "-e1-header-no-hint", false, layout, "dark", 2520, 1400, many, 1, -1, "ws1", "v0.1.0", ""})
+		list = append(list, scene{layout + "-e1-header-no-hint", false, layout, "dark", 2520, 1400, many, 1, -1, "ws1", "v0.1.0", "", ""})
 		// An overlay too narrow for the hint beside the version: none
-		list = append(list, scene{layout + "-header-narrow", false, layout, "dark", 280, 700, many[:6], 1, -1, "ws1", "v0.1.0", sceneHint(layout)})
+		list = append(list, scene{layout + "-header-narrow", false, layout, "dark", 280, 700, many[:6], 1, -1, "ws1", "v0.1.0", sceneHint(layout), ""})
+
+		// The hint of the animation key, a, left of the layout key's, in
+		// both states (specs/035-slip-by-frame-rate); and on an overlay too
+		// narrow for either, none
+		for _, state := range []string{"on", "off"} {
+			list = append(list, scene{layout + "-e1-header-animation-" + state, false, layout, "dark", 2520, 1400, many, 1, -1,
+				"ws1", "v0.1.0", sceneHint(layout), "A — animation " + state})
+		}
+		list = append(list, scene{layout + "-header-narrow-animation", false, layout, "dark", 280, 700, many[:6], 1, -1,
+			"ws1", "v0.1.0", sceneHint(layout), "A — animation on"})
 	}
 
 	// Grids that scroll on E1, with the header: the view at the top, in the
@@ -279,7 +291,7 @@ func scenes() []scene {
 			selected, hover int
 		}{{"top", 1, -1}, {"middle", n*2/3 - 1, n*2/3 - 7}, {"bottom", n - 1, -1}} {
 			list = append(list, scene{fmt.Sprintf("grid-e1-%d-%s", n, at.name), false, "grid", "dark", 2520, 1400,
-				all[:n], at.selected, at.hover, "ws1", "v0.1.0", sceneHint("grid")})
+				all[:n], at.selected, at.hover, "ws1", "v0.1.0", sceneHint("grid"), ""})
 		}
 	}
 	return list
