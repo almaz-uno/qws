@@ -157,13 +157,14 @@ func (s *Selector) liveBegin() {
 }
 
 // liveShown is the windows whose cards or tiles are in view at rest, at
-// now: every tile of the grid; the cards of the carousel with a live
+// now: the tiles of the grid in its view, whole or cut
+// (specs/036-grid-scroll, D8); the cards of the carousel with a live
 // rectangle at the selection, eleven at most — those the snapshotter
 // passes. A slice given is never changed: the snapshotter keeps it.
 func (s *Selector) liveShown(now time.Time) []xproto.Window {
 	key := [3]int{s.layers.gen, s.selectedIndex, 0}
 	if s.grid() {
-		key = [3]int{s.layers.gen, -1, 1}
+		key = [3]int{s.layers.gen, s.config.GridScroll, 1}
 	}
 	if s.live.shown != nil && s.live.shownKey == key {
 		return s.live.shown
@@ -174,9 +175,14 @@ func (s *Selector) liveShown(now time.Time) []xproto.Window {
 	}
 	shown := make([]xproto.Window, 0, len(s.windows))
 	since := make(map[xproto.Window]time.Time, len(s.windows))
+	view := carousel.GridViewOf(len(s.windows), s.config)
 	for i, w := range s.windows {
 		if !s.grid() {
 			if _, ok := carousel.CardLive(data, i, float64(i-s.selectedIndex), s.config); !ok {
+				continue
+			}
+		} else if view.MaxScroll > 0 {
+			if _, y, _, h := carousel.GridTile(len(s.windows), i, s.config); y+h <= float64(view.Top) || y >= float64(s.config.Height) {
 				continue
 			}
 		}
@@ -258,7 +264,7 @@ func (s *Selector) liveRest() {
 	}
 	data := s.prepareWindowData()
 	var items []carousel.LiveItem
-	for i, it := range s.liveGeometry(data) {
+	for i, it := range s.liveGeometry(data, s.config.GridScroll) {
 		p, ok := s.picture(i, data)
 		if !ok || it.Rect.Empty() {
 			continue
@@ -285,14 +291,14 @@ func (s *Selector) liveCard(data []carousel.WindowData, k int, o float64) (carou
 }
 
 // liveTiles are the scene items of the live pictures of the tiles of the
-// grid, which do not move
-func (s *Selector) liveTiles() []carousel.SceneItem {
+// grid, in the view at the scroll
+func (s *Selector) liveTiles(scroll int) []carousel.SceneItem {
 	if !s.liveOn() || len(s.live.pics) == 0 {
 		return nil
 	}
 	data := s.prepareWindowData()
 	var items []carousel.SceneItem
-	for i, it := range s.liveGeometry(data) {
+	for i, it := range s.liveGeometry(data, scroll) {
 		p, ok := s.picture(i, data)
 		if !ok || it.Rect.Empty() {
 			continue
@@ -304,8 +310,9 @@ func (s *Selector) liveTiles() []carousel.SceneItem {
 }
 
 // liveGeometry is the live items, but their textures, of the frame at rest
-// of the layout shown, kept while what they depend on stays
-func (s *Selector) liveGeometry(data []carousel.WindowData) []carousel.LiveItem {
+// of the layout shown, kept while what they depend on stays; of the grid,
+// those of its rows, in the view at the scroll (specs/036-grid-scroll)
+func (s *Selector) liveGeometry(data []carousel.WindowData, scroll int) []carousel.LiveItem {
 	key := [4]int{s.layers.gen, -1, -1, 1}
 	if !s.grid() {
 		key = [4]int{s.layers.gen, s.selectedIndex, s.hoverIndex, 0}
@@ -317,6 +324,9 @@ func (s *Selector) liveGeometry(data []carousel.WindowData) []carousel.LiveItem 
 			s.live.rest = carousel.CarouselLive(data, s.selectedIndex, s.hoverIndex, s.config)
 		}
 		s.live.restKey = key
+	}
+	if s.grid() {
+		return carousel.GridLiveView(s.live.rest, len(data), scroll, s.config)
 	}
 	return s.live.rest
 }

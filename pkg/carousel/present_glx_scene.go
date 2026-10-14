@@ -169,6 +169,9 @@ func (p *glxPresenter) drawScene(base LayerID, items []SceneItem, f Fade) error 
 		ra, ta := p.layerRect(it.A, it.RectA)
 		rb, tb := p.layerRect(it.B, it.RectB)
 		quad := union(ra, rb)
+		if it.Clip.W > 0 && it.Clip.H > 0 {
+			quad = intersect(quad, it.Clip)
+		}
 		if quad.W <= 0 || quad.H <= 0 {
 			continue
 		}
@@ -214,6 +217,16 @@ func (p *glxPresenter) PresentFaded(img *image.RGBA, f Fade) error {
 	p.drawLiveItems(f)
 	p.swap()
 	return nil
+}
+
+// intersect is the rectangle both hold; empty when they do not meet
+func intersect(a, b Rect) Rect {
+	x0, y0 := math.Max(a.X, b.X), math.Max(a.Y, b.Y)
+	x1, y1 := math.Min(a.X+a.W, b.X+b.W), math.Min(a.Y+a.H, b.Y+b.H)
+	if x1 <= x0 || y1 <= y0 {
+		return Rect{}
+	}
+	return Rect{x0, y0, x1 - x0, y1 - y0}
 }
 
 // union is the smallest rectangle holding both; an empty one does not count

@@ -1,0 +1,166 @@
+= 036 — the grid scrolls
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-13
+:status: implemented
+:issue: 106
+
+== What and why
+
+The grid lays every window out on one screen: as they grow in number its
+tiles shrink. On ws1 on 2026-10-13, 47 windows, an overlay of 2520×1400:
+6 columns — the most `GridColumns` gives — by 8 rows, tiles of some
+396×140, a thumbnail some 60 px high in each, squashed — `layoutGrid`
+bounds the width and the height of a tile each on its own, and the
+thumbnail takes what the title leaves.
+
+The author, 2026-10-13: with many windows, lay the grid out over several
+screens, scrolled vertically, and do not make the thumbnails that small.
+
+The specification is a delta to `develop` at `d6d535a` (1.6.1). Unchanged:
+the carousel; the grid of windows that fit (D2); the keys, but for the
+scroll they now bring with them.
+
+== Decisions
+
+D1, D4 and D5, and D3, decided by the author on 2026-10-13, each as
+recommended; D2 and D6–D9 made in the specification; D1 and D3 amended and
+D9 made in the plan.
+
+D1 (the author's). *A least thumbnail.* The thumbnail of a tile at least
+`appearance.grid.min_thumbnail_width` wide, 320 px by default, in the
+proportions of the overlay — 320×178 on ws1's 2520×1400. 0: no least,
+the grid on one screen as now. The least is at most what
+`appearance.thumbnail` lets a tile be, a thumbnail of (width + 20) ×
+height: 276 px with the defaults of 256×256 (amended in the plan).
+
+D2. *One screen while it fits.* A grid whose thumbnails come out at least
+that wide on one screen is laid out as now, pixel for pixel; past that,
+its tiles keep the least size, or the size the columns give them, and the
+rows run below the screen.
+
+D3 (the author's). *As many columns as fit.* With `columns: 0`, the
+columns as now, `ceil(sqrt(1.5 n))`, but not at most 6: at most as many as
+fit across at the least size. On ws1's 2520 px, 6: 7 would give
+thumbnails of 317 px (amended in the plan). `columns` set, that many, the
+tiles as wide as they come.
+
+D4 (the author's). *The view follows the selection.* A step, by the keys
+or the arrows, that takes the selection to a row out of the view scrolls
+it the least to bring that row in whole — animated as a step is, at once
+when still (031). An activation starts with the view at the top, or where
+it brings the first selection in.
+
+D5 (the author's). *The wheel.* The mouse wheel over the grid scrolls it by
+a row, within its ends; the selection stays where it is. The hover, the
+click (027) and the live thumbnails see the tiles where they are drawn.
+
+D6. *There is more.* A thin scrollbar at the right edge of the grid, its
+thumb the view among the rows; the rows cut by the bottom — and the top —
+of the view drawn cut, not hidden.
+
+D7. *The arrows of 026.* Up and Down within the column, around its ends,
+over all its rows: from the last to the first scrolls the view to the top.
+
+D8. *Live thumbnails seen.* Only the tiles in the view, whole or cut, are
+live (020); the others are drawn from their snapshots.
+
+D9. *The layers.* The tiles of the whole grid stay one layer (007), the
+view a window onto it, the scroll a move of it under the header: no tile
+drawn again as the view moves. The layer of all the rows fits the
+presenter — 48.6 MB and 4898 px high at 100 windows on E1, against a
+texture of 16384 px at least —, not cut in bands; a grid taller than
+16384 px has no layer and is drawn by the CPU (research, plan).
+
+== Acceptance criteria
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| The layout: the grid of the scenes of Σ unchanged where it fits
+  (`TestScenes`, `testdata/scenes.json` as it is for them); new scenes of
+  47 and 100 windows on E1 — 6 columns, thumbnails of 320 px at least, the
+  view at the top, at the middle, at the bottom, a scrollbar.
+
+| K2
+| The columns: `GridColumns` and the least width over n from 1 to 200 and
+  the widths of E1 and of a screen of 1920×1080; `columns` set.
+
+| K3
+| The scroll on the presenter of the tests of `pkg/ui`: a step out of the
+  view scrolls the least, animated and still; Up and Down around a column;
+  the wheel by a row within the ends; the hover and the click on a
+  scrolled grid (027); the live thumbnails of the view only (020).
+
+| K4
+| The layers: the frames of the scroll from the one layer of tiles, byte
+  for byte those of the cpu (`TestGLXPresenterMatchesCPU`, `TestLayers`).
+
+| K5
+| The configuration: `appearance.grid.min_thumbnail_width` from the file,
+  the flag and the variable, 320 by default and from `config init`, 0 as
+  no least, a negative a warning; `TestRoundTrip`, `TestTagNames`, the
+  documentation, `config.yaml.example`.
+
+| K6
+| `go build ./...`, `gofmt -l` empty, `go vet ./...`, `make check-specs`,
+  `go test ./...` on every commit, each in a worktree of its own; `go test
+  -race` of `pkg/ui`, `pkg/carousel`, `pkg/snapshot`, `pkg/x11`.
+
+| K7
+| The author's trial on ws1: its windows in the grid, thumbnails no smaller
+  than 320 px, the view following the arrows and the wheel.
+|===
+
+== Results
+
+Off the screen: the tests on ws1, the commits `36d4b8e` to `991cc23`, each
+in a worktree of its own. On the desktop: the author's trial on ws1 on
+2026-10-14, 00:44–09:21, the build of `6931da0` on Alt+F11 beside the
+service, `--log-level debug` (`~/.cache/qws-036-trial/log-k7.txt` on ws1).
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | Met. `TestScenes`: the grid scenes that fit unchanged; seven change,
+  each no longer fitting at 320 px — the six of 24 windows on 1260×700
+  (boxes of 166.7×90, 67.5 high under the header; now 3 columns, 8 rows
+  scrolled) and `grid-header-narrow` (280×700, now one column scrolled);
+  six new, `grid-e1-{47,100}-{top,middle,bottom}`. On E1 at 47 windows: 6
+  columns by 8 rows, tiles of 396.7×269.3, thumbnail boxes of 376.7×209.3
+  (81.2 high before), 4.53 rows in the view, 1025 px of scroll; at 100,
+  17 rows, 3628 px.
+| K2 | Met. `TestGridScrollLayout`: n from 1 to 200 on E1 and 1880×1040,
+  `columns` set, `GridFollow`.
+| K3 | Met. `TestGridScrollSteps`, `TestGridWheel`, `TestGridScrollMouse`,
+  `TestGridScrollLive`; the hit test and the clip each broken once on
+  purpose, caught.
+| K4 | Met as the checks of 007 compare: the scenes of a scrolled grid
+  within 2 per channel of the cpu, the frame at rest byte for byte
+  (`TestLayers`, `TestGLXPresenterMatchesCPU`, `checkGridScroll`). One
+  layer of all the rows (D9): 48.6 MB at 100 windows on E1, within the
+  32768 px of ws1's GL; past 16384 px, some 336 windows, the tiles are
+  drawn by the cpu, the steps at once — untested. The frame at rest 68 ms
+  at 47 and at 100 windows (`BenchmarkE1Grid`), only the tiles in the
+  view drawn.
+| K5 | Met. `TestGridKeys`, `TestGridFlags`, `TestRoundTrip`,
+  `TestTagNames`; `config show` of the build on ws1's file: no warning,
+  `min_thumbnail_width: 320`.
+| K6 | Met. Every commit in a worktree of its own; `-race` of `pkg/ui`,
+  `pkg/carousel`, `pkg/snapshot`, `pkg/x11`.
+| K7 | Met, the scroll seen still. 44 windows, ten activations on the
+  screen of 144 Hz, the selection taken down to the 43rd window by the
+  arrows; no warning or error; the author: "ок". The animation went still
+  by the frames of 031 in both passes — the false trips at 144 Hz that
+  035 mends —, so the view followed the selection at once, not animated.
+|===
+
+== Open decisions
+
+None. Left as found: `appearance.grid.columns` and `spacing` have no
+defaults set in the configuration, so their `QWS_` variables are not read.
+GL's largest texture on the T1200 of ws2 and ws3 is not measured.

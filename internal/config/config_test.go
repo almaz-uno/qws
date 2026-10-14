@@ -321,6 +321,68 @@ func TestThumbnailKeys(t *testing.T) {
 	}
 }
 
+// Criteria of specs/036-grid-scroll
+
+// TestGridKeys checks K5: appearance.grid.min_thumbnail_width is 320 by
+// default, as config init writes it, and in a file without it; it is read
+// from a file, 0 too, and from its QWS_ variable over the file; a negative
+// is reported and takes the default
+func TestGridKeys(t *testing.T) {
+	def := Default().Appearance.Grid
+	if def.MinThumbnailWidth != 320 {
+		t.Errorf("default %d, want 320", def.MinThumbnailWidth)
+	}
+	data, err := yaml.Marshal(Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "min_thumbnail_width: 320") {
+		t.Error("config init does not write min_thumbnail_width: 320")
+	}
+
+	clearEnvironment(t)
+	cfg, _, err := Load(writeFile(t, "appearance:\n  grid:\n    columns: 3\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Appearance.Grid.MinThumbnailWidth; got != 320 {
+		t.Errorf("a file without the key reads %d", got)
+	}
+	file := writeFile(t, "appearance:\n  grid:\n    min_thumbnail_width: 0\n")
+	cfg, warnings, err := Load(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Appearance.Grid.MinThumbnailWidth; got != 0 || len(warnings) != 0 {
+		t.Errorf("file: %d, warnings %v; want 0, none", got, warnings)
+	}
+	t.Setenv("QWS_APPEARANCE_GRID_MIN_THUMBNAIL_WIDTH", "400")
+	if cfg, _, err = Load(file); err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Appearance.Grid.MinThumbnailWidth; got != 400 {
+		t.Errorf("environment: %d, want 400", got)
+	}
+
+	for _, c := range []struct {
+		width, want int
+		warns       bool
+	}{
+		{320, 320, false},
+		{0, 0, false},
+		{500, 500, false},
+		{-1, 320, true},
+	} {
+		got, warning := Grid{MinThumbnailWidth: c.width}.MinThumbWidth()
+		if got != c.want || (warning != "") != c.warns {
+			t.Errorf("width %d: %d, warning %q; want %d, a warning %v", c.width, got, warning, c.want, c.warns)
+		}
+		if c.warns && !strings.Contains(warning, "appearance.grid.min_thumbnail_width") {
+			t.Errorf("width %d: the warning %q does not name the key", c.width, warning)
+		}
+	}
+}
+
 // Criteria of specs/026-layout-keys
 
 // TestLayoutToggle checks K3: the layout key is q by default, as config init
@@ -553,7 +615,7 @@ func changedConfig(t *testing.T) *Config {
 			Thumbnail:   Thumbnail{Width: 300, Height: 200, ScalingAlgorithm: "nearest", Live: false, LiveInterval: 75 * time.Millisecond},
 			Spacing:     450,
 			Perspective: 0.5,
-			Grid:        Grid{Columns: 4, Spacing: 12},
+			Grid:        Grid{Columns: 4, Spacing: 12, MinThumbnailWidth: 200},
 			Shadow:      Shadow{Offset: 3, Blur: 4},
 			Font:        Font{Paths: []string{"/tmp/a.ttf"}, Size: 17},
 			Colors: Colors{

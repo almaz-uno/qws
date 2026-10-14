@@ -45,6 +45,8 @@ func gridCases(fonts []string, host bool) []gridCase {
 	many := portableWindows(24)
 	add := func(name string, windows []WindowData, selected, hover int, inPlace bool, change func(*Config)) {
 		c := sceneConfig(base, fonts)
+		// On one screen, as before specs/036-grid-scroll
+		c.GridMinThumbWidth = 0
 		if change != nil {
 			change(&c)
 		}
@@ -106,16 +108,22 @@ func TestGridHeads(t *testing.T) {
 			drawHeader(dc, c.cfg)
 			inPlace := tiles.draw(dc)
 			want := gridInPlace(newCanvas(c.cfg), true, c.windows, c.selected, c.hover, c.cfg)
-			if !bytes.Equal(getImageRGBA(dc).Pix, want.Pix) {
+			// A grid that scrolls draws the rows of the header back over its
+			// tiles, which DrawGridLayout alone does; the tiles it cuts at
+			// the header are drawn over it, in place (specs/036-grid-scroll)
+			scrolls := tiles.grid.maxScroll > 0
+			if !scrolls && !bytes.Equal(getImageRGBA(dc).Pix, want.Pix) {
 				t.Errorf("the frame differs from the one with its heads drawn in place")
 			}
-			if c.inPlace != (inPlace > 0) {
+			if !scrolls && c.inPlace != (inPlace > 0) {
 				t.Errorf("%d heads drawn in place", inPlace)
 			}
 			if got := DrawGridLayout(c.windows, c.selected, c.hover, c.cfg); !bytes.Equal(got.Pix, want.Pix) {
 				t.Errorf("DrawGridLayout differs from the frame with its heads drawn in place")
 			}
-			layer := gridInPlace(gg.NewContext(c.cfg.Width, c.cfg.Height), false, c.windows, -1, -1, c.cfg)
+			rows := c.cfg
+			rows.GridScroll = 0
+			layer := gridInPlace(gg.NewContext(c.cfg.Width, c.cfg.Height+layoutGrid(len(c.windows), top, rows).maxScroll), false, c.windows, -1, -1, rows)
 			got := GridTiles(c.windows, c.cfg)
 			if b := opaqueBounds(layer); b.Empty() != (got == nil) || got != nil && !bytes.Equal(got.Pix, crop(layer, b).Pix) {
 				t.Errorf("GridTiles differs from the tiles with their heads drawn in place")
@@ -145,16 +153,31 @@ func TestGridHeads(t *testing.T) {
 
 // gridInPlace draws the tiles on the canvas of dc one after another, every
 // head in place, after the header if one is drawn, as DrawGridLayout and
-// GridTiles drew them before specs/019-grid-speed
+// GridTiles drew them before specs/019-grid-speed; of a grid that scrolls,
+// on the frame, the track, every tile at the scroll, the rows of the
+// header drawn back over them and the thumb (specs/036-grid-scroll)
 func gridInPlace(dc *gg.Context, header bool, windowData []WindowData, selected, hover int, cfg Config) *image.RGBA {
 	top := headerBand(cfg)
 	if header {
 		top = drawHeader(dc, cfg)
 	}
 	g := layoutGrid(len(windowData), top, cfg)
+	img := dc.Image().(*image.RGBA)
+	var band []byte
+	scrolls := header && g.maxScroll > 0
+	if scrolls {
+		track, _ := g.bar(cfg)
+		drawGridBar(dc, track, cfg, gridTrackAlpha)
+		band = append(band, img.Pix[:g.top*img.Stride]...)
+	}
 	for i := range windowData {
 		x, y := g.tile(i)
 		drawGridTile(dc, &windowData[i], x, y, g.tileW, g.tileH, i == selected, i == hover, cfg, nil)
+	}
+	if scrolls {
+		copy(img.Pix, band)
+		_, thumb := g.bar(cfg)
+		drawGridBar(dc, thumb, cfg, gridThumbAlpha)
 	}
 	return getImageRGBA(dc)
 }

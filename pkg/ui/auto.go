@@ -266,7 +266,7 @@ func (s *Selector) setStill(still bool) {
 		o = animationOptions{}
 	}
 	s.anim = o
-	s.step.pos.d, s.step.gx.d, s.step.gy.d = o.step, o.step, o.step
+	s.step.pos.d, s.step.gx.d, s.step.gy.d, s.step.sy.d = o.step, o.step, o.step, o.step
 	s.fade.level.d = o.duration
 }
 

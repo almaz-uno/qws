@@ -54,6 +54,8 @@ type Config struct {
 	LayoutMode              string   // Layout mode: "carousel" or "grid"
 	GridColumns             int      // Number of columns for grid layout (0 = auto)
 	GridSpacing             float64  // Spacing between tiles in grid mode
+	GridMinThumbWidth       int      // The least width of a thumbnail of the grid, in the proportions of the window; past it the grid scrolls; 0: none (specs/036-grid-scroll)
+	GridScroll              int      // How far the rows of a grid that scrolls are scrolled up, in pixels (specs/036-grid-scroll)
 	Hostname                string   // Drawn large at the top left (empty draws none)
 	Version                 string   // Drawn after the hostname (empty draws none)
 	LayoutHint              string   // Drawn at the top right of the header, what the layout key does (specs/026-layout-keys); empty draws none
@@ -824,10 +826,26 @@ func DrawGridLayout(windowData []WindowData, selected int, hoverIndex int, cfg C
 	dc := newCanvas(cfg)
 	drawHeader(dc, cfg)
 
-	if tiles != nil {
+	if tiles == nil {
+		return getImageRGBA(dc)
+	}
+	g := tiles.grid
+	if g.maxScroll == 0 {
 		tiles.draw(dc)
+		return getImageRGBA(dc)
 	}
 
+	// A grid that scrolls: the track of its scrollbar, the tiles in the view
+	// at the scroll — under the header, which the rows of its band drawn
+	// back cover —, the thumb (specs/036-grid-scroll)
+	track, thumb := g.bar(cfg)
+	drawGridBar(dc, track, cfg, gridTrackAlpha)
+	img := dc.Image().(*image.RGBA)
+	band := make([]byte, g.top*img.Stride)
+	copy(band, img.Pix)
+	tiles.draw(dc)
+	copy(img.Pix, band)
+	drawGridBar(dc, thumb, cfg, gridThumbAlpha)
 	return getImageRGBA(dc)
 }
 
@@ -855,14 +873,21 @@ func drawGridHover(dc *gg.Context, w, h float64) {
 	dc.Stroke()
 }
 
-// gridLayout is where DrawGridLayout puts its tiles
+// gridLayout is where DrawGridLayout puts its tiles: in the window, at the
+// scroll of its view
 type gridLayout struct {
 	cols                                    int
 	tileW, tileH, offsetX, offsetY, spacing float64
+	rows                                    int
+	top                                     int // the top of the view: the bottom of the header, whole pixels down
+	scroll                                  int // how far the rows are scrolled up, from 0 to maxScroll
+	maxScroll                               int // 0: the grid fits on one screen (specs/036-grid-scroll)
 }
 
 // GridColumns is the number of columns the grid lays n tiles out in, row
 // after row: appearance.grid.columns, or when it is 0 a number that suits n
+// — at most 6, or with a least thumbnail as many as fit across at it
+// (specs/036-grid-scroll, D3)
 func GridColumns(n int, cfg Config) int {
 	cols := cfg.GridColumns
 	if cols <= 0 {
@@ -871,23 +896,54 @@ func GridColumns(n int, cfg Config) int {
 		if cols < 2 {
 			cols = 2
 		}
-		if cols > 6 {
+		if least := gridLeast(cfg); least > 0 {
+			cols = min(cols, gridFitColumns(least, cfg))
+		} else if cols > 6 {
 			cols = 6
 		}
 	}
 	return cols
 }
 
-// layoutGrid lays out n tiles in the window below top, the bottom of the header
+// gridSpacing is the spacing between and around the tiles
+func gridSpacing(cfg Config) float64 {
+	if cfg.GridSpacing == 0 {
+		return 20 // Default spacing
+	}
+	return cfg.GridSpacing
+}
+
+// gridLeast is the least width of a thumbnail box of the grid: the least of
+// the configuration, but no more than a tile may be — a box of
+// (ThumbWidth + 20) × ThumbHeight, its height in the proportions of the
+// window; 0: none (specs/036-grid-scroll, D1)
+func gridLeast(cfg Config) float64 {
+	if cfg.GridMinThumbWidth <= 0 || cfg.Width <= 0 || cfg.Height <= 0 {
+		return 0
+	}
+	least := float64(cfg.GridMinThumbWidth)
+	least = math.Min(least, float64(cfg.ThumbWidth)+40-2*gridThumbPadding)
+	least = math.Min(least, (float64(cfg.ThumbHeight)+60-gridTitleSpace)*float64(cfg.Width)/float64(cfg.Height))
+	return math.Max(least, 0)
+}
+
+// gridFitColumns is how many tiles of a thumbnail least wide fit across the
+// window with their spacing, at least one
+func gridFitColumns(least float64, cfg Config) int {
+	spacing := gridSpacing(cfg)
+	return max(1, int(math.Floor((float64(cfg.Width)-spacing)/(least+2*gridThumbPadding+spacing))))
+}
+
+// layoutGrid lays out n tiles in the window below top, the bottom of the
+// header: on one screen when their thumbnails come out at least the least
+// size; past that, the rows run below it, at the scroll of the view
+// (specs/036-grid-scroll, D2)
 func layoutGrid(n int, top float64, cfg Config) gridLayout {
 	// Calculate grid dimensions
 	cols := GridColumns(n, cfg)
 	rows := (n + cols - 1) / cols
 
-	spacing := cfg.GridSpacing
-	if spacing == 0 {
-		spacing = 20 // Default spacing
-	}
+	spacing := gridSpacing(cfg)
 
 	// Calculate tile size to fit all tiles in the window, below the header
 	availableWidth := float64(cfg.Width) - spacing*(float64(cols)+1)
@@ -906,22 +962,86 @@ func layoutGrid(n int, top float64, cfg Config) gridLayout {
 		tileH = maxTileH
 	}
 
-	// Center the grid in the window
+	g := gridLayout{cols: cols, tileW: tileW, tileH: tileH, spacing: spacing, rows: rows,
+		top: min(int(math.Ceil(top)), max(cfg.Height, 0))}
+	least := gridLeast(cfg)
+	aspect := 0.0
+	if cfg.Width > 0 {
+		aspect = float64(cfg.Height) / float64(cfg.Width)
+	}
 	totalGridW := float64(cols)*tileW + (float64(cols)+1)*spacing
-	totalGridH := float64(rows)*tileH + (float64(rows)+1)*spacing
-	offsetX := (float64(cfg.Width) - totalGridW) / 2
-	offsetY := top + (float64(cfg.Height)-top-totalGridH)/2
+	g.offsetX = (float64(cfg.Width) - totalGridW) / 2
+	if least <= 0 || n == 0 || tileW-2*gridThumbPadding >= least && tileH-gridTitleSpace >= least*aspect {
+		// Center the grid in the window
+		totalGridH := float64(rows)*tileH + (float64(rows)+1)*spacing
+		g.offsetY = top + (float64(cfg.Height)-top-totalGridH)/2
+		return g
+	}
 
-	return gridLayout{cols, tileW, tileH, offsetX, offsetY, spacing}
+	// The thumbnail box in the proportions of the window, as wide as the
+	// columns make it; the rows from the header down, centred when they
+	// leave room
+	g.tileH = math.Min((tileW-2*gridThumbPadding)*aspect, float64(cfg.ThumbHeight)) + gridTitleSpace
+	totalGridH := float64(rows)*g.tileH + (float64(rows)+1)*spacing
+	g.offsetY = top + math.Max(0, (float64(cfg.Height)-top-totalGridH)/2)
+	g.maxScroll = max(0, int(math.Ceil(g.offsetY+totalGridH-float64(cfg.Height))))
+	g.scroll = min(max(cfg.GridScroll, 0), g.maxScroll)
+	return g
 }
 
-// tile is the top-left corner of tile i
+// tile is the top-left corner of tile i in the window, at the scroll
 func (g gridLayout) tile(i int) (float64, float64) {
 	row := i / g.cols
 	col := i % g.cols
 	x := g.offsetX + g.spacing + float64(col)*(g.tileW+g.spacing)
-	y := g.offsetY + g.spacing + float64(row)*(g.tileH+g.spacing)
+	y := g.offsetY + g.spacing + float64(row)*(g.tileH+g.spacing) - float64(g.scroll)
 	return x, y
+}
+
+// The scrollbar of a grid that scrolls (specs/036-grid-scroll, D6): its
+// width, its distance from the right edge of the grid, the least length of
+// its thumb, the opacity of the text colour the track and the thumb are
+// drawn in
+const (
+	gridBarWidth   = 4
+	gridBarMargin  = 4
+	gridBarLeast   = 24
+	gridTrackAlpha = 0.12
+	gridThumbAlpha = 0.45
+	gridBarRadius  = 2.0
+	maxGridLayer   = 16384 // the largest side of a texture of OpenGL 4.6 core at least: no tiles layer is taller (research, D9)
+)
+
+// bar is the track of the scrollbar, beside the view, and its thumb at the
+// scroll: the view's share of the rows, at the scroll's share of the
+// largest, in whole pixels
+func (g gridLayout) bar(cfg Config) (track, thumb image.Rectangle) {
+	right := int(math.Round(g.offsetX + float64(g.cols)*g.tileW + float64(g.cols+1)*g.spacing))
+	x1 := right - gridBarMargin
+	s := int(math.Round(g.spacing))
+	y0, y1 := g.top+s, max(cfg.Height-s, g.top+s)
+	track = image.Rect(x1-gridBarWidth, y0, x1, y1)
+	length := y1 - y0
+	rows := float64(g.rows)*g.tileH + float64(g.rows+1)*g.spacing
+	view := float64(cfg.Height - g.top)
+	tl := min(max(gridBarLeast, int(math.Round(float64(length)*view/rows))), length)
+	ty := y0
+	if g.maxScroll > 0 {
+		ty += int(math.Round(float64(length-tl) * float64(g.scroll) / float64(g.maxScroll)))
+	}
+	thumb = image.Rect(x1-gridBarWidth, ty, x1, ty+tl)
+	return track, thumb
+}
+
+// drawGridBar draws the track or the thumb of the scrollbar, r, in the text
+// colour at the opacity alpha
+func drawGridBar(dc *gg.Context, r image.Rectangle, cfg Config, alpha float64) {
+	if r.Empty() {
+		return
+	}
+	setColor(dc, cfg.TextColor, alpha)
+	dc.DrawRoundedRectangle(float64(r.Min.X), float64(r.Min.Y), float64(r.Dx()), float64(r.Dy()), gridBarRadius)
+	dc.Fill()
 }
 
 // drawGridTile draws a single tile in grid layout under the identity matrix:

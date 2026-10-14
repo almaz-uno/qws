@@ -104,9 +104,20 @@ func drawCard(windowData []WindowData, index, offset int, r image.Rectangle, cfg
 // or GridHover over it, it is the grid with that tile selected or hovered —
 // but for the frame of the tile under the frame over it
 // (specs/007-animation).
+//
+// The tiles of a grid that scrolls are of all its rows, at scroll 0, and the
+// layer's bounds are where they lie at that scroll: a scene places it at
+// minus the scroll and cuts it to the view; none when its rows are taller
+// than a texture may be (specs/036-grid-scroll, D9).
 func GridTiles(windowData []WindowData, cfg Config) *image.RGBA {
-	tiles := startGridTiles(windowData, headerBand(cfg), -1, -1, cfg)
-	dc := gg.NewContextForRGBA(clearImage(image.Rect(0, 0, cfg.Width, cfg.Height)))
+	cfg.GridScroll = 0
+	top := headerBand(cfg)
+	canvas := image.Rect(0, 0, cfg.Width, cfg.Height+layoutGrid(len(windowData), top, cfg).maxScroll)
+	if canvas.Dy() > maxGridLayer {
+		return nil
+	}
+	tiles := startGridTilesOn(canvas, windowData, top, -1, -1, cfg)
+	dc := gg.NewContextForRGBA(clearImage(canvas))
 	tiles.draw(dc)
 	img := getImageRGBA(dc)
 	defer Recycle(img)
@@ -134,8 +145,92 @@ func GridShadow(w, h, o float64, cfg Config) *image.RGBA {
 	return img
 }
 
+// GridBase is the canvas of the grid without its tiles: the window
+// background, the header and, for a grid of n tiles that scrolls, the track
+// of its scrollbar (specs/036-grid-scroll)
+func GridBase(n int, cfg Config) *image.RGBA {
+	dc := newCanvas(cfg)
+	drawHeader(dc, cfg)
+	if g := layoutGrid(n, headerBand(cfg), cfg); g.maxScroll > 0 {
+		track, _ := g.bar(cfg)
+		drawGridBar(dc, track, cfg, gridTrackAlpha)
+	}
+	return getImageRGBA(dc)
+}
+
+// GridScrollThumb is the thumb of the scrollbar of a grid of n tiles that
+// scrolls, on a transparent image whose bounds are where it lies at scroll
+// 0; nil when the grid fits on one screen (specs/036-grid-scroll)
+func GridScrollThumb(n int, cfg Config) *image.RGBA {
+	cfg.GridScroll = 0
+	g := layoutGrid(n, headerBand(cfg), cfg)
+	if g.maxScroll == 0 {
+		return nil
+	}
+	_, r := g.bar(cfg)
+	if r.Empty() {
+		return nil
+	}
+	dc := gg.NewContextForRGBA(clearImage(image.Rect(0, 0, r.Dx(), r.Dy())))
+	dc.Translate(float64(-r.Min.X), float64(-r.Min.Y))
+	drawGridBar(dc, r, cfg, gridThumbAlpha)
+	img := getImageRGBA(dc)
+	img.Rect = r
+	return img
+}
+
+// GridThumbOffset is how far down the thumb of the scrollbar of a grid of n
+// tiles lies at the scroll from where it lies at 0
+func GridThumbOffset(n, scroll int, cfg Config) int {
+	cfg.GridScroll = 0
+	g := layoutGrid(n, headerBand(cfg), cfg)
+	_, at0 := g.bar(cfg)
+	g.scroll = min(max(scroll, 0), g.maxScroll)
+	_, at := g.bar(cfg)
+	return at.Min.Y - at0.Min.Y
+}
+
+// GridView is the view of a grid onto its rows (specs/036-grid-scroll)
+type GridView struct {
+	Top       int     // the top of the view, the bottom of the header
+	MaxScroll int     // the largest scroll; 0: the grid fits on one screen
+	Row       float64 // from the top of a row to the top of the next
+}
+
+// GridViewOf is the view of the grid of n tiles
+func GridViewOf(n int, cfg Config) GridView {
+	g := layoutGrid(n, headerBand(cfg), cfg)
+	return GridView{Top: g.top, MaxScroll: g.maxScroll, Row: g.tileH + g.spacing}
+}
+
+// Clip is the rectangle of the window the view shows, which the items of
+// a scene of the grid are cut to; empty — nothing cut — when the grid fits
+// on one screen
+func (v GridView) Clip(cfg Config) Rect {
+	if v.MaxScroll == 0 {
+		return Rect{}
+	}
+	return Rect{X: 0, Y: float64(v.Top), W: float64(cfg.Width), H: float64(cfg.Height - v.Top)}
+}
+
+// GridFollow is the scroll nearest to cfg.GridScroll that shows the row of
+// tile i of n whole, with the spacing around it: the view moved the least,
+// within its ends (specs/036-grid-scroll, D4)
+func GridFollow(n, i int, cfg Config) int {
+	g := layoutGrid(n, headerBand(cfg), cfg)
+	if g.maxScroll == 0 || n == 0 {
+		return 0
+	}
+	g.scroll = 0
+	_, y := g.tile(i)
+	lo := int(math.Ceil(y + g.tileH + g.spacing - float64(cfg.Height)))
+	hi := int(math.Floor(y - g.spacing - float64(g.top)))
+	scroll := min(max(cfg.GridScroll, lo), hi)
+	return min(max(scroll, 0), g.maxScroll)
+}
+
 // GridTile is the rectangle of tile i in the grid: its top-left corner and
-// size
+// size, at the scroll of cfg
 func GridTile(n, i int, cfg Config) (x, y, w, h float64) {
 	g := layoutGrid(n, headerBand(cfg), cfg)
 	x, y = g.tile(i)

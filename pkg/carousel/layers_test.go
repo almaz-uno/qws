@@ -65,8 +65,10 @@ func TestLayers(t *testing.T) {
 	// hovered tile, the tiles, the hover and the selection frame — the grid
 	// with the tiles selected and hovered but for the frames of the tiles
 	// under the frames over them, and the edges of the layers placed at the
-	// nearest pixel here
-	for _, name := range []string{"grid-e1-header", "grid-24-middle-hover"} {
+	// nearest pixel here. A grid that scrolls: its base with the track of the
+	// scrollbar, the tiles of all its rows at minus the scroll, the thumb
+	// at its offset, each cut to the view (specs/036-grid-scroll, K4).
+	for _, name := range []string{"grid-e1-header", "grid-24-middle-hover", "grid-e1-47-middle", "grid-e1-100-bottom"} {
 		for _, s := range scenes() {
 			if s.name == name {
 				sc = s
@@ -79,6 +81,12 @@ func TestLayers(t *testing.T) {
 			img  *image.RGBA
 			x, y float64
 		}
+		n := len(sc.windows)
+		view := GridViewOf(n, cfg)
+		clip := image.Rect(0, 0, cfg.Width, cfg.Height)
+		if c := view.Clip(cfg); c.W > 0 {
+			clip = image.Rect(int(c.X), int(c.Y), int(c.X+c.W), int(c.Y+c.H))
+		}
 		layers := []placed{{GridShadow(w, h, o, cfg), x, y}}
 		var hx, hy float64
 		hovered := sc.hover >= 0 && sc.hover != sc.selected
@@ -86,16 +94,22 @@ func TestLayers(t *testing.T) {
 			hx, hy, _, _ = GridTile(len(sc.windows), sc.hover, cfg)
 			layers = append(layers, placed{GridShadow(w, h, o/2, cfg), hx, hy})
 		}
-		layers = append(layers, placed{GridTiles(sc.windows, cfg), 0, 0})
+		layers = append(layers, placed{GridTiles(sc.windows, cfg), 0, -float64(cfg.GridScroll)})
 		if hovered {
 			layers = append(layers, placed{GridHover(w, h), hx, hy})
 		}
 		layers = append(layers, placed{GridSelection(w, h, cfg), x, y})
+		if thumb := GridScrollThumb(n, cfg); thumb != nil {
+			layers = append(layers, placed{thumb, 0, float64(GridThumbOffset(n, cfg.GridScroll, cfg))})
+		} else if view.MaxScroll > 0 {
+			t.Errorf("%s: a grid that scrolls without a thumb", name)
+		}
 
-		got := CarouselBase(cfg)
+		got := GridBase(n, cfg)
 		for _, l := range layers {
 			r := l.img.Rect.Add(image.Pt(int(math.Round(l.x)), int(math.Round(l.y))))
-			draw.Draw(got, r, l.img, l.img.Rect.Min, draw.Over)
+			sp := l.img.Rect.Min.Add(r.Intersect(clip).Min.Sub(r.Min))
+			draw.Draw(got, r.Intersect(clip), l.img, sp, draw.Over)
 		}
 		want := DrawGridLayout(sc.windows, sc.selected, sc.hover, cfg)
 		// Near the edge of a rectangle: within d of its border

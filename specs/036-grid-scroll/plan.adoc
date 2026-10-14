@@ -1,0 +1,154 @@
+= 036 — plan
+:toc: left
+:toc-title: Contents
+:revdate: 2026-10-13
+
+== Amendments to the specification
+
+Made here on the figures of the research and written into the
+specification in the same change set:
+
+* D1: the least is at most what `appearance.thumbnail` lets a tile be — a
+  box of (width + 20) × height. With the defaults, 256×256, a least of 320
+  could not be had, and every grid would scroll. 320 on E1, 276 with the
+  defaults (research, "The least thumbnail").
+* D3, K1: 6 columns on E1, not 7: 7 columns give thumbnails of 317 px
+  (research, "The columns").
+* D9: one layer of all the rows (research, "The layer of all the rows");
+  the open decision dropped.
+
+== Approach
+
+*The layout* (D1–D3, `pkg/carousel/renderer-cpu.go`). `Config` gets
+`GridMinThumbWidth`, the least m, and `GridScroll`, the scroll of the view
+in whole pixels. `layoutGrid` computes the least m′ of D1 and the columns
+of D3 — `GridColumns` with its bound of 6 when m is 0, of cfit otherwise
+—, lays the grid out as `develop` does and keeps it if its thumbnail boxes
+hold m′ × m′·H/W, or m is 0; otherwise lays the rows out from the band of
+the header down, the tiles of the research, "The grid that scrolls". The
+layout keeps the view: its top, the band in whole pixels up; the largest
+scroll; the scroll of `cfg`, within it. `tile(i)` is the tile at that
+scroll. A grid that fits has a largest scroll of 0 and is laid out, and
+drawn, as in `develop`.
+
+*The view, for `pkg/ui`.* `GridView(n, cfg)`: the top of the view, the
+largest scroll, the distance of the rows. `GridFollow(n, i, cfg)`: the
+least scroll from `cfg.GridScroll` that brings the row of tile i in whole,
+with the spacing around it, within the ends (D4). `GridTile` is the tile
+at `cfg.GridScroll`, as before at 0.
+
+*The frame* (D6). `DrawGridLayout` draws the canvas, the header and, for a
+grid that scrolls, the track of the scrollbar; keeps the rows of the band
+of the header; draws the tiles at the scroll, those out of the view left
+out; writes the rows kept back over what the tiles drew under the header;
+draws the thumb of the scrollbar. The scrollbar is 4 px wide, 4 px from the
+right edge of the grid, from the top of the view to the bottom of the
+window less the spacing; its thumb the view's share of the content, at
+least 24 px, at the scroll's share of the largest, in whole pixels.
+
+*The layers* (D9, `pkg/carousel/layers.go`). `GridTiles` draws the tiles
+of all the rows at scroll 0 on a canvas of the content and crops it; none
+for a content taller than 16384 px. `GridBase` is `CarouselBase` with the
+track; `GridScrollThumb` the thumb at scroll 0, and `GridThumbOffset` how
+far the scroll moves it. `SceneItem.Clip`, when not empty, cuts the quad of
+the item (`present_glx_scene.go`). The base of the grid is `GridBase`; the
+thumb a layer among the grid's, held as none when the grid does not
+scroll.
+
+*The scene* (`pkg/ui/animation.go`). The scroll of a scene is that of the
+view at now, rounded to a pixel: `s.config.GridScroll` at rest, the motion
+`step.sy` while it moves. The tiles layer is placed at minus the scroll,
+the shadows and frames at their tiles in the rows less it — `step.gx` and
+`step.gy` are in the coordinates of the rows —, the thumb at its offset;
+for a grid that scrolls each item is cut to the view.
+
+*The scroll* (D4, D5, D7). `stepTo` takes the scroll of `GridFollow` for
+its target: at once with the selection, or moved by `step.sy` beside
+`step.pos`, of its duration — 0 while still (031). A step moves while
+either moves. The wheel, button 4 or 5 in the grid, scrolls by a row
+within the ends through the same step, the selection where it is, its
+frame at rest drawn for the event; then the hover is found anew at the
+pointer. The view follows the selection at the start of an activation, at
+a switch to the grid and when the workspace filter changes the windows.
+Up and Down as in 026: around a column is a wrap, at once. The frame at
+rest drawn in the background carries its scroll and is not taken for
+another.
+
+*The mouse* (D5). `getWindowIndexAtPositionGrid` takes the tiles at the
+scroll and no point above the view.
+
+*The live thumbnails* (D8, `pkg/carousel/live.go`, `pkg/ui/live.go`).
+`GridLive` gives the items of all the rows at scroll 0, cut to the
+content; `GridLiveView` moves them by a scroll and cuts them, and their
+holes, to the view. The selector keeps the items of the rows by the
+generation of its layers and views them at the scroll of each frame. The
+windows the snapshotter passes are those of the tiles in the view at
+rest, whole or cut.
+
+*The key* (K5). `appearance.grid.min_thumbnail_width`, `int`, 320 in
+`Default()` and `setDefaults` — so the variable is read —, the flag
+`--appearance-grid-min-thumbnail-width`; `Grid.MinThumbWidth()` gives the
+value and a warning for a negative one, which takes the default, logged by
+`NewSelector`. Existing configurations have no such key: they get 320, and
+a grid that does not fit at it scrolls; 0 keeps the grid of 1.6.1.
+
+== Files
+
+[cols="2,5"]
+|===
+| File | What changes
+
+| `internal/config/config.go`
+| `Grid.MinThumbnailWidth`, `min_thumbnail_width`; 320 in `Default()` and
+  `setDefaults`; `MinThumbWidth`.
+
+| `cmd/qws/root.go`
+| The flag and `applyFlags`.
+
+| `pkg/carousel/renderer-cpu.go`
+| `GridMinThumbWidth`, `GridScroll`; the layout of D1–D3 and its view;
+  `GridColumns` of D3; `DrawGridLayout` at the scroll, with the scrollbar.
+
+| `pkg/carousel/gridheads.go`
+| The tiles on a canvas given, those out of the view left out.
+
+| `pkg/carousel/layers.go`
+| `GridTiles` of all the rows; `GridBase`, `GridScrollThumb`,
+  `GridThumbOffset`, `GridView`, `GridFollow`.
+
+| `pkg/carousel/present.go`, `present_glx_scene.go`
+| `SceneItem.Clip`.
+
+| `pkg/carousel/live.go`
+| `GridLive` of all the rows; `GridLiveView`.
+
+| `pkg/ui/selector.go`
+| The minimum in the configuration; the view followed; the wheel; the hit
+  test at the scroll.
+
+| `pkg/ui/animation.go`
+| `step.sy`; the scroll in `stepTo`, the scene, the frame at rest; the base
+  and the thumb of the grid.
+
+| `pkg/ui/live.go`
+| The items viewed at the scroll; the windows in the view.
+
+| `pkg/carousel/scenes_test.go`, `testdata/scenes.json`, `layers_test.go`,
+  `present_glx_test.go`, new `gridscroll_test.go`
+| K1, K2, K4.
+
+| `pkg/ui/scroll_test.go`
+| New: K3.
+
+| `internal/config/config_test.go`, `cmd/qws/root_test.go`
+| K5.
+
+| `doc/configuration.asciidoc`, `config.yaml.example`, `README.md`
+| The key, the scroll, the wheel.
+|===
+
+What must stay: the grid that fits, pixel for pixel, at either renderer,
+and its scenes — `TestScenes` with `testdata/scenes.json` but for the
+scenes of the research, `TestGLXPresenterMatchesCPU`, `TestLayers`; its
+steps, hover, click and convergence (026–028); `min_thumbnail_width: 0` as
+1.6.1; the carousel.
