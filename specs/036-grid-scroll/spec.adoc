@@ -3,7 +3,7 @@
 :toc-title: Contents
 :sectnums:
 :revdate: 2026-10-13
-:status: draft
+:status: implemented
 :issue: 106
 
 == What and why
@@ -115,6 +115,52 @@ texture of 16384 px at least —, not cut in bands; a grid taller than
   than 320 px, the view following the arrows and the wheel.
 |===
 
+== Results
+
+Off the screen: the tests on ws1, the commits `36d4b8e` to `991cc23`, each
+in a worktree of its own. On the desktop: the author's trial on ws1 on
+2026-10-14, 00:44–09:21, the build of `6931da0` on Alt+F11 beside the
+service, `--log-level debug` (`~/.cache/qws-036-trial/log-k7.txt` on ws1).
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | Met. `TestScenes`: the grid scenes that fit unchanged; seven change,
+  each no longer fitting at 320 px — the six of 24 windows on 1260×700
+  (boxes of 166.7×90, 67.5 high under the header; now 3 columns, 8 rows
+  scrolled) and `grid-header-narrow` (280×700, now one column scrolled);
+  six new, `grid-e1-{47,100}-{top,middle,bottom}`. On E1 at 47 windows: 6
+  columns by 8 rows, tiles of 396.7×269.3, thumbnail boxes of 376.7×209.3
+  (81.2 high before), 4.53 rows in the view, 1025 px of scroll; at 100,
+  17 rows, 3628 px.
+| K2 | Met. `TestGridScrollLayout`: n from 1 to 200 on E1 and 1880×1040,
+  `columns` set, `GridFollow`.
+| K3 | Met. `TestGridScrollSteps`, `TestGridWheel`, `TestGridScrollMouse`,
+  `TestGridScrollLive`; the hit test and the clip each broken once on
+  purpose, caught.
+| K4 | Met as the checks of 007 compare: the scenes of a scrolled grid
+  within 2 per channel of the cpu, the frame at rest byte for byte
+  (`TestLayers`, `TestGLXPresenterMatchesCPU`, `checkGridScroll`). One
+  layer of all the rows (D9): 48.6 MB at 100 windows on E1, within the
+  32768 px of ws1's GL; past 16384 px, some 336 windows, the tiles are
+  drawn by the cpu, the steps at once — untested. The frame at rest 68 ms
+  at 47 and at 100 windows (`BenchmarkE1Grid`), only the tiles in the
+  view drawn.
+| K5 | Met. `TestGridKeys`, `TestGridFlags`, `TestRoundTrip`,
+  `TestTagNames`; `config show` of the build on ws1's file: no warning,
+  `min_thumbnail_width: 320`.
+| K6 | Met. Every commit in a worktree of its own; `-race` of `pkg/ui`,
+  `pkg/carousel`, `pkg/snapshot`, `pkg/x11`.
+| K7 | Met, the scroll seen still. 44 windows, ten activations on the
+  screen of 144 Hz, the selection taken down to the 43rd window by the
+  arrows; no warning or error; the author: "ок". The animation went still
+  by the frames of 031 in both passes — the false trips at 144 Hz that
+  035 mends —, so the view followed the selection at once, not animated.
+|===
+
 == Open decisions
 
-None.
+None. Left as found: `appearance.grid.columns` and `spacing` have no
+defaults set in the configuration, so their `QWS_` variables are not read.
+GL's largest texture on the T1200 of ws2 and ws3 is not measured.
