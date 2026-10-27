@@ -1,0 +1,88 @@
+= 037 — the icons of the grid
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-27
+:status: draft
+:issue: 109
+
+== What and why
+
+A tile of the grid draws the icon of its window at 24 px, in its top-left
+corner, 8 px from the edges, over the thumbnail (`gridIconSize`,
+`gridIconPadding`). On the tiles of ws1 — thumbnail boxes of some
+380×210 at 47 windows (036) — such an icon is hard to make out.
+
+The author, 2026-10-27: make the icons larger, some three times, at the top
+centre or in the centre of a tile — try and compare. Compared on the stills
+of the README demo (2560×1440, thumbnails of 512): the icon of 24 px in the
+corner as now; of 72 px in the corner, at the top centre, in the centre; of
+48 px at the top centre. The author chose 72 px at the top centre.
+
+The specification is a delta to `develop` at `30dd885` (1.7.0). Unchanged:
+the carousel, but for the icon it is given (D4); the layout of the grid,
+its thumbnails, titles, frames, scroll and live thumbnails; the
+configuration.
+
+== Decisions
+
+D1 and D2 the author's, 2026-10-27, after the comparison; D3 the author's,
+as recommended; D4 and D5 made in the specification.
+
+D1 (the author's). *72 px.* The icon is drawn in a square of 72 px, three
+times the 24 of now, in its proportions.
+
+D2 (the author's). *At the top centre.* The icon is centred across the
+tile, 8 px below the top of the thumbnail box — the box `gridThumbnail`
+centres the thumbnail in —, not of the thumbnail itself: the icons of a
+row stand on one line whatever the proportions of their windows. Over the
+thumbnail of a wide window, which the box letterboxes, the icon reaches
+above it into the band of the tile's background.
+
+D3 (the author's). *No key.* The size and the place are fixed, as they are
+now; the configuration keys of the trial are dropped.
+
+D4. *An icon not upscaled.* `_NET_WM_ICON` is read at the size closest to
+128 px, larger rather than smaller — 48 px now —, so that an application
+giving several sizes is drawn at 72 by downscaling. The icons by class
+already prefer `hicolor/128x128`. The carousel draws the same icon at
+48 px times the scale of its card, now from the larger image. The cost: 64
+KiB of pixels a window read and kept instead of 9 KiB.
+
+D5. *No larger than the box.* On a tile whose thumbnail box is less than
+72 px wide or high the icon is the box's least side.
+
+== Acceptance criteria
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| The grid: every grid scene of `TestScenes` and `TestScenesOnGarbage`
+  changes, the icon 72 px at the top centre; every carousel scene stays
+  byte for byte (`testdata/scenes.json`).
+
+| K2
+| One place: the drawing (`drawGridTileHead`), the bounds of the head of a
+  tile drawn apart (`gridHeadBounds`, 019) and the covers of a live
+  thumbnail (`GridLive`, 020) take the icon from one function, `gridIcon`;
+  `TestLayers`, `TestGLXPresenterMatchesCPU`, the live tests pass.
+
+| K3
+| The README: `make readme-images` redraws `grid.png` and `qws.webp`;
+  `carousel.png` comes out byte for byte the same.
+
+| K4
+| `go build ./...`, `gofmt -l` empty, `go vet ./...`, `make check-specs`,
+  `go test ./...`.
+
+| K5
+| The author's trial on ws1: its windows in the grid, the icons 72 px at
+  the top centre, sharp — not upscaled — for the applications that give a
+  large `_NET_WM_ICON`.
+|===
+
+== Open decisions
+
+None.
