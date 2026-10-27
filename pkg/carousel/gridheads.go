@@ -266,8 +266,8 @@ func gridHeadBounds(canvas image.Rectangle, win *WindowData, x, y, w, h float64,
 		add(rect(thumbX, thumbY, scaledW, scaledH, 0.5+margin))
 	}
 	if win.Icon != nil {
-		if iconScale, has := gridIconScale(win.Icon.Bounds()); has {
-			add(resampled(win.Icon, gridIconPadding, gridIconPadding, iconScale))
+		if iconX, iconY, iconScale, has := gridIcon(win.Icon.Bounds(), w, h); has {
+			add(resampled(win.Icon, iconX, iconY, iconScale))
 		}
 	}
 	if win.Title != "" && win.Urgent {

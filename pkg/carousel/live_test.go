@@ -480,10 +480,10 @@ func TestLiveCovers(t *testing.T) {
 			dc := gg.NewContext(sc.cfg.Width, sc.cfg.Height)
 			x, y := g.tile(i)
 			drawGridTileTail(dc, &win, x, y, g.tileW, g.tileH, false, false, sc.cfg)
-			if s, ok := gridIconScale(win.Icon.Bounds()); ok {
+			if ix, iy, s, ok := gridIcon(win.Icon.Bounds(), g.tileW, g.tileH); ok {
 				dc.Push()
 				dc.Translate(x, y)
-				dc.Translate(gridIconPadding, gridIconPadding)
+				dc.Translate(ix, iy)
 				dc.Scale(s, s)
 				dc.DrawImage(win.Icon, 0, 0)
 				dc.Pop()

@@ -1072,8 +1072,8 @@ func drawGridTile(dc *gg.Context, win *WindowData, x, y, w, h float64, isSelecte
 const (
 	gridThumbPadding = 10.0 // around the thumbnail
 	gridTitleSpace   = 60.0 // below it, for the title (increased from 50 to 60)
-	gridIconSize     = 24.0 // the icon, in the top-left corner
-	gridIconPadding  = 8.0
+	gridIconSize     = 72.0 // the icon, at the top centre (specs/037-grid-icons)
+	gridIconPadding  = 8.0  // below the top of the thumbnail box
 	gridTitleY       = 40.0 // the top of the title, from the bottom of the tile (moved down from 35 to 40 for better spacing)
 )
 
@@ -1123,9 +1123,9 @@ func drawGridTileHead(dc *gg.Context, win *WindowData, x, y, w, h float64, isSel
 
 	// Draw icon (if available) in top-left corner
 	if win.Icon != nil {
-		if iconScale, ok := gridIconScale(win.Icon.Bounds()); ok {
+		if iconX, iconY, iconScale, ok := gridIcon(win.Icon.Bounds(), w, h); ok {
 			dc.Push()
-			dc.Translate(gridIconPadding, gridIconPadding)
+			dc.Translate(iconX, iconY)
 			dc.Scale(iconScale, iconScale)
 			dc.DrawImage(win.Icon, 0, 0)
 			dc.Pop()
@@ -1221,15 +1221,20 @@ func gridThumbnail(b image.Rectangle, w, h float64) (x, y, scaledW, scaledH, sca
 	return x, y, scaledW, scaledH, scale
 }
 
-// gridIconScale is the scale drawGridTileHead draws an icon of bounds b at;
-// false when it draws none
-func gridIconScale(b image.Rectangle) (float64, bool) {
+// gridIcon is where drawGridTileHead puts an icon of bounds b in a tile of
+// size w×h: its top-left corner, relative to the tile's, and its scale; false
+// when it draws none. The icon is centred across the tile, gridIconPadding
+// below the top of the thumbnail box, and no larger than the box
+// (specs/037-grid-icons).
+func gridIcon(b image.Rectangle, w, h float64) (x, y, scale float64, ok bool) {
 	imgW := float64(b.Dx())
 	imgH := float64(b.Dy())
 	if imgW <= 0 || imgH <= 0 {
-		return 0, false
+		return 0, 0, 0, false
 	}
-	return math.Min(gridIconSize/imgW, gridIconSize/imgH), true
+	size := math.Max(1, math.Min(gridIconSize, math.Min(w-2*gridThumbPadding, h-gridTitleSpace)))
+	scale = math.Min(size/imgW, size/imgH)
+	return (w - imgW*scale) / 2, gridThumbPadding + gridIconPadding, scale, true
 }
 
 // truncateTitle truncates title to fit within maxWidth, as measured by

@@ -104,7 +104,7 @@ func (c *Connection) GetWindowName(window xproto.Window) (string, error) {
 
 // GetWindowIcon retrieves window icon from _NET_WM_ICON property.
 // Returns nil if the icon is not available.
-// If multiple icons are available, returns the largest one or closest to 48x48.
+// If multiple icons are available, returns the one closest to 128x128, larger rather than smaller.
 func (c *Connection) GetWindowIcon(window xproto.Window) (image.Image, error) {
 	// Get _NET_WM_ICON atom
 	netWmIcon, err := c.InternAtom("_NET_WM_ICON", true)
@@ -133,7 +133,7 @@ func (c *Connection) GetWindowIcon(window xproto.Window) (image.Image, error) {
 			uint32(prop.Value[i*4+3])<<24
 	}
 
-	// Find the best icon (closest to 48x48 or largest available)
+	// Find the best icon (closest to 128x128, larger rather than smaller)
 	bestIcon := findBestIcon(data)
 	if bestIcon == nil {
 		return nil, nil
@@ -143,7 +143,8 @@ func (c *Connection) GetWindowIcon(window xproto.Window) (image.Image, error) {
 }
 
 // findBestIcon finds the best icon from _NET_WM_ICON data
-// Prefers icons close to 48x48, or the largest available
+// Prefers icons close to 128x128, larger rather than smaller: the grid
+// draws them at 72 px (specs/037-grid-icons)
 func findBestIcon(data []uint32) image.Image {
 	if len(data) < 2 {
 		return nil
@@ -151,7 +152,7 @@ func findBestIcon(data []uint32) image.Image {
 
 	var bestImg image.Image
 	var bestScore int
-	targetSize := 48
+	targetSize := 128
 	pos := 0
 
 	// Parse all icons in the data
@@ -230,7 +231,7 @@ type iconRange func(offset, length uint32) (values []uint32, remaining uint32, e
 // sizes of the icons first and then the pixels of that one alone
 // (specs/003-window-list): the same image, a fraction of the bytes
 func readIconByHeaders(read iconRange) (image.Image, error) {
-	const targetSize = 48
+	const targetSize = 128
 	var (
 		bestScore, bestW, bestH int
 		bestOffset              uint32
