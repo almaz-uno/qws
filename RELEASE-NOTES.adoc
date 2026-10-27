@@ -2,12 +2,27 @@
 :toc: left
 :toc-title: Contents
 :toclevels: 2
-:revdate: 2026-10-14
+:revdate: 2026-10-27
 
 Every minor or major release is a chapter, its patches are subsections, the
 newest come first (link:specs/004-releases/spec.adoc[specification 004]). The
 version of a build is `qws version`. Release files are built on Debian 12:
 they need glibc 2.36 or newer and the OpenGL and X11 libraries.
+
+== 1.8.0 — 2026-10-27
+
+*The icons of the grid* (link:specs/037-grid-icons/spec.adoc[specification
+037]):
+
+* The icon of a tile is 72 px instead of 24, centred across the tile above
+  its thumbnail, its lower third on it, no longer in the top-left corner.
+  The thumbnail is put at the top of its box, so the icon lies on every
+  thumbnail alike.
+* A tile is 48 px taller where its height is bounded; where the tiles share
+  one screen, the thumbnail is 48 px lower. 47 windows on a screen of
+  2560×1440: tiles of 397×317 instead of 397×269, the thumbnails as before.
+* The icon of a window is read at about 128 px instead of 48, so that it is
+  drawn sharp, by downscaling.
 
 == 1.7.0 — 2026-10-14
 
