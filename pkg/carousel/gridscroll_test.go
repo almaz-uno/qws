@@ -43,12 +43,12 @@ func TestGridScrollLayout(t *testing.T) {
 				t.Fatalf("%s, no least: %d columns, want %d", name, got, want)
 			}
 			g := layoutGrid(n, top, cfg)
-			boxW, boxH := g.tileW-2*gridThumbPadding, g.tileH-gridTitleSpace
+			boxW, boxH := g.tileW-2*gridThumbPadding, g.tileH-gridChrome
 			if boxW < least || boxH < least*aspect-1e-9 {
 				t.Fatalf("%s: thumbnail box %.1f×%.1f under the least", name, boxW, boxH)
 			}
 			old := layoutGrid(n, top, none)
-			holds := old.tileW-2*gridThumbPadding >= least && old.tileH-gridTitleSpace >= least*aspect
+			holds := old.tileW-2*gridThumbPadding >= least && old.tileH-gridChrome >= least*aspect
 			if old.cols == g.cols && holds != (g.maxScroll == 0) {
 				t.Fatalf("%s: the boxes on one screen hold the least %v, the grid scrolls %v", name, holds, g.maxScroll > 0)
 			}

@@ -120,8 +120,8 @@ func GridLive(windowData []WindowData, cfg Config) []LiveItem {
 		}
 		var covers []image.Rectangle
 		if win.Icon != nil {
-			if iconScale, has := gridIconScale(win.Icon.Bounds()); has {
-				_, r := placement(canvas, gridImageMatrix(x, y, gridIconPadding, gridIconPadding, iconScale), win.Icon)
+			if iconX, iconY, iconScale, has := gridIcon(win.Icon.Bounds(), g.tileW, g.tileH); has {
+				_, r := placement(canvas, gridImageMatrix(x, y, iconX, iconY, iconScale), win.Icon)
 				covers = append(covers, r)
 			}
 		}

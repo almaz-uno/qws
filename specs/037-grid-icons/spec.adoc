@@ -1,0 +1,152 @@
+= 037 — the icons of the grid
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-10-27
+:status: implemented
+:issue: 109
+
+== What and why
+
+A tile of the grid draws the icon of its window at 24 px, in its top-left
+corner, 8 px from the edges, over the thumbnail (`gridIconSize`,
+`gridIconPadding`). On the tiles of ws1 — thumbnail boxes of some
+380×210 at 47 windows (036) — such an icon is hard to make out.
+
+The author, 2026-10-27: make the icons larger, some three times, at the top
+centre or in the centre of a tile — try and compare. The variants were
+compared first on the stills of the README demo (2560×1440, thumbnails of
+512), then on the author's desktop on ws2, each a build of the branch on
+Alt+F11 or Alt+F8 beside the service:
+
+[cols="1,5,3"]
+|===
+| | Variant | The author
+
+| A | 24 px in the corner, as now; 72 px in the corner, at the top centre, in
+  the centre; 48 px at the top centre — stills only | 72 px at the top
+  centre
+| B | 72 px at the top centre, 8 px below the top of the thumbnail box, over
+  the thumbnail | the icon looks a part of the thumbnail
+| C | 16 px above the top edge of the tile — 20 px of spacing between the
+  rows leave no more | the frames of the tile, of the selection and of
+  the hover cross the icon
+| V1 | a band of 80 px above the thumbnail box, the icon in it, 8 px above
+  the box | "not bad", kept as V1
+| V2a | a band of 48 px, two thirds of the icon: its lower third lies on
+  the box, the thumbnail centred in it as now | over a wide window the
+  icon barely reaches the thumbnail
+| V2b | V2a, the thumbnail at the top of its box | taken
+|===
+
+The specification is a delta to `develop` at `30dd885` (1.7.0). Unchanged:
+the carousel, but for the icon it is given (D4); the width of tiles and
+thumbnail boxes, the columns, the least thumbnail and the rule of the
+scroll (036), the titles, frames, selection and live thumbnails; the
+configuration.
+
+== Decisions
+
+D1–D3 the author's, 2026-10-27, after the comparison; D4 and D5 made in the
+specification.
+
+D1 (the author's). *72 px.* The icon is drawn in a square of 72 px, three
+times the 24 of now, in its proportions.
+
+D2 (the author's). *At the top centre, its lower third on the thumbnail.*
+A tile gets a band of 48 px — two thirds of the icon — between its top
+padding and its thumbnail box. The icon is centred across the tile at the
+top of the band, so that its lower 24 px lie on the thumbnail. The
+thumbnail is centred across its box and put at the top of it, not in the
+middle as now: the icon lies on every thumbnail alike whatever the
+proportions of its window, and the room a wide window leaves is below it,
+above the title. The tile is 48 px taller where its height is bounded —
+up to `appearance.thumbnail.height` + 108 instead of + 60, and a box in
+the proportions of the overlay in a grid that scrolls; where the tiles
+share the height of one screen, the box is 48 px lower.
+
+D3 (the author's). *No key.* The size and the place are fixed, as they are
+now; the configuration keys of the trial are dropped.
+
+D4. *An icon not upscaled.* `_NET_WM_ICON` is read at the size closest to
+128 px, larger rather than smaller — 48 px now —, so that an application
+giving several sizes is drawn at 72 by downscaling. The icons by class
+already prefer `hicolor/128x128`. The carousel draws the same icon at
+48 px times the scale of its card, now from the larger image. The cost: 64
+KiB of pixels a window read and kept instead of 9 KiB.
+
+D5. *No wider than the box.* On a tile whose thumbnail box is less than
+72 px wide the icon is as wide as the box.
+
+== Acceptance criteria
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| The grid: every grid scene of `TestScenes` and `TestScenesOnGarbage`
+  changes, the icon as D2 puts it; every carousel scene stays byte for
+  byte (`testdata/scenes.json`).
+
+| K2
+| One place: the drawing (`drawGridTileHead`), the bounds of the head of a
+  tile drawn apart (`gridHeadBounds`, 019) and the covers of a live
+  thumbnail (`GridLive`, 020) take the icon from one function, `gridIcon`;
+  `TestLayers`, `TestGLXPresenterMatchesCPU`, the live tests pass.
+
+| K3
+| The layout of 036 with the band: `TestGridScrollLayout` with the box of a
+  tile its height less the band and the title, the least thumbnail held.
+
+| K4
+| The README: `make readme-images` redraws `grid.png` and `qws.webp`;
+  `carousel.png` comes out byte for byte the same.
+
+| K5
+| `go build ./...`, `gofmt -l` empty, `go vet ./...`, `make check-specs`,
+  `go test ./...`.
+
+| K6
+| The author's trial on their desktop: their windows in the grid, the
+  icons as D2 puts them.
+|===
+
+== Results
+
+Off the screen: the tests on ws1, in the clone of the branch. On the
+desktop: the author's trial on ws2 on 2026-10-27, 12:57–13:50, the builds
+of the variants on Alt+F11 and Alt+F8 beside the service.
+
+The layout on E1 (2520×1400, the scene configuration of the tests, with the
+header), before and after:
+
+[cols="1,3,3"]
+|===
+| Windows | 1.7.0: tile, box, scroll | Now
+
+| 8 | 552×572, 532×512 | 552×620, 532×512
+| 16 | 480×302.5, 460×242.5 | 480×302.5, 460×194.5
+| 24 | 396.7×302.5, 376.7×242.5 | 396.7×302.5, 376.7×194.5
+| 47 | 396.7×269.3, 376.7×209.3, 1025 px | 396.7×317.3, 376.7×209.3, 1409 px
+|===
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | Met. The 23 grid scenes of each test change; the 20 carousel scenes
+  are byte for byte.
+| K2 | Met. `gridIcon` alone places the icon; `TestLayers`,
+  `TestGLXPresenterMatchesCPU`, `TestLiveThumbnails`, `TestLiveCovers` pass.
+| K3 | Met. `TestGridScrollLayout` over 1 to 200 windows on E1 and
+  1880×1040; at 16 and 24 windows on E1 the grid still fits on one screen
+  (boxes of 194.5 against the least of 177.8).
+| K4 | Met. `grid.png` and `qws.webp` redrawn, `carousel.png` the same.
+| K5 | Met, on every commit of the branch.
+| K6 | Met. The author on V2b, Alt+F11 on ws2: "норм, её берём".
+|===
+
+== Open decisions
+
+None.
