@@ -932,7 +932,7 @@ func gridLeast(cfg Config) float64 {
 	}
 	least := float64(cfg.GridMinThumbWidth)
 	least = math.Min(least, float64(cfg.ThumbWidth)+40-2*gridThumbPadding)
-	least = math.Min(least, (float64(cfg.ThumbHeight)+60-gridTitleSpace)*float64(cfg.Width)/float64(cfg.Height))
+	least = math.Min(least, float64(cfg.ThumbHeight)*float64(cfg.Width)/float64(cfg.Height))
 	return math.Max(least, 0)
 }
 
@@ -962,8 +962,8 @@ func layoutGrid(n int, top float64, cfg Config) gridLayout {
 	tileH := availableHeight / float64(rows)
 
 	// Respect max thumbnail size
-	maxTileW := float64(cfg.ThumbWidth) + 40  // Add padding for borders
-	maxTileH := float64(cfg.ThumbHeight) + 60 // Add padding for title
+	maxTileW := float64(cfg.ThumbWidth) + 40          // Add padding for borders
+	maxTileH := float64(cfg.ThumbHeight) + gridChrome // Add room for the icon and the title
 	if tileW > maxTileW {
 		tileW = maxTileW
 	}
@@ -980,7 +980,7 @@ func layoutGrid(n int, top float64, cfg Config) gridLayout {
 	}
 	totalGridW := float64(cols)*tileW + (float64(cols)+1)*spacing
 	g.offsetX = (float64(cfg.Width) - totalGridW) / 2
-	if least <= 0 || n == 0 || tileW-2*gridThumbPadding >= least && tileH-gridTitleSpace >= least*aspect {
+	if least <= 0 || n == 0 || tileW-2*gridThumbPadding >= least && tileH-gridChrome >= least*aspect {
 		// Center the grid in the window
 		totalGridH := float64(rows)*tileH + (float64(rows)+1)*spacing
 		g.offsetY = top + (float64(cfg.Height)-top-totalGridH)/2
@@ -990,7 +990,7 @@ func layoutGrid(n int, top float64, cfg Config) gridLayout {
 	// The thumbnail box in the proportions of the window, as wide as the
 	// columns make it; the rows from the header down, centred when they
 	// leave room
-	g.tileH = math.Min((tileW-2*gridThumbPadding)*aspect, float64(cfg.ThumbHeight)) + gridTitleSpace
+	g.tileH = math.Min((tileW-2*gridThumbPadding)*aspect, float64(cfg.ThumbHeight)) + gridChrome
 	totalGridH := float64(rows)*g.tileH + (float64(rows)+1)*spacing
 	g.offsetY = top + math.Max(0, (float64(cfg.Height)-top-totalGridH)/2)
 	g.maxScroll = max(0, int(math.Ceil(g.offsetY+totalGridH-float64(cfg.Height))))
@@ -1070,11 +1070,12 @@ func drawGridTile(dc *gg.Context, win *WindowData, x, y, w, h float64, isSelecte
 
 // The thumbnail, the icon and the title of a grid tile
 const (
-	gridThumbPadding = 10.0 // around the thumbnail
-	gridTitleSpace   = 60.0 // below it, for the title (increased from 50 to 60)
-	gridIconSize     = 72.0 // the icon, at the top centre (specs/037-grid-icons)
-	gridIconPadding  = 8.0  // below the top of the thumbnail box
-	gridTitleY       = 40.0 // the top of the title, from the bottom of the tile (moved down from 35 to 40 for better spacing)
+	gridThumbPadding = 10.0                          // around the thumbnail
+	gridTitleSpace   = 60.0                          // below it, for the title (increased from 50 to 60)
+	gridIconSize     = 72.0                          // the icon, at the top centre, above the thumbnail box (specs/037-grid-icons)
+	gridIconBand     = gridIconSize * 2 / 3          // above the thumbnail box: the lower third of the icon lies on the thumbnail
+	gridChrome       = gridTitleSpace + gridIconBand // the height of a tile but its thumbnail box
+	gridTitleY       = 40.0                          // the top of the title, from the bottom of the tile (moved down from 35 to 40 for better spacing)
 )
 
 // drawGridTileHead draws the part of a tile under its title: the shadow of a
@@ -1206,7 +1207,7 @@ func gridShadowOffset(isSelected bool, cfg Config) float64 {
 // its scale
 func gridThumbnail(b image.Rectangle, w, h float64) (x, y, scaledW, scaledH, scale float64) {
 	thumbW := w - 2*gridThumbPadding
-	thumbH := h - gridTitleSpace // Reserve space for title at bottom
+	thumbH := h - gridChrome // Reserve the band of the icon at top and space for the title at bottom
 
 	// Scale thumbnail to fit
 	imgW := float64(b.Dx())
@@ -1215,16 +1216,17 @@ func gridThumbnail(b image.Rectangle, w, h float64) (x, y, scaledW, scaledH, sca
 	scaledW = imgW * scale
 	scaledH = imgH * scale
 
-	// Center thumbnail in tile
+	// Centre the thumbnail across the tile
 	x = gridThumbPadding + (thumbW-scaledW)/2
-	y = gridThumbPadding + (thumbH-scaledH)/2
+	y = gridThumbPadding + gridIconBand // at the top of the box, under the icon (specs/037-grid-icons)
 	return x, y, scaledW, scaledH, scale
 }
 
 // gridIcon is where drawGridTileHead puts an icon of bounds b in a tile of
 // size w×h: its top-left corner, relative to the tile's, and its scale; false
-// when it draws none. The icon is centred across the tile, gridIconPadding
-// below the top of the thumbnail box, and no larger than the box
+// when it draws none. The icon is centred across the tile at the top of the
+// thumbnail box's band: its lower third lies on the thumbnail, which
+// gridThumbnail puts at the top of its box. It is at most as wide as the box
 // (specs/037-grid-icons).
 func gridIcon(b image.Rectangle, w, h float64) (x, y, scale float64, ok bool) {
 	imgW := float64(b.Dx())
@@ -1232,9 +1234,9 @@ func gridIcon(b image.Rectangle, w, h float64) (x, y, scale float64, ok bool) {
 	if imgW <= 0 || imgH <= 0 {
 		return 0, 0, 0, false
 	}
-	size := math.Max(1, math.Min(gridIconSize, math.Min(w-2*gridThumbPadding, h-gridTitleSpace)))
+	size := math.Max(1, math.Min(gridIconSize, w-2*gridThumbPadding))
 	scale = math.Min(size/imgW, size/imgH)
-	return (w - imgW*scale) / 2, gridThumbPadding + gridIconPadding, scale, true
+	return (w - imgW*scale) / 2, gridThumbPadding, scale, true
 }
 
 // truncateTitle truncates title to fit within maxWidth, as measured by
