@@ -38,7 +38,7 @@ func CardLayer(windowData []WindowData, index, offset int, cfg Config) *image.RG
 	halfW := math.Max(card.finalW/2, 420) + cfg.ShadowOffset + 40
 	band := image.Rect(
 		int(card.x-halfW), int(card.y-card.finalH/2-130*card.scale-40),
-		int(card.x+halfW)+1, int(card.y+card.finalH/2+70*card.scale+cfg.ShadowOffset+40)+1,
+		int(card.x+halfW)+1, int(card.y+card.finalH/2+90*card.scale+cfg.ShadowOffset+40)+1,
 	).Intersect(canvas)
 	img := drawCard(windowData, index, offset, band, cfg)
 	if b := opaqueBounds(img); b.Empty() {

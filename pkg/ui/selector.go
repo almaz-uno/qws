@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"image"
-	"math"
 	"strings"
 	"time"
 	"unicode"
@@ -54,42 +53,42 @@ type Selector struct {
 	paddingY            int                 // Vertical padding from screen edges
 	animOffset          float64
 	resultChan          chan *x11.WindowInfo
-	keyConfig           keyConfig                       // Configured keybindings
-	modifierPressed     bool                            // Track if primary modifier is currently pressed
-	workspacePressed    bool                            // Track if workspace modifier is currently pressed
-	initialWorkspaceOpt string                          // Initial workspace configuration ("all", "current", "all-except-current")
-	initialLayoutMode   string                          // Initial layout mode ("carousel" or "grid") for restoration on exit
-	lastMouseUpdate     time.Time                       // Last time mouse hover was processed
-	watcher             *focus.Watcher                  // Focus watcher for getting active window
-	timing              frameTiming                     // Cause and start of the next frame, for latency logging
-	placeholders        map[string]image.Image          // Placeholders of windows without a thumbnail, by title
-	keymap              *xproto.GetKeyboardMappingReply // Keyboard mapping of the activation; nil: to be read
-	modmap              *xproto.GetModifierMappingReply // Modifier mapping of the activation; nil: to be read
-	animator            carousel.Animator               // The presenter, when it composes layers (specs/007-animation)
-	step                stepAnimation                   // The step of the carousel in progress
-	rest                restDrawing                     // The frame at rest drawn in the background
-	layers              layerCache                      // Layers the animator holds
-	held                heldFrames                      // Frames the presenter may still read (specs/030-drawing-memory)
-	period              time.Duration                   // Frame period of the monitor of the overlay
-	fade                fadeAnimation                   // The appearance or disappearance in progress
-	hover               hoverAnimation                  // The levels of the hover frames
-	anim                animationOptions                // The animations of the activation (specs/010-animation-options): animated, or none while still
-	animated            animationOptions                // The animations of the configuration
-	still               bool                            // The activation is still: under auto a VNC viewer connected (specs/031-animation-auto), or by the animation key (specs/035-slip-by-frame-rate)
-	animState           animState                       // Animated, off or still
-	animMode            config.AnimationMode            // appearance.animation.enabled
-	forced              int                             // The animation as the animation key left it: forcedNot, forcedOn, forcedOff
-	animKeyDown         bool                            // The animation key pressed while shown, not yet released
-	keyHeld             func(xproto.Keycode) bool       // Whether the server has a key down; nil: asked (keyDown)
-	auto                autoAnimation                   // What decides it under auto
-	deciding            bool                            // The first frame of the activation decides whether it is still
-	frameDue            time.Time                       // When the next frame of an animation is due
-	uploaded            int                             // Bytes uploaded in the pause before that frame
-	animations          int                             // Animations so far, for the frame records
-	mapped              bool                            // The overlay is on the screen
-	chosenAt            time.Time                       // When the event that ended the activation was read
-	live                liveThumbnails                  // The live thumbnails (specs/020-live-thumbnails)
-	locate              locateAnimation                 // The selection frame converging after a switch to the grid (specs/028-grid-locate)
+	keyConfig           keyConfig                          // Configured keybindings
+	modifierPressed     bool                               // Track if primary modifier is currently pressed
+	workspacePressed    bool                               // Track if workspace modifier is currently pressed
+	initialWorkspaceOpt string                             // Initial workspace configuration ("all", "current", "all-except-current")
+	initialLayoutMode   string                             // Initial layout mode ("carousel" or "grid") for restoration on exit
+	lastMouseUpdate     time.Time                          // Last time mouse hover was processed
+	watcher             *focus.Watcher                     // Focus watcher for getting active window
+	timing              frameTiming                        // Cause and start of the next frame, for latency logging
+	placeholders        map[xproto.Window]placeholderImage // Placeholders of windows without a thumbnail, by window
+	keymap              *xproto.GetKeyboardMappingReply    // Keyboard mapping of the activation; nil: to be read
+	modmap              *xproto.GetModifierMappingReply    // Modifier mapping of the activation; nil: to be read
+	animator            carousel.Animator                  // The presenter, when it composes layers (specs/007-animation)
+	step                stepAnimation                      // The step of the carousel in progress
+	rest                restDrawing                        // The frame at rest drawn in the background
+	layers              layerCache                         // Layers the animator holds
+	held                heldFrames                         // Frames the presenter may still read (specs/030-drawing-memory)
+	period              time.Duration                      // Frame period of the monitor of the overlay
+	fade                fadeAnimation                      // The appearance or disappearance in progress
+	hover               hoverAnimation                     // The levels of the hover frames
+	anim                animationOptions                   // The animations of the activation (specs/010-animation-options): animated, or none while still
+	animated            animationOptions                   // The animations of the configuration
+	still               bool                               // The activation is still: under auto a VNC viewer connected (specs/031-animation-auto), or by the animation key (specs/035-slip-by-frame-rate)
+	animState           animState                          // Animated, off or still
+	animMode            config.AnimationMode               // appearance.animation.enabled
+	forced              int                                // The animation as the animation key left it: forcedNot, forcedOn, forcedOff
+	animKeyDown         bool                               // The animation key pressed while shown, not yet released
+	keyHeld             func(xproto.Keycode) bool          // Whether the server has a key down; nil: asked (keyDown)
+	auto                autoAnimation                      // What decides it under auto
+	deciding            bool                               // The first frame of the activation decides whether it is still
+	frameDue            time.Time                          // When the next frame of an animation is due
+	uploaded            int                                // Bytes uploaded in the pause before that frame
+	animations          int                                // Animations so far, for the frame records
+	mapped              bool                               // The overlay is on the screen
+	chosenAt            time.Time                          // When the event that ended the activation was read
+	live                liveThumbnails                     // The live thumbnails (specs/020-live-thumbnails)
+	locate              locateAnimation                    // The selection frame converging after a switch to the grid (specs/028-grid-locate)
 }
 
 // NewSelector creates a new graphical window selector; snap, when not nil, is
@@ -296,13 +295,13 @@ func (s *Selector) UpdateWindows(windows []x11.WindowInfo) {
 	}
 
 	// Keep the placeholders of windows that are still there
-	titles := make(map[string]bool, len(windows))
+	ids := make(map[xproto.Window]bool, len(windows))
 	for _, win := range windows {
-		titles[win.Name] = true
+		ids[win.ID] = true
 	}
-	for title := range s.placeholders {
-		if !titles[title] {
-			delete(s.placeholders, title)
+	for id := range s.placeholders {
+		if !ids[id] {
+			delete(s.placeholders, id)
 		}
 	}
 }
@@ -319,16 +318,38 @@ func (s *Selector) SetHeader(hostname, version string) {
 	s.config.Version = version
 }
 
-// placeholder is the thumbnail of a window that has none, drawn once per title
-func (s *Selector) placeholder(title string) image.Image {
-	if img, ok := s.placeholders[title]; ok {
-		return img
+// placeholderImage is the placeholder of a window and the title it shows
+type placeholderImage struct {
+	title string
+	img   image.Image
+}
+
+// placeholderWidth is the width of a placeholder; its height is in the
+// proportions of the monitor of its window
+const placeholderWidth = 512
+
+// placeholder is the thumbnail of a window that has none, in the proportions
+// of the monitor the window is on, drawn once per window and title
+// (specs/038-carousel-cards)
+func (s *Selector) placeholder(win x11.WindowInfo) image.Image {
+	if p, ok := s.placeholders[win.ID]; ok && p.title == win.Name {
+		return p.img
 	}
-	img := s.renderer.DrawPlaceholder(256, 256, title)
+	w, h := s.config.Width, s.config.Height // the overlay's, without an X connection
+	if s.conn != nil {
+		if m, err := x11.GetMonitorForWindow(s.conn, s.root, win.ID); err == nil && m.Width > 0 && m.Height > 0 {
+			w, h = m.Width, m.Height
+		}
+	}
+	height := placeholderWidth
+	if w > 0 && h > 0 {
+		height = max(1, placeholderWidth*h/w)
+	}
+	img := s.renderer.DrawPlaceholder(placeholderWidth, height, win.Name)
 	if s.placeholders == nil {
-		s.placeholders = make(map[string]image.Image)
+		s.placeholders = make(map[xproto.Window]placeholderImage)
 	}
-	s.placeholders[title] = img
+	s.placeholders[win.ID] = placeholderImage{win.Name, img}
 	return img
 }
 
@@ -860,7 +881,7 @@ func (s *Selector) prepareThumbnails() []image.Image {
 			thumbnails[i] = win.Preview
 		} else {
 			// Use placeholder if no thumbnail available
-			thumbnails[i] = s.placeholder(win.Name)
+			thumbnails[i] = s.placeholder(win)
 		}
 	}
 	return thumbnails
@@ -873,7 +894,7 @@ func (s *Selector) prepareWindowData() []carousel.WindowData {
 		thumbnail := win.Preview
 		if thumbnail == nil {
 			// Use placeholder if no thumbnail available
-			thumbnail = s.placeholder(win.Name)
+			thumbnail = s.placeholder(win)
 		}
 		data[i] = carousel.WindowData{
 			Thumbnail: thumbnail,
@@ -1298,46 +1319,7 @@ func (s *Selector) getWindowIndexAtPosition(mouseX, mouseY int) int {
 
 // getWindowIndexAtPositionCarousel calculates position for carousel layout
 func (s *Selector) getWindowIndexAtPositionCarousel(mouseX, mouseY int) int {
-	centerX := float64(s.config.Width) / 2
-	centerY := float64(s.config.Height) / 2
-
-	// Check each window's position
-	for i := range s.windows {
-		offset := float64(i - s.selectedIndex)
-
-		// Skip windows too far from center
-		if math.Abs(offset) > 5 {
-			continue
-		}
-
-		// Calculate card position and size (same logic as in renderer)
-		var scale, x, y float64
-
-		if math.Abs(offset) < 0.01 {
-			// Central window
-			scale = 1.0
-			x = centerX
-			y = centerY
-		} else {
-			// Side windows
-			scale = s.config.PerspectiveFactor + (1.0-s.config.PerspectiveFactor)/(1.0+math.Abs(offset)*0.5)
-			x = centerX + offset*s.config.Spacing*scale
-			arcHeight := math.Abs(offset) * 10
-			y = centerY + arcHeight
-		}
-
-		// Calculate final dimensions
-		finalW := float64(s.config.ThumbWidth) * scale
-		finalH := float64(s.config.ThumbHeight) * scale
-
-		// Check if mouse is within card bounds
-		if float64(mouseX) >= x-finalW/2 && float64(mouseX) <= x+finalW/2 &&
-			float64(mouseY) >= y-finalH/2 && float64(mouseY) <= y+finalH/2 {
-			return i
-		}
-	}
-
-	return -1
+	return carousel.CarouselIndexAt(s.prepareWindowData(), s.selectedIndex, float64(mouseX), float64(mouseY), s.config)
 }
 
 // wheel scrolls the grid by a row for a press of button 4, up, or 5, down,

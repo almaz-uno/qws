@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"image/draw"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -200,8 +201,9 @@ func Draw3DCarouselWithData(windowData []WindowData, selected int, hoverIndex in
 	}
 	wg.Wait()
 
-	// Draw each window with icon, title, and thumbnail
-	for i := range windowData {
+	// Draw each window with icon, title, and thumbnail, the nearest to the
+	// centre last (specs/038-carousel-cards)
+	for _, i := range carouselOrder(len(windowData), float64(selected)+animOffset) {
 		drawWindowWithData(dc, &windowData[i], i, selected, hoverIndex, animOffset, centerX, centerY, cfg, thumbs[i], icons[i])
 	}
 
@@ -472,10 +474,45 @@ func drawShadow(dc *gg.Context, x, y, w, h, rotation, scale float64, cfg Config)
 	dc.Pop()
 }
 
+// The cards of the carousel (specs/038-carousel-cards). The centre card is
+// at scale 1; the others shrink a little — cardSideScale next to it, then
+// cardFarStep less a card — and overlap: the nearer a card to the centre,
+// the later it is drawn, over the ones beyond it. A side card is placed by its
+// outer edge, so that every card, whatever the proportions of its window,
+// shows a slice of cardSlice of the nominal width beyond the card before it;
+// its icon and its labels are centred on what is seen of it.
+const (
+	cardSideScale = 0.85 // the scale of the cards next to the centre one
+	cardFarStep   = 0.02 // the scale lost by each card further out
+	cardGap       = 24.0 // between the centre card and its neighbours
+	cardSlice     = 0.27 // of a card behind another, the share of the nominal width in view
+	cardIconSize  = 72.0 // the icon of the centre card; the others at the square root of their scale
+	cardMaxOffset = 5    // the cards further from the centre are not drawn
+)
+
+// cardIcon is the size of the icon of a card at scale s
+func cardIcon(s float64) float64 { return cardIconSize * math.Sqrt(s) }
+
+// cardScale is the scale of a card at the distance a ≥ 0 from the centre,
+// in cards
+func cardScale(a float64) float64 {
+	return 1 - (1-cardSideScale)*math.Min(a, 1) - cardFarStep*math.Max(a-1, 0)
+}
+
+// cardOuter is how far from the centre of the overlay the outer edge of a
+// card at the distance a ≥ 0 lies, for cards w wide at scale 1
+func cardOuter(a, w float64) float64 {
+	if a >= 1 {
+		return w/2 + cardGap + cardSideScale*w + (a-1)*cardSlice*w
+	}
+	return a*(w/2+cardGap+cardSideScale*w/2) + cardScale(a)*w/2
+}
+
 // cardGeometry is where the carousel puts the card of a window
 type cardGeometry struct {
 	offset, scale, x, y, alpha, rotation     float64
 	thumbW, thumbH, scaleMin, finalW, finalH float64
+	seenX, seenW                             float64 // the centre and the width of what is seen of the card
 }
 
 // carouselCard computes the geometry of the card of the window at index;
@@ -487,45 +524,80 @@ func carouselCard(data *WindowData, index, selected int, animOffset, centerX, ce
 
 	// Position relative to center (with animation offset)
 	offset := float64(index-selected) - animOffset
-
-	// Don't draw items too far from center (performance optimization)
-	if math.Abs(offset) > 5 {
+	a := math.Abs(offset)
+	if a > cardMaxOffset {
 		return cardGeometry{}, false
 	}
-
-	// Calculate transformation parameters
-	var scale, x, y, alpha, rotation float64
-
-	if math.Abs(offset) < 0.01 {
-		// Central window — full size, no distortion
-		scale = 1.0
-		x = centerX
-		y = centerY
-		alpha = 1.0
-		rotation = 0
-	} else {
-		// Side windows — reduced with perspective
-		scale = cfg.PerspectiveFactor + (1.0-cfg.PerspectiveFactor)/(1.0+math.Abs(offset)*0.5)
-		x = centerX + offset*cfg.Spacing*scale
-		arcHeight := math.Abs(offset) * 10
-		y = centerY + arcHeight
-		alpha = 0.5 + 0.5*scale
-		rotation = 0
+	sign := 1.0
+	if offset < 0 {
+		sign = -1
 	}
 
 	// Calculate thumbnail dimensions
 	thumbBounds := data.Thumbnail.Bounds()
 	thumbW := float64(thumbBounds.Dx())
 	thumbH := float64(thumbBounds.Dy())
-
 	scaleW := float64(cfg.ThumbWidth) / thumbW
 	scaleH := float64(cfg.ThumbHeight) / thumbH
 	scaleMin := math.Min(scaleW, scaleH)
+	baseW := thumbW * scaleMin
 
-	finalW := thumbW * scaleMin * scale
+	scale := cardScale(a)
+	finalW := baseW * scale
 	finalH := thumbH * scaleMin * scale
 
-	return cardGeometry{offset, scale, x, y, alpha, rotation, thumbW, thumbH, scaleMin, finalW, finalH}, true
+	nominal := float64(cfg.ThumbWidth)
+	var mid, left, right float64 // from the centre, outwards
+	if a >= 1 {
+		right = cardOuter(a, nominal)
+		mid = right - finalW/2
+		left = math.Max(right-finalW, cardOuter(a-1, nominal))
+	} else {
+		mid = a * (cardOuter(1, nominal) - cardSideScale*baseW/2)
+		left, right = mid-finalW/2, mid+finalW/2
+	}
+	x := centerX + sign*mid
+	y := centerY
+	alpha := 1.0
+	if a >= 0.01 {
+		alpha = 0.5 + 0.5*scale
+	}
+	if a < 0.01 {
+		x = centerX
+	}
+	return cardGeometry{offset, scale, x, y, alpha, 0, thumbW, thumbH, scaleMin, finalW, finalH,
+		centerX + sign*(left+right)/2, right - left}, true
+}
+
+// carouselOrder is the indices of n cards with the selection at p, in the
+// order they are drawn: the furthest from the centre first
+func carouselOrder(n int, p float64) []int {
+	order := make([]int, n)
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(i, j int) bool {
+		return math.Abs(float64(order[i])-p) > math.Abs(float64(order[j])-p)
+	})
+	return order
+}
+
+// CarouselOrder is carouselOrder for pkg/ui
+func CarouselOrder(n int, p float64) []int { return carouselOrder(n, p) }
+
+// CarouselIndexAt is the window whose card is under the point x, y of the
+// carousel at rest with selected at the centre — the topmost of the cards
+// there —, or -1
+func CarouselIndexAt(windowData []WindowData, selected int, x, y float64, cfg Config) int {
+	order := carouselOrder(len(windowData), float64(selected))
+	for k := len(order) - 1; k >= 0; k-- {
+		i := order[k]
+		card, ok := carouselCard(&windowData[i], i, selected, 0, float64(cfg.Width)/2, float64(cfg.Height)/2, cfg)
+		if ok && math.Abs(x-card.x) <= card.finalW/2 && math.Abs(y-card.y) <= card.finalH/2 {
+			return i
+		}
+	}
+	return -1
 }
 
 // thumbnailMatrix is the matrix drawWindowWithData draws the thumbnail under
@@ -537,18 +609,65 @@ func (c cardGeometry) thumbnailMatrix() gg.Matrix {
 		Translate(-c.thumbW/2, -c.thumbH/2)
 }
 
-// iconMatrix is the matrix drawWindowWithData draws the icon under
+// iconMatrix is the matrix drawWindowWithData draws the icon under: centred
+// on what is seen of the card, its lower third on the thumbnail, as in the
+// grid (specs/037-grid-icons)
 func (c cardGeometry) iconMatrix(icon image.Image) gg.Matrix {
-	iconBounds := icon.Bounds()
-	iconW := float64(iconBounds.Dx())
-	iconH := float64(iconBounds.Dy())
-	iconSize := 48.0 * c.scale
-	iconY := c.y - c.finalH/2 - 80*c.scale
-	iconScale := iconSize / math.Max(iconW, iconH)
-	return gg.Identity().
-		Translate(c.x, iconY).
-		Scale(iconScale, iconScale).
-		Translate(-iconW/2, -iconH/2)
+	x, y, scale, w, h := c.iconPlace(icon)
+	return gg.Identity().Translate(x, y).Scale(scale, scale).Translate(-w/2, -h/2)
+}
+
+// iconPlace is the centre of the icon, its scale and its size in pixels
+func (c cardGeometry) iconPlace(icon image.Image) (x, y, scale, w, h float64) {
+	b := icon.Bounds()
+	w, h = float64(b.Dx()), float64(b.Dy())
+	size := math.Min(cardIcon(c.scale), c.seenW)
+	return c.seenX, c.y - c.finalH/2 - size/6, size / math.Max(w, h), w, h
+}
+
+// cardLabel is a label of a card: a title or a workspace, its text cut to
+// what is seen of the card, centred at x, y on a rounded rectangle
+type cardLabel struct {
+	text                  string
+	size                  float64 // of the font
+	x, y, padding, radius float64
+}
+
+// labels are the title and the workspace of the card under its thumbnail;
+// an empty text for none
+func (c cardGeometry) labels(data *WindowData, cfg Config) (title, workspace cardLabel) {
+	title = cardLabel{size: float64(cfg.FontSize) * c.scale * 1.15, x: c.seenX, y: c.y + c.finalH/2 + 28*c.scale, padding: 8 * c.scale, radius: 6 * c.scale}
+	workspace = cardLabel{size: float64(cfg.FontSize) * c.scale, x: c.seenX, y: title.y + 34*c.scale, padding: 6 * c.scale, radius: 4 * c.scale}
+	if t := strings.TrimSpace(data.Title); t != "" {
+		if face := cfg.face(title.size); face != nil {
+			title.text = truncateTitle(t, c.seenW-2*title.padding, face)
+		}
+	}
+	if data.Workspace != "" {
+		if face := cfg.face(workspace.size); face != nil {
+			workspace.text = truncateTitle(data.Workspace, c.seenW-2*workspace.padding, face)
+		}
+	}
+	return title, workspace
+}
+
+// drawLabel draws a label on its background of colour bg at the opacity
+// bgAlpha, its text at textAlpha
+func drawLabel(dc *gg.Context, l cardLabel, bg string, bgAlpha, textAlpha float64, cfg Config) {
+	if l.text == "" {
+		return
+	}
+	face := cfg.face(l.size)
+	if face == nil {
+		return
+	}
+	dc.SetFontFace(face)
+	textWidth, textHeight := dc.MeasureString(l.text)
+	setColor(dc, bg, bgAlpha)
+	dc.DrawRoundedRectangle(l.x-textWidth/2-l.padding, l.y-textHeight/2-l.padding, textWidth+l.padding*2, textHeight+l.padding*2, l.radius)
+	dc.Fill()
+	setColor(dc, cfg.TextColor, textAlpha)
+	dc.DrawStringAnchored(l.text, l.x, l.y, 0.5, 0.5)
 }
 
 // drawWindowWithData draws a window with icon, title, and thumbnail; thumb and
@@ -562,16 +681,6 @@ func drawWindowWithData(dc *gg.Context, data *WindowData, index, selected, hover
 	offset, scale, x, y, alpha, rotation := card.offset, card.scale, card.x, card.y, card.alpha, card.rotation
 	thumbW, thumbH, scaleMin, finalW, finalH := card.thumbW, card.thumbH, card.scaleMin, card.finalW, card.finalH
 
-	// Icon size and position
-	iconSize := 48.0 * scale
-	iconY := y - finalH/2 - 80*scale // Above thumbnail
-
-	// Title position
-	titleY := y - finalH/2 - 30*scale // Between icon and thumbnail
-
-	// Workspace position
-	workspaceY := y + finalH/2 + 30*scale // Below thumbnail
-
 	dc.Push()
 
 	// Draw shadow
@@ -579,120 +688,17 @@ func drawWindowWithData(dc *gg.Context, data *WindowData, index, selected, hover
 		drawShadow(dc, x, y, finalW, finalH, rotation, scale, cfg)
 	}
 
-	// Draw icon (if available)
-	if data.Icon != nil {
-		iconBounds := data.Icon.Bounds()
-		iconW := float64(iconBounds.Dx())
-		iconH := float64(iconBounds.Dy())
-		iconScale := iconSize / math.Max(iconW, iconH)
-
-		dc.Push()
-		dc.Translate(x, iconY)
-		dc.Scale(iconScale, iconScale)
-		dc.Translate(-iconW/2, -iconH/2)
-		dc.SetRGBA(1, 1, 1, alpha)
-		if icon == nil || !icon.drawTo(dc.Image().(*image.RGBA)) {
-			dc.DrawImage(data.Icon, 0, 0)
-		}
-		dc.Pop()
+	// The title and the workspace under the thumbnail
+	title, workspace := card.labels(data, cfg)
+	bg := cfg.BackgroundColor
+	if data.Urgent {
+		bg = cfg.UrgentTitleBackground
 	}
-
-	// Draw title (if available)
-	if data.Title != "" {
-		fontSize := float64(cfg.FontSize) * scale * 1.15 // Slightly larger than configured size
-		// Load multi-fallback font face
-		fallbackFace := cfg.face(fontSize)
-		if fallbackFace == nil {
-			// Skip text rendering if no font available
-			goto skipTitle
-		}
-		defer fallbackFace.Close()
-		dc.SetFontFace(fallbackFace)
-		{
-			title := strings.TrimSpace(data.Title)
-			// Truncate long titles by runes (Unicode characters), not bytes
-			maxLen := max(int(30/scale), 10)
-			runes := []rune(title)
-			if len(runes) > maxLen {
-				title = string(runes[:maxLen]) + "..."
-			}
-
-			// Measure text to draw background
-			textWidth, textHeight := dc.MeasureString(title)
-			padding := 8.0 * scale
-			borderRadius := 6.0 * scale
-
-			// Choose background color based on urgency
-			bgColor := cfg.BackgroundColor
-			if data.Urgent {
-				bgColor = cfg.UrgentTitleBackground
-			}
-
-			// Draw semi-transparent background
-			setColor(dc, bgColor, 0.7*alpha)
-			dc.DrawRoundedRectangle(
-				x-textWidth/2-padding,
-				titleY-textHeight/2-padding,
-				textWidth+padding*2,
-				textHeight+padding*2,
-				borderRadius,
-			)
-			dc.Fill()
-
-			// Draw title text
-			setColor(dc, cfg.TextColor, alpha)
-			dc.DrawStringAnchored(title, x, titleY, 0.5, 0.5)
-		}
-	}
-skipTitle:
-
-	// Draw workspace name (if available)
-	if data.Workspace != "" {
-		fontSize := float64(cfg.FontSize) * scale
-		// Load multi-fallback font face
-		fallbackFace := cfg.face(fontSize)
-		if fallbackFace == nil {
-			// Skip workspace rendering if no font available
-			goto skipWorkspace
-		}
-		defer fallbackFace.Close()
-		dc.SetFontFace(fallbackFace)
-		{
-			workspace := data.Workspace
-			// Truncate long workspace names
-			maxLen := int(20 / scale)
-			if maxLen < 8 {
-				maxLen = 8
-			}
-			runes := []rune(workspace)
-			if len(runes) > maxLen {
-				workspace = string(runes[:maxLen]) + "..."
-			}
-
-			// Measure text to draw background
-			textWidth, textHeight := dc.MeasureString(workspace)
-			padding := 6.0 * scale
-			borderRadius := 4.0 * scale
-
-			// Draw semi-transparent background using inactive frame color
-			setColor(dc, cfg.InactiveFrame, 0.6*alpha)
-			dc.DrawRoundedRectangle(
-				x-textWidth/2-padding,
-				workspaceY-textHeight/2-padding,
-				textWidth+padding*2,
-				textHeight+padding*2,
-				borderRadius,
-			)
-			dc.Fill()
-
-			// Draw workspace text
-			setColor(dc, cfg.TextColor, alpha*0.9)
-			dc.DrawStringAnchored(workspace, x, workspaceY, 0.5, 0.5)
-		}
-	}
-skipWorkspace:
+	drawLabel(dc, title, bg, 0.7*alpha, alpha, cfg)
+	drawLabel(dc, workspace, cfg.InactiveFrame, 0.6*alpha, alpha*0.9, cfg)
 
 	// Draw thumbnail
+	dc.Push()
 	dc.Translate(x, y)
 	dc.Rotate(rotation)
 	dc.Scale(scaleMin*scale, scaleMin*scale)
@@ -708,7 +714,6 @@ skipWorkspace:
 	dc.SetLineWidth(2.0 / (scaleMin * scale))
 	dc.DrawRectangle(0, 0, thumbW, thumbH)
 	dc.Stroke()
-
 	dc.Pop()
 
 	// Highlight selected item
@@ -720,6 +725,22 @@ skipWorkspace:
 	if index == hoverIndex && hoverIndex != selected {
 		drawHoverIndicator(dc, x, y, finalW, finalH, cfg)
 	}
+
+	// The icon over all of it
+	if data.Icon != nil {
+		dc.Push()
+		ix, iy, is, iw, ih := card.iconPlace(data.Icon)
+		dc.Translate(ix, iy)
+		dc.Scale(is, is)
+		dc.Translate(-iw/2, -ih/2)
+		dc.SetRGBA(1, 1, 1, alpha)
+		if icon == nil || !icon.drawTo(dc.Image().(*image.RGBA)) {
+			dc.DrawImage(data.Icon, 0, 0)
+		}
+		dc.Pop()
+	}
+
+	dc.Pop()
 }
 
 // drawSelectionIndicator draws a highlight around selected thumbnail

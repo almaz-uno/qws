@@ -125,16 +125,17 @@ func TestLiveFrames(t *testing.T) {
 	p := &fakePresenter{}
 	s.live = liveThumbnails{snap: src, presenter: p, atom: 77, drawn: map[xproto.Window]uint64{}}
 
-	// The cards come into view, without pictures: those at offsets -2 to 3
-	// reach into the frame of 1260, the one at 4 does not
+	// The cards come into view, without pictures: those at offsets -2 to 4
+	// reach into the frame of 1260 — the cards overlap
+	// (specs/038-carousel-cards)
 	s.liveBegin()
 	s.liveEnd(time.Now())
 	shown := map[xproto.Window]bool{}
 	for _, id := range src.shown {
 		shown[id] = true
 	}
-	if len(shown) != 6 || shown[16] {
-		t.Errorf("the windows in view %v, want 10 to 15", src.shown)
+	if len(shown) != 7 {
+		t.Errorf("the windows in view %v, want 10 to 16", src.shown)
 	}
 	first := src.shown
 	inView := time.Now().Add(-30 * time.Millisecond)
