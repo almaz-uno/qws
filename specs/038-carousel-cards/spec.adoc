@@ -1,0 +1,145 @@
+= 038 — the cards of the carousel
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-11-01
+:status: implemented
+:issue: 112
+
+== What and why
+
+The carousel puts the selected card in the middle at scale 1 and the others
+beside it at `perspective + (1 − perspective)/(1 + 0.5·|k|)` — 0.87, 0.80,
+0.76 with the default 0.6 —, `spacing` times the scale apart, not
+overlapping. With the author's 512-px thumbnails and spacing of 600 on the
+2520-px overlay of ws1 it shows five cards whole and two cut. The icon is
+48 px times the scale, above the title, above the thumbnail.
+
+The author, 2026-11-01: they look at the icons more than at the thumbnails;
+make the carousel as the grid (037) — the side cards shrunk little, more
+windows at once, the main icon as in the grid, the others shrunk little.
+And a window that has no thumbnail yet gets one in the proportions of the
+screen it is on, not a square.
+
+The variants were tried on the author's desktop on ws1, a build of the
+branch on Alt+F11 beside the service:
+
+[cols="1,5,3"]
+|===
+| | Variant | The author
+
+| A | cards overlapping; the icons on an arc, cardArc·k² lower, each card
+  hanging from its icon | "выглядит плохо"
+| B | A, the cards centred, the icon in the centre of the thumbnail | "норм"
+| C | B, the icon 8 px above its card | —
+| D | B, the icons on an arc above the box of the thumbnails, apart from
+  them | —
+| E | B, the icon as in the grid, its lower third on the thumbnail | "норм",
+  taken
+|===
+
+The specification is a delta to `develop` at `3c8605a` (1.8.0). Unchanged:
+the grid; the selection, hover and shadow of a card; the steps, their
+animation and the live thumbnails, but for the order of the cards (D3).
+
+== Decisions
+
+D1, D2, D4 and D5 the author's, 2026-11-01; D3, D6 and D7 made in the
+specification.
+
+D1 (the author's). *Shrunk little.* The centre card at scale 1, its
+neighbours at 0.85, each card further 0.02 less: 0.83, 0.81, 0.79, 0.77
+at the fifth. Before: 0.87, 0.80, 0.76, 0.73, 0.71.
+
+D2 (the author's). *Overlapping.* The neighbours of the centre card are
+24 px from it; each card further lies under the one before it, nearer the
+centre, and shows 0.27 of the nominal width — `appearance.thumbnail.width`
+— beyond it. A side card is placed by its outer edge, so that a narrow
+window shows that slice too. On ws1 (512 px, 2520 px): 138 px a card,
+eleven cards in view, the fifth cut by 8 px; before, five whole and two
+cut.
+
+D3. *The nearest on top.* The cards are drawn from the furthest from the
+centre to the centre one, on the CPU and in the scenes of the presenter;
+the mouse picks the topmost card under it; the holes of a live thumbnail
+at rest are where its own icon and the cards drawn after it lie.
+
+D4 (the author's). *The icons as in the grid.* The icon of a card is
+72 px times the square root of its scale — 72 in the middle, 66 to 63
+beside it —, centred on what is seen of the card, its lower third on the
+thumbnail; drawn after the thumbnail and the frames. The title and the
+workspace go under the thumbnail, centred on what is seen of the card and
+cut to its width.
+
+D5 (the author's). *The placeholder in the proportions of the monitor.* A
+window without a thumbnail gets a placeholder 512 px wide, as high as the
+monitor it lies most on makes it — the monitor under the pointer when its
+place is unknown, the overlay without an X connection —, kept by window,
+drawn anew when its title changes. Before: a square of 256, kept by title.
+
+D6. *The cards centred.* Every card is centred on the middle of the
+overlay, no arc: the icons of windows of different proportions stand at
+different heights.
+
+D7. *Two keys no longer used.* `appearance.spacing` and
+`appearance.perspective`, their flags and variables are read as before —
+files that set them stay valid — but do not change the carousel; the
+documentation says so. `Draw3DCarousel`, the carousel of thumbnails alone
+no part of qws calls, keeps them as it is.
+
+== Acceptance criteria
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| The scenes: the carousel scenes of `TestScenes` and `TestScenesOnGarbage`
+  change; every grid scene stays byte for byte.
+
+| K2
+| The live thumbnails: `TestLiveThumbnails` — the live pixels of the
+  carousel at rest equal to the cpu frame with the holes of D3;
+  `TestLiveFrames` — the cards of offsets −2 to 4 in view of 1260 px.
+
+| K3
+| The layers: `TestLayers`, `TestGLXPresenterMatchesCPU` pass with the order
+  of D3.
+
+| K4
+| The README: `make readme-images` redraws `carousel.png` and `qws.webp`;
+  `grid.png` comes out byte for byte the same.
+
+| K5
+| `go build ./...`, `gofmt -l` empty, `go vet ./...`, `make check-specs`,
+  `go test ./...`.
+
+| K6
+| The author's trial on ws1: their windows in the carousel as D1–D6 put
+  them.
+|===
+
+== Results
+
+Off the screen: the tests on ws1, in the clone of the branch. On the
+desktop: the author's trial on ws1 on 2026-11-01, 23:20–23:45, the builds
+of the variants on Alt+F11 beside the service.
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | Met. 17 carousel scenes change; every grid scene is byte for byte.
+| K2 | Met. `TestLiveThumbnails` passes; `TestLiveFrames` with the cards of
+  offsets −2 to 4 — the one at 4 was out of view before.
+| K3 | Met.
+| K4 | Met. `carousel.png` and `qws.webp` redrawn, `grid.png` the same.
+| K5 | Met.
+| K6 | Met. The author on variant E: "норм".
+|===
+
+== Open decisions
+
+None. Left as found: in a scene — a step under way — the live thumbnail of
+a card is drawn over its card, without holes, and covers the lower third of
+its own icon until the step ends; at rest it does not.
