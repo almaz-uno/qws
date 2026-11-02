@@ -1,0 +1,95 @@
+= 039 — the row of the carousel
+:toc: left
+:toc-title: Contents
+:sectnums:
+:revdate: 2026-11-02
+:status: draft
+:issue: 115
+
+== What and why
+
+Since 1.9.0 (038) the cards of the carousel overlap: the neighbours of the
+centre card at 0.85, each further card 0.02 less, under the one before it,
+0.27 of the nominal width in view; the icon of a card, 72 px times the
+square root of its scale, lies with its lower third on the thumbnail.
+
+The author, 2026-11-02: the carousel flickers; the overlapping thumbnails do
+not look well — put the icon higher, drop the overlap, maybe shrink the
+side cards more. The flicker is of the icons: in a frame of a step the live
+thumbnail of a card is drawn over its card without holes and covers the
+lower third of its own icon, which the frame at rest, with its holes,
+shows again — every icon of the eleven in view, on every step.
+
+The variants were tried on the author's desktop on ws2, a build of the
+branch on Alt+F11 and Alt+F8 beside the service:
+
+[cols="1,5,3"]
+|===
+| | Variant | The author
+
+| A | cards in a row, 24 px apart, the icon 8 px above the thumbnail, a card
+  a cards from the centre at 0.8^a^ | —
+| B | A at 0.7^a^ | "F8 лучше", taken
+|===
+
+The specification is a delta to `develop` at `2595884` (1.9.0). Unchanged:
+the grid; the size of the icons, the labels under the thumbnail, the
+placeholder in the proportions of the monitor (D5 of 038); the selection,
+hover and shadow of a card; the steps, their animation, the live
+thumbnails; the order of drawing the cards, nearest last (D3 of 038), now
+of no consequence.
+
+== Decisions
+
+D1 and D2 the author's, 2026-11-02; D3 made in the specification.
+
+D1 (the author's). *A row.* The cards do not overlap: card j ≥ 1 from the
+centre stands with its nominal width — `appearance.thumbnail.width` at its
+scale — 24 px beyond that of card j − 1, its card centred in it. A card
+between two places moves straight from one to the other.
+
+D2 (the author's). *Shrunk by 0.7 a card.* The card a cards from the centre
+is at the scale 0.7^a^: 0.70, 0.49, 0.34, 0.24, 0.17. On ws1 (512 px,
+2520 px) nine cards whole, the tenth and eleventh out of view; on 1.9.0
+eleven overlapping.
+
+D3. *The icon above the thumbnail.* The icon of a card, of the size of 038,
+centred across the card, 8 px above the top of its thumbnail; the flicker
+goes with it: no live thumbnail reaches an icon.
+
+== Acceptance criteria
+
+[cols="1,6"]
+|===
+| # | Criterion and method
+
+| K1
+| The scenes: the carousel scenes of `TestScenes` and `TestScenesOnGarbage`
+  change; every grid scene stays byte for byte.
+
+| K2
+| The live thumbnails: `TestLiveThumbnails`, `TestLiveFrames` pass.
+
+| K3
+| The layers: `TestLayers`, `TestGLXPresenterMatchesCPU` pass.
+
+| K4
+| The README: `make readme-images` redraws `carousel.png` and `qws.webp`;
+  `grid.png` comes out byte for byte the same.
+
+| K5
+| `go build ./...`, `gofmt -l` empty, `go vet ./...`, `make check-specs`,
+  `go test ./...`.
+
+| K6
+| The author's trial on ws2: their windows in the carousel as D1–D3 put
+  them, no flicker of the icons.
+|===
+
+== Results
+
+To be filled.
+
+== Open decisions
+
+None.
