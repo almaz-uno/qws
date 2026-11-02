@@ -191,11 +191,11 @@ keybindings:
 
 | `Spacing`
 | 300
-| Distance between carousel items
+| Not used since 1.9.0: the carousel places its cards by their width, overlapping (specification 038)
 
 | `PerspectiveFactor`
 | 0.6
-| Depth of perspective effect (0.0–1.0)
+| Not used since 1.9.0, as `Spacing`
 
 | `ShadowOffset`
 | 10
@@ -465,14 +465,14 @@ log:
 | `QWS_APPEARANCE_SPACING`
 | `float`
 | `300`
-| Distance between carousel items
+| Not used since 1.9.0: the carousel places its cards by their width, overlapping (specification 038); still read, so old files stay valid
 
 | `appearance.perspective`
 | `--appearance-perspective`
 | `QWS_APPEARANCE_PERSPECTIVE`
 | `float`
 | `0.6`
-| Perspective effect factor (0.0-1.0)
+| Not used since 1.9.0, as `appearance.spacing`
 
 | `appearance.grid.min_thumbnail_width`
 | `--appearance-grid-min-thumbnail-width`
@@ -1040,8 +1040,8 @@ qws -t dark --appearance-colors-dark-selection-frame="#ff6b6b"
 # Configure fonts
 qws --appearance-font-primary=/path/to/font.ttf --appearance-font-size=16
 
-# Adjust shadow and perspective
-qws --appearance-shadow-offset=15 --appearance-shadow-blur=20 --appearance-perspective=0.7
+# Adjust the shadow
+qws --appearance-shadow-offset=15 --appearance-shadow-blur=20
 
 # Auto-detect theme (default)
 qws -t auto

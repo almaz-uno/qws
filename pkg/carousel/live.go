@@ -3,7 +3,6 @@ package carousel
 import (
 	"image"
 	"math"
-	"strings"
 
 	"github.com/fogleman/gg"
 	"golang.org/x/image/font"
@@ -80,17 +79,28 @@ func CardLive(windowData []WindowData, index int, offset float64, cfg Config) (L
 
 // CarouselLive is the live item, but its texture, of every card of the
 // carousel at rest with selected at the centre and hover hovered, by window;
-// a zero item where a card has none. Its holes are where the cards drawn after
-// it draw over its live rectangle.
+// a zero item where a card has none. Its holes are where its own icon and the
+// cards drawn after it — those nearer the centre (specs/038-carousel-cards) —
+// draw over its live rectangle.
 func CarouselLive(windowData []WindowData, selected, hover int, cfg Config) []LiveItem {
 	items := make([]LiveItem, len(windowData))
+	canvas := image.Rect(0, 0, cfg.Width, cfg.Height)
 	for k := range windowData {
 		items[k], _ = CardLive(windowData, k, float64(k-selected), cfg)
+		if icon := windowData[k].Icon; icon != nil {
+			if card, ok := carouselCard(&windowData[k], k, selected, 0, float64(cfg.Width)/2, float64(cfg.Height)/2, cfg); ok {
+				_, r := placement(canvas, card.iconMatrix(icon), icon)
+				items[k].Holes = appendHoles(items[k].Holes, items[k].Rect, []image.Rectangle{r})
+			}
+		}
 	}
-	for j := range windowData {
+	order := carouselOrder(len(windowData), float64(selected))
+	for n, j := range order {
 		covers := cardCover(windowData, j, selected, hover, cfg)
-		for k := 0; k < j && len(covers) > 0; k++ {
-			items[k].Holes = appendHoles(items[k].Holes, items[k].Rect, covers)
+		for _, k := range order[:n] {
+			if len(covers) > 0 {
+				items[k].Holes = appendHoles(items[k].Holes, items[k].Rect, covers)
+			}
 		}
 	}
 	return items
@@ -227,7 +237,7 @@ func cardCover(windowData []WindowData, index, selected, hover int, cfg Config) 
 		return nil
 	}
 	canvas := image.Rect(0, 0, cfg.Width, cfg.Height)
-	x, y, scale, w, h := card.x, card.y, card.scale, card.finalW, card.finalH
+	x, y, w, h := card.x, card.y, card.finalW, card.finalH
 	var covers []image.Rectangle
 	if math.Abs(card.offset) < 3 {
 		covers = append(covers, roundOut(x+cfg.ShadowOffset-w/2, y+cfg.ShadowOffset-h/2, w, h, coverMargin))
@@ -236,24 +246,13 @@ func cardCover(windowData []WindowData, index, selected, hover int, cfg Config) 
 		_, r := placement(canvas, card.iconMatrix(data.Icon), data.Icon)
 		covers = append(covers, r)
 	}
-	if data.Title != "" {
-		if face := cfg.face(float64(cfg.FontSize) * scale * 1.15); face != nil {
-			title := strings.TrimSpace(data.Title)
-			maxLen := max(int(30/scale), 10)
-			if runes := []rune(title); len(runes) > maxLen {
-				title = string(runes[:maxLen]) + "..."
-			}
-			covers = append(covers, labelCover(face, title, x, y-h/2-30*scale, 8*scale)...)
+	title, workspace := card.labels(data, cfg)
+	for _, l := range []cardLabel{title, workspace} {
+		if l.text == "" {
+			continue
 		}
-	}
-	if data.Workspace != "" {
-		if face := cfg.face(float64(cfg.FontSize) * scale); face != nil {
-			workspace := data.Workspace
-			maxLen := max(int(20/scale), 8)
-			if runes := []rune(workspace); len(runes) > maxLen {
-				workspace = string(runes[:maxLen]) + "..."
-			}
-			covers = append(covers, labelCover(face, workspace, x, y+h/2+30*scale, 6*scale)...)
+		if face := cfg.face(l.size); face != nil {
+			covers = append(covers, labelCover(face, l.text, l.x, l.y, l.padding)...)
 		}
 	}
 	// The thumbnail with its border, and the frames around it

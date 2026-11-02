@@ -956,7 +956,8 @@ func (s *Selector) carouselItems(now time.Time) []carousel.SceneItem {
 	}
 	data := s.prepareWindowData()
 	var items []carousel.SceneItem
-	for k := range s.windows {
+	// The nearest to the centre last, over the others (specs/038-carousel-cards)
+	for _, k := range carousel.CarouselOrder(len(s.windows), p) {
 		o := float64(k) - p
 		x, y, scale, ok := carousel.CardCenter(data, k, o, s.config)
 		if !ok {

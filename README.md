@@ -93,13 +93,15 @@ The modifier, the key, `q`, `a` and the rest are configurable
 
 <table>
   <tr>
-    <td><img src="doc/images/carousel.png" alt="The carousel: the selected window in the middle, the others in perspective"></td>
+    <td><img src="doc/images/carousel.png" alt="The carousel: the selected window in the middle, the others overlapping beside it"></td>
     <td><img src="doc/images/grid.png" alt="The grid: every window at once, the selection frame on one tile"></td>
   </tr>
 </table>
 
-- **Two layouts.** A Cover Flow–like carousel in perspective, the
-  selection in the middle; a grid of every window at once.
+- **Two layouts.** A Cover Flow–like carousel, the selection in the
+  middle and the cards beside it overlapping, eleven windows at once; a
+  grid of every window at once. The icon of a window lies large on the
+  top of its thumbnail in both.
 - **Most recently used first,** as Alt+Tab should be.
 - **Thumbnails of every visible window,** averaged on the GPU, kept
   current as windows change. Windows the window manager draws into their
