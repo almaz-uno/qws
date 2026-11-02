@@ -191,7 +191,7 @@ keybindings:
 
 | `Spacing`
 | 300
-| Not used since 1.9.0: the carousel places its cards by their width, overlapping (specification 038)
+| Not used since 1.9.0: the carousel places its cards by their width (specifications 038 and 039)
 
 | `PerspectiveFactor`
 | 0.6
@@ -465,7 +465,7 @@ log:
 | `QWS_APPEARANCE_SPACING`
 | `float`
 | `300`
-| Not used since 1.9.0: the carousel places its cards by their width, overlapping (specification 038); still read, so old files stay valid
+| Not used since 1.9.0: the carousel places its cards by their width (specifications 038 and 039); still read, so old files stay valid
 
 | `appearance.perspective`
 | `--appearance-perspective`

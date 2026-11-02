@@ -474,19 +474,16 @@ func drawShadow(dc *gg.Context, x, y, w, h, rotation, scale float64, cfg Config)
 	dc.Pop()
 }
 
-// The cards of the carousel (specs/038-carousel-cards). The centre card is
-// at scale 1; the others shrink a little — cardSideScale next to it, then
-// cardFarStep less a card — and overlap: the nearer a card to the centre,
-// the later it is drawn, over the ones beyond it. A side card is placed by its
-// outer edge, so that every card, whatever the proportions of its window,
-// shows a slice of cardSlice of the nominal width beyond the card before it;
-// its icon and its labels are centred on what is seen of it.
+// The cards of the carousel (specs/039-carousel-row). The centre card is at
+// scale 1, a card a cards from it at cardRatio^a; the cards stand in a row,
+// cardGap apart in their nominal widths, and do not overlap. A card between
+// two places moves straight from one to the other. The icon of a card stands
+// above its thumbnail, centred across it.
 const (
-	cardSideScale = 0.85 // the scale of the cards next to the centre one
-	cardFarStep   = 0.02 // the scale lost by each card further out
-	cardGap       = 24.0 // between the centre card and its neighbours
-	cardSlice     = 0.27 // of a card behind another, the share of the nominal width in view
+	cardRatio     = 0.7  // the scale a card keeps of the scale of the one before it
+	cardGap       = 24.0 // between the nominal widths of two cards
 	cardIconSize  = 72.0 // the icon of the centre card; the others at the square root of their scale
+	cardIconGap   = 8.0  // between the icon and the top of its thumbnail
 	cardMaxOffset = 5    // the cards further from the centre are not drawn
 )
 
@@ -495,17 +492,17 @@ func cardIcon(s float64) float64 { return cardIconSize * math.Sqrt(s) }
 
 // cardScale is the scale of a card at the distance a ≥ 0 from the centre,
 // in cards
-func cardScale(a float64) float64 {
-	return 1 - (1-cardSideScale)*math.Min(a, 1) - cardFarStep*math.Max(a-1, 0)
-}
+func cardScale(a float64) float64 { return math.Pow(cardRatio, a) }
 
-// cardOuter is how far from the centre of the overlay the outer edge of a
-// card at the distance a ≥ 0 lies, for cards w wide at scale 1
-func cardOuter(a, w float64) float64 {
-	if a >= 1 {
-		return w/2 + cardGap + cardSideScale*w + (a-1)*cardSlice*w
+// cardPlace is how far from the centre of the overlay the centre of the card
+// at the integer distance j ≥ 0 lies, for cards w wide at scale 1, in whole
+// pixels
+func cardPlace(j int, w float64) float64 {
+	c := 0.0
+	for i := 1; i <= j; i++ {
+		c += (cardScale(float64(i-1))+cardScale(float64(i)))*w/2 + cardGap
 	}
-	return a*(w/2+cardGap+cardSideScale*w/2) + cardScale(a)*w/2
+	return math.Round(c)
 }
 
 // cardGeometry is where the carousel puts the card of a window
@@ -547,15 +544,9 @@ func carouselCard(data *WindowData, index, selected int, animOffset, centerX, ce
 	finalH := thumbH * scaleMin * scale
 
 	nominal := float64(cfg.ThumbWidth)
-	var mid, left, right float64 // from the centre, outwards
-	if a >= 1 {
-		right = cardOuter(a, nominal)
-		mid = right - finalW/2
-		left = math.Max(right-finalW, cardOuter(a-1, nominal))
-	} else {
-		mid = a * (cardOuter(1, nominal) - cardSideScale*baseW/2)
-		left, right = mid-finalW/2, mid+finalW/2
-	}
+	j := math.Floor(a)
+	c0 := cardPlace(int(j), nominal)
+	mid := c0 + (a-j)*(cardPlace(int(j)+1, nominal)-c0)
 	x := centerX + sign*mid
 	y := centerY
 	alpha := 1.0
@@ -566,7 +557,7 @@ func carouselCard(data *WindowData, index, selected int, animOffset, centerX, ce
 		x = centerX
 	}
 	return cardGeometry{offset, scale, x, y, alpha, 0, thumbW, thumbH, scaleMin, finalW, finalH,
-		centerX + sign*(left+right)/2, right - left}, true
+		x, finalW}, true
 }
 
 // carouselOrder is the indices of n cards with the selection at p, in the
@@ -610,8 +601,7 @@ func (c cardGeometry) thumbnailMatrix() gg.Matrix {
 }
 
 // iconMatrix is the matrix drawWindowWithData draws the icon under: centred
-// on what is seen of the card, its lower third on the thumbnail, as in the
-// grid (specs/037-grid-icons)
+// across the card, above its thumbnail (specs/039-carousel-row)
 func (c cardGeometry) iconMatrix(icon image.Image) gg.Matrix {
 	x, y, scale, w, h := c.iconPlace(icon)
 	return gg.Identity().Translate(x, y).Scale(scale, scale).Translate(-w/2, -h/2)
@@ -622,7 +612,7 @@ func (c cardGeometry) iconPlace(icon image.Image) (x, y, scale, w, h float64) {
 	b := icon.Bounds()
 	w, h = float64(b.Dx()), float64(b.Dy())
 	size := math.Min(cardIcon(c.scale), c.seenW)
-	return c.seenX, c.y - c.finalH/2 - size/6, size / math.Max(w, h), w, h
+	return c.seenX, c.y - c.finalH/2 - cardIconGap - size/2, size / math.Max(w, h), w, h
 }
 
 // cardLabel is a label of a card: a title or a workspace, its text cut to
@@ -633,11 +623,25 @@ type cardLabel struct {
 	x, y, padding, radius float64
 }
 
+// half is half the height of the background of a label of one line
+func (l cardLabel) half(cfg Config) float64 {
+	face := cfg.face(l.size)
+	if face == nil {
+		return l.padding
+	}
+	return float64(face.Metrics().Height)/64/2 + l.padding
+}
+
 // labels are the title and the workspace of the card under its thumbnail;
 // an empty text for none
 func (c cardGeometry) labels(data *WindowData, cfg Config) (title, workspace cardLabel) {
-	title = cardLabel{size: float64(cfg.FontSize) * c.scale * 1.15, x: c.seenX, y: c.y + c.finalH/2 + 28*c.scale, padding: 8 * c.scale, radius: 6 * c.scale}
-	workspace = cardLabel{size: float64(cfg.FontSize) * c.scale, x: c.seenX, y: title.y + 34*c.scale, padding: 6 * c.scale, radius: 4 * c.scale}
+	title = cardLabel{size: float64(cfg.FontSize) * c.scale * 1.15, x: c.seenX, padding: 8 * c.scale, radius: 6 * c.scale}
+	workspace = cardLabel{size: float64(cfg.FontSize) * c.scale, x: c.seenX, padding: 6 * c.scale, radius: 4 * c.scale}
+	// 28 and 34 px at scale 1; on the smallest cards no less than keeps the
+	// backgrounds off the thumbnail and off each other (specs/039-carousel-row)
+	th, wh := title.half(cfg), workspace.half(cfg)
+	title.y = c.y + c.finalH/2 + math.Max(28*c.scale, th+2)
+	workspace.y = title.y + math.Max(34*c.scale, th+wh+2)
 	if t := strings.TrimSpace(data.Title); t != "" {
 		if face := cfg.face(title.size); face != nil {
 			title.text = truncateTitle(t, c.seenW-2*title.padding, face)
@@ -711,7 +715,7 @@ func drawWindowWithData(dc *gg.Context, data *WindowData, index, selected, hover
 
 	// Draw border around thumbnail
 	dc.SetRGBA(1, 1, 1, alpha*0.8)
-	dc.SetLineWidth(2.0 / (scaleMin * scale))
+	dc.SetLineWidth(2 * cardBorderHalf(card))
 	dc.DrawRectangle(0, 0, thumbW, thumbH)
 	dc.Stroke()
 	dc.Pop()

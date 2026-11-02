@@ -47,17 +47,15 @@ type LivePresenter interface {
 }
 
 // tileBorderHalf is the half width of the border of a tile's thumbnail, 1 px
-// wide. The border of a card's is 2 px wide in the units of the thumbnail
-// drawn at full size: gg strokes a path in pixels of the canvas, whatever the
-// matrix, and drawWindowWithData divides the width by the scale it draws the
-// thumbnail at (cardBorderHalf).
+// wide. The border of a card's is 2 px wide in pixels of the canvas, at any
+// scale: gg strokes a path in pixels of the canvas, whatever the matrix. Until
+// 039 drawWindowWithData divided the width by the scale it draws the
+// thumbnail at, some 12 px on a card at 0.17 (specs/039-carousel-row).
 const tileBorderHalf = 0.5
 
 // cardBorderHalf is the half width, in pixels of the frame, of the border of
 // the thumbnail of a card
-func cardBorderHalf(card cardGeometry) float64 {
-	return 1 / (card.scaleMin * card.scale)
-}
+func cardBorderHalf(cardGeometry) float64 { return 1 }
 
 // coverMargin is how far around what a card draws its cover reaches, for the
 // antialiasing of fills and strokes and the resampling of glyphs
