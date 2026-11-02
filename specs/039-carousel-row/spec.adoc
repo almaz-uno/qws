@@ -41,7 +41,7 @@ of no consequence.
 
 == Decisions
 
-D1 and D2 the author's, 2026-11-02; D3 made in the specification.
+D1 and D2 the author's, 2026-11-02; D3–D5 made in the specification.
 
 D1 (the author's). *A row.* The cards do not overlap: card j ≥ 1 from the
 centre stands with its nominal width — `appearance.thumbnail.width` at its
@@ -56,6 +56,18 @@ eleven overlapping.
 D3. *The icon above the thumbnail.* The icon of a card, of the size of 038,
 centred across the card, 8 px above the top of its thumbnail; the flicker
 goes with it: no live thumbnail reaches an icon.
+
+D4. *A border of 2 px.* The border of a thumbnail is 2 px wide at any scale.
+Until now `drawWindowWithData` divided the 2 px by the scale it draws the
+thumbnail at — gg strokes in pixels of the canvas, whatever the matrix —:
+2.4 to 2.8 px on the cards of 038, 12 px on a card at 0.17, which left its
+live thumbnail a sliver. The labels of the smallest cards keep 2 px off the
+thumbnail and off each other, whatever 28 and 34 px times the scale give.
+
+D5. *On whole pixels.* The places of the cards at rest are rounded to whole
+pixels; a card in a step moves straight between two of them. At 0.7^a^ the
+places are fractional, and the layer of a card drawn apart differed from the
+frame by 3 at an edge, against 2 allowed by `TestLayers`.
 
 == Acceptance criteria
 
