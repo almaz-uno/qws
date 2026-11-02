@@ -2,12 +2,25 @@
 :toc: left
 :toc-title: Contents
 :toclevels: 2
-:revdate: 2026-11-01
+:revdate: 2026-11-02
 
 Every minor or major release is a chapter, its patches are subsections, the
 newest come first (link:specs/004-releases/spec.adoc[specification 004]). The
 version of a build is `qws version`. Release files are built on Debian 12:
 they need glibc 2.36 or newer and the OpenGL and X11 libraries.
+
+== 1.10.0 — 2026-11-02
+
+*The row of the carousel* (link:specs/039-carousel-row/spec.adoc[specification
+039]):
+
+* The cards no longer overlap: each is 0.7 the scale of the one before it,
+  24 px apart — nine windows at once on a screen of 2560×1440 with
+  thumbnails of 512.
+* The icon stands above its thumbnail instead of on it, so the icons no
+  longer flicker as the selection moves.
+* The border of a thumbnail is 2 px on every card; the smaller cards had
+  thicker ones.
 
 == 1.9.0 — 2026-11-01
 

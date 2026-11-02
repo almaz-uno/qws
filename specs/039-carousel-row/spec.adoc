@@ -3,7 +3,7 @@
 :toc-title: Contents
 :sectnums:
 :revdate: 2026-11-02
-:status: draft
+:status: implemented
 :issue: 115
 
 == What and why
@@ -100,7 +100,26 @@ frame by 3 at an edge, against 2 allowed by `TestLayers`.
 
 == Results
 
-To be filled.
+Off the screen: the tests on ws1, in the clone of the branch. On the
+desktop: the author's trial on ws2 on 2026-11-02, 10:24–11:20, the builds of
+the variants on Alt+F11 and Alt+F8 beside the service, then the build of
+the branch on Alt+F8.
+
+[cols="1,6"]
+|===
+| # | How it is met
+
+| K1 | Met. 17 carousel scenes change; every grid scene is byte for byte.
+| K2 | Met. `TestLiveThumbnails` failed on the card at 0.17 of
+  `carousel-defaults` — its live thumbnail a sliver inside a border of
+  12 px — until D4.
+| K3 | Met. `TestLayers` failed by 3 at an edge of the card at offset −1
+  until D5.
+| K4 | Met. `carousel.png` and `qws.webp` redrawn, `grid.png` the same.
+| K5 | Met.
+| K6 | Met. The author on variant B: "F8 лучше"; on the build of the branch:
+  "норм, выкатывай".
+|===
 
 == Open decisions
 
